@@ -33,6 +33,11 @@ credentials and the IPA stay under the runner's private temporary directory.
 
 ## Workflow modes
 
+`regenerate_project_only=true` runs the pinned XcodeGen and publishes the
+generated project, schemes and Info plists for review/commit from Windows.
+It refuses signing/upload/provisioning flags and runs no app tests. Normal CI
+still requires the committed project to match that generator.
+
 Normal CI runs all gates. The separate `check_delivery_tools=true` mode checks
 Xcode's altool API-key interface and Python delivery tests without credentials
 or uploading. That mode passed in run `38744397286` at `c06f392`.
@@ -54,6 +59,14 @@ number, observes any existing Apple record, and does not blindly re-upload.
 Delivery runs have their own non-cancelling concurrency group.
 
 ## What delivery verifies
+
+The app bundles `PrivacyInfo.xcprivacy`. File integrity checks use app-container
+metadata (`C617.1`), measurements use elapsed event durations (`35F9.1`), model
+downloads check space before writing (`E174.1`), and app settings use private
+user defaults (`CA92.1`). No tracking or automatic diagnostic collection is
+declared. The archive gate verifies the manifest and these four audited reasons
+in the actual app bundle, before signing/upload. See Apple's
+[required reason API documentation](https://developer.apple.com/documentation/bundleresources/app-privacy-configuration/nsprivacyaccessedapitypes/nsprivacyaccessedapitype).
 
 All package/app/reference gates and the Simulator review precede the Release
 archive. The archive checker verifies device Mach-O, identity, storage access,

@@ -7,6 +7,42 @@ import plistlib
 import struct
 
 
+def privacy_manifest(path):
+    try:
+        with path.open('rb') as stream:
+            data = stream.read(65537)
+    except OSError as error:
+        raise ValueError("Missing app privacy manifest") from error
+    if len(data) > 65536:
+        raise ValueError("Unbounded app privacy manifest")
+    try:
+        manifest = plistlib.loads(data)
+    except (ValueError, plistlib.InvalidFileException) as error:
+        raise ValueError("Invalid app privacy manifest") from error
+    if not isinstance(manifest, dict) or set(manifest) != {
+            'NSPrivacyTracking', 'NSPrivacyCollectedDataTypes', 'NSPrivacyAccessedAPITypes'}:
+        raise ValueError("Unexpected app privacy manifest keys")
+    if manifest['NSPrivacyTracking'] is not False or manifest['NSPrivacyCollectedDataTypes'] != []:
+        raise ValueError("Privacy manifest must match the app's no-tracking/no-collection behavior")
+    expected = {'NSPrivacyAccessedAPICategoryFileTimestamp': ['C617.1'],
+                'NSPrivacyAccessedAPICategorySystemBootTime': ['35F9.1'],
+                'NSPrivacyAccessedAPICategoryDiskSpace': ['E174.1'],
+                'NSPrivacyAccessedAPICategoryUserDefaults': ['CA92.1']}
+    entries = manifest['NSPrivacyAccessedAPITypes']
+    if not isinstance(entries, list) or len(entries) != len(expected):
+        raise ValueError("Missing required reason API declaration")
+    observed = {}
+    for entry in entries:
+        if not isinstance(entry, dict) or set(entry) != {'NSPrivacyAccessedAPIType', 'NSPrivacyAccessedAPITypeReasons'}:
+            raise ValueError("Invalid required reason API declaration")
+        category = entry['NSPrivacyAccessedAPIType']
+        if not isinstance(category, str) or category in observed:
+            raise ValueError("Invalid or duplicate required reason API category")
+        observed[category] = entry['NSPrivacyAccessedAPITypeReasons']
+    if observed != expected:
+        raise ValueError("Required reason APIs do not match audited app behavior")
+
+
 def device_executable(path):
     with path.open("rb") as stream:
         header = stream.read(32)
@@ -46,6 +82,7 @@ def inspect(archive):
         if info.get(key) != value:
             raise ValueError("Incorrect device archive metadata: " + key)
     device_executable(app / "FlashLocal")
+    privacy_manifest(app / "PrivacyInfo.xcprivacy")
     prohibited = {".gguf", ".safetensors", ".p8", ".p12", ".pem", ".key", ".dpapi", ".mobileprovision"}
     total, count = 0, 0
     for item in app.rglob("*"):
@@ -64,6 +101,7 @@ def inspect(archive):
     return {"bundleIdentifier": info["CFBundleIdentifier"], "platform": "iphoneos", "architecture": "arm64",
             "version": info.get("CFBundleShortVersionString"), "build": info.get("CFBundleVersion"),
             "appBytes": total, "files": count, "modelPayloadBundled": False,
+            "privacyManifestVerified": True,
             "signed": False, "installedOnIPhone": False, "uploadedToTestFlight": False}
 
 

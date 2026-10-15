@@ -93,6 +93,17 @@ validation with the unchanged logit limits. The full-prefix scalar attention
 test compares eight prefixes across chunk sizes 1/3/8, independently rounds
 the operands, and emits bounded-cache/timing metadata. These tiny hosted
 measurements do not establish long-context or iPhone performance.
+
+Run `38785860218` at `8ad2057` passed the corrected attention checks and complete
+FP32/mixed-quant graph gates at the original limits. Mixed maximum relative L2
+was 2.969834632e-7 and maximum absolute error 4.4703484e-8 across five positions.
+The 563 app tests and 472 package tests passed (nine environment-specific
+package skips); iOS Simulator compilation also passed. The run was stopped
+before any upload after a pre-upload audit found the missing required-reason
+privacy manifest. This was not an Apple upload rejection. The manifest and
+archive checks are now being added, with project regeneration and a new full
+delivery run still required. These measurements remain tiny synthetic hosted
+Mac evidence, not trained-model or physical-phone evidence.
 The standalone CPU reference explicitly disables native tuning, Accelerate,
 KleidiAI and llamafile, and selects the runtime's armv8-a target on Apple silicon;
 its settings do not depend on a prior tokenizer build's CMake cache.

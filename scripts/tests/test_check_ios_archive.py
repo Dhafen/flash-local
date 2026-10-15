@@ -25,6 +25,8 @@ class ArchiveChecks(unittest.TestCase):
         self.write_binary(2)
         (self.app / "QwenModelLicense.txt").write_bytes(
             (ROOT / "Apps/Minirun/Resources/QwenModelLicense.txt").read_bytes())
+        (self.app / "PrivacyInfo.xcprivacy").write_bytes(
+            (ROOT / "Apps/Minirun/Resources/PrivacyInfo.xcprivacy").read_bytes())
 
     def write_info(self):
         (self.app / "Info.plist").write_bytes(plistlib.dumps(self.info))
@@ -39,6 +41,38 @@ class ArchiveChecks(unittest.TestCase):
         self.assertEqual(result["platform"], "iphoneos")
         self.assertFalse(result["signed"])
         self.assertFalse(result["uploadedToTestFlight"])
+        self.assertTrue(result['privacyManifestVerified'])
+
+    def test_missing_or_malformed_privacy_manifest_refuses_archive(self):
+        path = self.app / 'PrivacyInfo.xcprivacy'
+        path.unlink()
+        with self.assertRaisesRegex(ValueError, 'privacy manifest'):
+            check.inspect(self.archive)
+        path.write_bytes(b'not a property list')
+        with self.assertRaisesRegex(ValueError, 'privacy manifest'):
+            check.inspect(self.archive)
+
+    def test_missing_duplicate_or_wrong_required_reasons_refuse_archive(self):
+        path = self.app / 'PrivacyInfo.xcprivacy'
+        original = plistlib.loads(path.read_bytes())
+        for mutation in ('missing', 'duplicate', 'wrong'):
+            with self.subTest(mutation=mutation):
+                value = plistlib.loads(plistlib.dumps(original))
+                entries = value['NSPrivacyAccessedAPITypes']
+                if mutation == 'missing': entries.pop()
+                elif mutation == 'duplicate': entries[1] = entries[0]
+                else: entries[0]['NSPrivacyAccessedAPITypeReasons'] = ['not-approved']
+                path.write_bytes(plistlib.dumps(value))
+                with self.assertRaises(ValueError): check.inspect(self.archive)
+
+    def test_tracking_or_collection_cannot_silently_change_the_declaration(self):
+        path = self.app / 'PrivacyInfo.xcprivacy'
+        original = plistlib.loads(path.read_bytes())
+        for key, change in [('NSPrivacyTracking', True), ('NSPrivacyCollectedDataTypes', [{}])]:
+            value = dict(original); value[key] = change
+            path.write_bytes(plistlib.dumps(value))
+            with self.assertRaisesRegex(ValueError, 'no-tracking/no-collection'):
+                check.inspect(self.archive)
 
     def test_simulator_binary_refused_even_when_info_claims_device(self):
         self.write_binary(7)

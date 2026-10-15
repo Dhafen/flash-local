@@ -29,6 +29,10 @@ on:
         description: 'After all tests, archive and verified signing, upload to the configured own-tester internal group'
         type: boolean
         default: false
+      regenerate_project_only:
+        description: 'Only regenerate and publish the pinned Xcode project for review on hosts without Xcode'
+        type: boolean
+        default: false
 
 concurrency:
   group: ci-${{ github.ref }}${{ inputs.upload_private_testflight && '-delivery' || '' }}
@@ -49,8 +53,35 @@ env:
   XCODEBUILD_FLAGS: -skipPackagePluginValidation -skipMacroValidation
 
 jobs:
+  regenerate-project:
+    if: github.event_name == 'workflow_dispatch' && inputs.regenerate_project_only
+    runs-on: macos-26
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Refuse combined delivery modes
+        run: |
+          test '${{ inputs.release_archive }}' = false
+          test '${{ inputs.probe_automatic_signing }}' = false
+          test '${{ inputs.provisioning_only }}' = false
+          test '${{ inputs.check_delivery_tools }}' = false
+          test '${{ inputs.upload_private_testflight }}' = false
+          sudo xcode-select -s /Applications/Xcode_26.2.app
+      - run: python3 scripts/generate_xcode_project.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: generated-project
+          path: |
+            Apps/Minirun/Minirun.xcodeproj/project.pbxproj
+            Apps/Minirun/Minirun.xcodeproj/xcshareddata/xcschemes/*.xcscheme
+            Apps/Minirun/Info-iOS.plist
+            Apps/Minirun/Info-macOS.plist
+          retention-days: 7
+
   delivery-tool-check:
-    if: github.event_name == 'workflow_dispatch' && inputs.check_delivery_tools
+    if: github.event_name == 'workflow_dispatch' && inputs.check_delivery_tools && !inputs.regenerate_project_only
     runs-on: macos-26
     timeout-minutes: 10
     steps:
@@ -71,7 +102,7 @@ jobs:
           retention-days: 7
 
   build-and-test:
-    if: ${{ !inputs.check_delivery_tools }}
+    if: ${{ !inputs.check_delivery_tools && !inputs.regenerate_project_only }}
     name: ${{ inputs.provisioning_only && 'device archive · signing probe (no test coverage)' || 'streaming tests · app tests · package tests · iOS build' }}
     runs-on: macos-26
     timeout-minutes: ${{ inputs.upload_private_testflight && 120 || 90 }}
