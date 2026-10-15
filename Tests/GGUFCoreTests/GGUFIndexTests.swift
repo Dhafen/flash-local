@@ -122,6 +122,23 @@ final class GGUFIndexTests: XCTestCase {
         XCTAssertEqual(index.tensors.count, 1)
     }
 
+    func testOnlyExplicitLargeTablesAreRetainedAndShareAnAggregateBudget() throws {
+        var array = Data(); array.le(8, 4); array.le(10, 8)
+        for _ in 0..<10 { array.string("token") }
+        let (header, size) = fixture(extras: [
+            ("tokenizer.ggml.tokens", 9, array), ("unrelated", 9, array)])
+        var limits = GGUFParseLimits(); limits.retainedArrayCount = 4
+        limits.largeArrayKeys = ["tokenizer.ggml.tokens"]
+        limits.retainedElementBudget = 10
+        let index = try GGUFIndex.parse(header: header, fileByteCount: size, limits: limits)
+        XCTAssertEqual(index.metadata["tokenizer.ggml.tokens"]?.elements?.count, 10)
+        XCTAssertEqual(index.metadata["unrelated"], .omittedArray(type: 8, count: 10))
+        limits.largeArrayKeys.insert("unrelated")
+        XCTAssertThrowsError(try GGUFIndex.parse(header: header, fileByteCount: size, limits: limits))
+        limits.retainedElementBudget = 9
+        XCTAssertThrowsError(try GGUFIndex.parse(header: header, fileByteCount: size, limits: limits))
+    }
+
     func testMetadataLimitsRejectBeforeAllocatingFromUntrustedCounts() {
         let (header, size) = fixture()
         var limits = GGUFParseLimits(); limits.headerBytes = 10

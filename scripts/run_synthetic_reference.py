@@ -26,7 +26,7 @@ def main():
             if not (source / ".git").is_dir():
                 raise RuntimeError("Reference cache is not a Git checkout")
             run(["git", "-C", source, "diff", "--exit-code"])
-            run(["git", "-C", source, "sparse-checkout", "set", "src", "include", "ggml", "cmake", "vendor"])
+            run(["git", "-C", source, "sparse-checkout", "set", "src", "include", "ggml", "cmake", "vendor", "common"])
             run(["git", "-C", source, "fetch", "--depth", "1", "origin", REVISION])
             run(["git", "-C", source, "checkout", "--detach", REVISION])
             actual = subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip()
@@ -34,11 +34,18 @@ def main():
                 raise RuntimeError("Reference revision mismatch")
             run(["cmake", "-S", root / "Tests/ReferenceHarness", "-B", build,
                  f"-DLLAMA_SOURCE={source}", "-DCMAKE_BUILD_TYPE=Release"])
-            run(["cmake", "--build", build, "--target", "flash-local-reference", "--parallel", "3"])
+            run(["cmake", "--build", build, "--target", "flash-local-reference",
+                 "flash-local-tokenizer-reference", "--parallel", "3"])
             model = root / ".test-fixtures/synthetic-qwen4exp.gguf"
             if not model.is_file() or model.stat().st_size > 1_000_000:
                 raise RuntimeError("Only the tiny synthetic fixture may run in this harness")
             run([build / "flash-local-reference", model, root / ".test-fixtures/llama-reference-logits.json"])
+            run(["python3", root / "scripts/make_tokenizer_reference_fixture.py"])
+            run([build / "flash-local-tokenizer-reference",
+                 root / ".test-fixtures/qwen35-vocabulary-only.gguf",
+                 root / ".test-fixtures/qwen35-tokenizer-corpus.bin",
+                 root / ".test-fixtures/qwen35-tokenizer-reference.json",
+                 root / ".test-fixtures/qwen35-tokenizer-corpus.json"])
         except Exception:
             output.flush()
             print(log.read_text(encoding="utf-8", errors="replace")[-18000:])

@@ -105,6 +105,23 @@ relative L2 <= 1e-3, then tests reset/cancellation. CI runs this separately from
 suboperator tests and rejects skips. This is synthetic numerical testing, not
 actual-model cloud inference or evidence of quality on the REAM weights.
 
+The Qwen35 tokenizer reads the GGUF's original byte vocabulary, token types
+and ranked merge table through an explicitly bounded metadata opt-in. Layout
+inspection still omits large arrays. Production tokenizer reads are tied to
+the fully hashed file descriptor. Qwen35 has no whole-word merge shortcut.
+The typed text-chat path binds the exact published template hash and selects
+`enable_thinking=false`, `preserve_thinking=false`, with no tools or images.
+Its trimming follows the pinned llama.cpp Jinja implementation's C-locale
+whitespace behavior; it does not silently normalize Unicode.
+
+The vocabulary-only reference fixture copies the hash-checked header's KV
+bytes into a GGUF with zero tensors. The CPU reference opens it with
+`vocab_only=true` and never creates an inference context. It supplies exact
+token IDs and decoded bytes for 109 public strings, plus Jinja rendering and
+token IDs for 22 text conversations. The parity gate must pass before this
+new tokenizer/chat path is considered validated. No user conversations or
+trained inference enter the cloud reference harness.
+
 ## Important artifact discrepancy
 
 The source HF config uses `qwen_sparse_attention`; the pinned converter only

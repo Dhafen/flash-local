@@ -60,6 +60,7 @@ jobs:
             -only-testing:MinirunKitTests/LocalModelStorageTests \
             -only-testing:MinirunKitTests/VerifiedGGUFArtifactTests \
             -skip-testing:ModelAdaptersTests/Qwen4ExpDecoderParityTests \
+            -skip-testing:ModelAdaptersTests/PublishedQwen35TokenizerParityTests \
             -resultBundlePath streaming-tests.xcresult 2>&1 | tee streaming-tests.log | tail -60
           if grep -E 'PublishedGGUFTests.*skipped' streaming-tests.log; then exit 1; fi
           if grep -E 'PublishedQwen4ExpLayoutTests.*skipped' streaming-tests.log; then exit 1; fi
@@ -71,8 +72,10 @@ jobs:
           export TEST_RUNNER_GGUF_HEADER_FIXTURE="$GGUF_HEADER_FIXTURE"
           xcodebuild test -scheme minirun-Package $XCODEBUILD_FLAGS -destination 'platform=macOS' \
             -only-testing:ModelAdaptersTests/Qwen4ExpDecoderParityTests \
+            -only-testing:ModelAdaptersTests/PublishedQwen35TokenizerParityTests \
             -resultBundlePath parity-tests.xcresult 2>&1 | tee parity-tests.log | tail -80
           if grep -E 'Qwen4ExpDecoderParityTests.*skipped' parity-tests.log; then exit 1; fi
+          if grep -E 'PublishedQwen35TokenizerParityTests.*skipped' parity-tests.log; then exit 1; fi
 
       - name: App tests (macOS)
         run: |
@@ -116,6 +119,8 @@ jobs:
             .work/reference-build.log
             .test-fixtures/llama-reference-logits.json
             .test-fixtures/synthetic-qwen4exp.json
+            .test-fixtures/qwen35-tokenizer-reference.json
+            .test-fixtures/qwen35-tokenizer-corpus.json
           if-no-files-found: ignore
           include-hidden-files: true
           retention-days: 14

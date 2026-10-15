@@ -132,6 +132,34 @@ public final class VerifiedGGUFArtifact: @unchecked Sendable {
         return duplicate
     }
 
+    /// Load the large tokenizer tables only when a runner actually needs them.
+    /// Discovery/layout inspection keeps using `index`, which omits them.
+    /// The bytes come from the hashed descriptor, with the same 32 MiB header
+    /// and one-million retained-element bounds as the GGUF parser.
+    public func tokenizerMetadata() throws -> GGUFIndex {
+        try assertUnchanged()
+        let count = index.headerByteCount
+        guard count > 0, count <= GGUFParseLimits().headerBytes else {
+            throw GGUFError.limit("verified tokenizer header")
+        }
+        var header = Data(count: count)
+        try header.withUnsafeMutableBytes { bytes in
+            var filled = 0
+            while filled < count {
+                let n = Darwin.pread(descriptor, bytes.baseAddress! + filled,
+                                     count - filled, off_t(filled))
+                if n < 0, errno == EINTR { continue }
+                guard n > 0 else { throw GGUFError.truncated }
+                filled += n
+            }
+        }
+        var limits = GGUFParseLimits()
+        limits.largeArrayKeys = ["tokenizer.ggml.tokens", "tokenizer.ggml.token_type", "tokenizer.ggml.merges"]
+        let result = try GGUFIndex.parse(header: header, fileByteCount: manifest.fileByteCount, limits: limits)
+        try assertUnchanged()
+        return result
+    }
+
     private static func status(_ descriptor: Int32) throws -> stat {
         var value = stat()
         guard fstat(descriptor, &value) == 0 else { throw posixError() }

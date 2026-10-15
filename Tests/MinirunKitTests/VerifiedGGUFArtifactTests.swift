@@ -5,7 +5,7 @@ import XCTest
 @testable import MinirunKit
 
 final class VerifiedGGUFArtifactTests: XCTestCase {
-    private func withModel(_ body: (URL, GGUFModelManifest) throws -> Void) throws {
+    private func withModel(vocabularyCount: Int = 0, _ body: (URL, GGUFModelManifest) throws -> Void) throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -13,7 +13,15 @@ final class VerifiedGGUFArtifactTests: XCTestCase {
         func put(_ number: UInt64, _ bytes: Int) {
             for i in 0..<bytes { data.append(UInt8(truncatingIfNeeded: number >> (i * 8))) }
         }
-        put(3, 4); put(1, 8); put(0, 8)
+        put(3, 4); put(1, 8); put(vocabularyCount == 0 ? 0 : 1, 8)
+        if vocabularyCount > 0 {
+            let key = Data("tokenizer.ggml.tokens".utf8)
+            put(UInt64(key.count), 8); data.append(key); put(9, 4); put(8, 4)
+            put(UInt64(vocabularyCount), 8)
+            for i in 0..<vocabularyCount {
+                let token = Data("token-\(i)".utf8); put(UInt64(token.count), 8); data.append(token)
+            }
+        }
         let name = Data("matrix".utf8); put(UInt64(name.count), 8); data.append(name)
         put(2, 4); put(4, 8); put(2, 8); put(0, 4); put(0, 8)
         data.append(Data(repeating: 0, count: ((data.count + 31) / 32 * 32) - data.count))
@@ -49,6 +57,17 @@ final class VerifiedGGUFArtifactTests: XCTestCase {
         }
     }
 
+    func testTokenizerTablesAreOptInAndReadOnlyFromVerifiedDescriptor() throws {
+        try withModel(vocabularyCount: 5000) { root, manifest in
+            let artifact = try VerifiedGGUFArtifact.verify(insideRoot: root, manifest: manifest)
+            XCTAssertEqual(artifact.index.metadata["tokenizer.ggml.tokens"], .omittedArray(type: 8, count: 5000))
+            let loaded = try artifact.tokenizerMetadata()
+            XCTAssertEqual(loaded.metadata["tokenizer.ggml.tokens"]?.elements?.count, 5000)
+            XCTAssertEqual(loaded.metadata["tokenizer.ggml.tokens"]?.elements?.last?.text, "token-4999")
+            XCTAssertEqual(loaded.tensors, artifact.index.tensors)
+        }
+    }
+
     func testMutationInvalidatesExistingCapability() throws {
         try withModel { root, manifest in
             let artifact = try VerifiedGGUFArtifact.verify(insideRoot: root, manifest: manifest)
@@ -56,6 +75,7 @@ final class VerifiedGGUFArtifactTests: XCTestCase {
             try handle.seekToEnd(); try handle.write(contentsOf: Data([1])); try handle.close()
             XCTAssertThrowsError(try artifact.assertUnchanged())
             XCTAssertThrowsError(try artifact.duplicateForReading())
+            XCTAssertThrowsError(try artifact.tokenizerMetadata())
         }
     }
 

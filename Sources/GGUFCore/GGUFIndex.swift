@@ -68,6 +68,11 @@ public struct GGUFParseLimits: Sendable {
     public var metadataCount: UInt64 = 10_000
     public var arrayCount: UInt64 = 1_000_000
     public var retainedArrayCount: UInt64 = 4096
+    /// Only an explicit tokenizer load opts into these larger tables. Layout
+    /// inspection continues to skip them. The aggregate bound also includes
+    /// ordinary retained arrays, preventing many small tables bypassing it.
+    public var largeArrayKeys: Set<String> = []
+    public var retainedElementBudget: UInt64 = 1_000_000
     public var stringBytes: UInt64 = 2 * 1024 * 1024
     public init() {}
 }
@@ -130,7 +135,7 @@ public struct GGUFIndex: Sendable {
             let key = try reader.string()
             guard metadata[key] == nil else { throw GGUFError.invalid("duplicate key \(key)") }
             let type = UInt32(try reader.integer(4))
-            metadata[key] = try reader.value(type: type)
+            metadata[key] = try reader.value(type: type, largeArray: limits.largeArrayKeys.contains(key))
         }
         let alignment: UInt64
         if let declared = metadata["general.alignment"] {
@@ -198,6 +203,7 @@ private struct Reader {
     let data: Data
     let limits: GGUFParseLimits
     var position = 0
+    var retainedElements: UInt64 = 0
 
     mutating func integer(_ bytes: Int) throws -> UInt64 {
         guard bytes <= data.count - position else { throw GGUFError.truncated }
@@ -221,7 +227,7 @@ private struct Reader {
         return string
     }
 
-    mutating func value(type: UInt32, retain: Bool = true) throws -> GGUFValue {
+    mutating func value(type: UInt32, retain: Bool = true, largeArray: Bool = false) throws -> GGUFValue {
         switch type {
         case 0: return .unsigned(try integer(1))
         case 1: return .signed(Int64(Int8(bitPattern: UInt8(try integer(1)))))
@@ -241,7 +247,14 @@ private struct Reader {
             guard count <= limits.arrayCount else { throw GGUFError.limit("array count") }
             // Validate even an empty array's element type.
             guard elementType <= 12 else { throw GGUFError.unsupported("metadata type \(elementType)") }
-            let keep = retain && count <= limits.retainedArrayCount
+            let keep = retain && (largeArray || count <= limits.retainedArrayCount)
+            if keep {
+                guard retainedElements <= limits.retainedElementBudget,
+                      count <= limits.retainedElementBudget - retainedElements else {
+                    throw GGUFError.limit("aggregate retained array elements")
+                }
+                retainedElements += count
+            }
             var result: [GGUFValue] = []
             for _ in 0..<count {
                 let item = try value(type: elementType, retain: keep)
