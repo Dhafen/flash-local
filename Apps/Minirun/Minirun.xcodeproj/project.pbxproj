@@ -63,6 +63,7 @@
 		4CDC1E1E6A5D12D0101507D6 /* PromptAssembler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9EC1C3587459DC0447DF0538 /* PromptAssembler.swift */; };
 		4F69395D6CCC138EF3EBD335 /* RunSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7FFD1F783466387DCB38A15C /* RunSnapshot.swift */; };
 		4F8EF0C58AA12C94C7856D06 /* REAMRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9EFD1C4AD23582687D8423FD /* REAMRootView.swift */; };
+		501482B02CE9C5DEEF74A6E6 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 355654F1DB934ADC8AD27EE8 /* PrivacyInfo.xcprivacy */; };
 		5072C46B310152012AC80E3B /* Primitives.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FD3923DC64AB82EE5FC433C /* Primitives.swift */; };
 		50E8286A2B420DA9F2E902A7 /* StorageCore in Frameworks */ = {isa = PBXBuildFile; productRef = 13FC903243E9A3513840AA91 /* StorageCore */; };
 		55C97EF589C22A40FBF290C8 /* RunTraceRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = B623D6F4C60433A3B23E354A /* RunTraceRecorder.swift */; };
@@ -146,6 +147,7 @@
 		CD8D202E9EB4FAE06EF2DE24 /* InstrumentSample.swift in Sources */ = {isa = PBXBuildFile; fileRef = 541C7B8E135AAD5FC190934C /* InstrumentSample.swift */; };
 		CFD74BDB3F64ABCE1DEF50BE /* MinirunRunners in Frameworks */ = {isa = PBXBuildFile; productRef = 0CE0F9F50081920ED5D8023D /* MinirunRunners */; };
 		CFFDEB4C27DCA7665AA2D220 /* VerificationBackgroundWork.swift in Sources */ = {isa = PBXBuildFile; fileRef = 468E84AB80FF569F373B2FD7 /* VerificationBackgroundWork.swift */; };
+		D0A4B87C44B5642EB4865042 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 355654F1DB934ADC8AD27EE8 /* PrivacyInfo.xcprivacy */; };
 		D28ABD814BBAAC5F9F7EF951 /* DeepSeekV4ProductRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38E30B7578E4871024BE0168 /* DeepSeekV4ProductRuntime.swift */; };
 		D36E78D2FC2FCC299211EC7C /* ProjectionStrip.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74ED1F2BB87D224E2E5E2AE3 /* ProjectionStrip.swift */; };
 		D4BDCE4E6CC7A5CF2B011F90 /* InstalledModelsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8BFAAD5FB6F2AACE93ECD73 /* InstalledModelsTests.swift */; };
@@ -223,6 +225,7 @@
 		2BB1F5994A3E1F690A831B57 /* InstalledModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstalledModels.swift; sourceTree = "<group>"; };
 		307968BBED41DE917D47936C /* DeepSeekV41PreparationMemoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeepSeekV41PreparationMemoryTests.swift; sourceTree = "<group>"; };
 		34012DB1B47A8BA43CDF840A /* BudgetPlanTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BudgetPlanTests.swift; sourceTree = "<group>"; };
+		355654F1DB934ADC8AD27EE8 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		38E30B7578E4871024BE0168 /* DeepSeekV4ProductRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeepSeekV4ProductRuntime.swift; sourceTree = "<group>"; };
 		40CD85A0EA5D6BF84A9CD902 /* PreviewTokenizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewTokenizer.swift; sourceTree = "<group>"; };
 		448526E15DEF07D45E52731C /* StorageLocationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageLocationTests.swift; sourceTree = "<group>"; };
@@ -358,6 +361,7 @@
 				C1DEEA6CFC2E23E3B7BBC60E /* Assets.xcassets */,
 				7FB065E4579BEAAA27BC5273 /* FlashLocalMark.svg */,
 				4584526402C0C724EA126739 /* OpenSourceNotices.txt */,
+				355654F1DB934ADC8AD27EE8 /* PrivacyInfo.xcprivacy */,
 				4EBB7691E9CBEE5D213A2C65 /* QwenModelLicense.txt */,
 			);
 			path = Resources;
@@ -655,6 +659,7 @@
 				6AA3E4DB3A5D922A767D918D /* Assets.xcassets in Resources */,
 				59EE90717EDDF5B55D9F3A46 /* FlashLocalMark.svg in Resources */,
 				34BAD95298C4A4E53A80FF1F /* OpenSourceNotices.txt in Resources */,
+				D0A4B87C44B5642EB4865042 /* PrivacyInfo.xcprivacy in Resources */,
 				149410BD57CBB47F8503E743 /* QwenModelLicense.txt in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -666,6 +671,7 @@
 				221167AA697CCEAB94887ADD /* Assets.xcassets in Resources */,
 				DC341D43C50CF5020CEDAC46 /* FlashLocalMark.svg in Resources */,
 				AF68BAEBBE105EABA6D4246F /* OpenSourceNotices.txt in Resources */,
+				501482B02CE9C5DEEF74A6E6 /* PrivacyInfo.xcprivacy in Resources */,
 				F82982E5F9A6A6EF44CA7338 /* QwenModelLicense.txt in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

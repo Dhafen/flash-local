@@ -96,12 +96,18 @@ class PrivateDeliveryTests(unittest.TestCase):
             ipa = pathlib.Path(folder) / 'app.ipa'; ipa.write_bytes(b'only a validation-binding fixture')
             path = pathlib.Path(folder) / 'seal.json'
             seal = {'signatureVerified': True, 'memoryEntitlementsVerified': True, 'exportedLocally': True,
+                    'privacyManifestVerified': True,
                     'internalTestingOnly': True, 'usesNonExemptEncryption': False,
                     'bundleIdentifier': delivery.BUNDLE, 'profileType': 'app-store',
                     'sourceRevision': 'a' * 40, 'build': '42', 'workflowRunID': '123',
                     'ipaSHA256': hashlib.sha256(ipa.read_bytes()).hexdigest()}
             path.write_text(json.dumps(seal))
             delivery.verified_export(ipa, path, 'a' * 40, '42', '123')
+            missing_privacy = dict(seal); missing_privacy.pop('privacyManifestVerified')
+            path.write_text(json.dumps(missing_privacy))
+            with self.assertRaisesRegex(ValueError, 'privacyManifestVerified'):
+                delivery.verified_export(ipa, path, 'a' * 40, '42', '123')
+            path.write_text(json.dumps(seal))
             with self.assertRaises(ValueError): delivery.verified_export(ipa, path, 'b' * 40, '42', '123')
             with self.assertRaises(ValueError): delivery.verified_export(ipa, path, 'a' * 40, '43', '123')
             ipa.write_bytes(b'changed after signing check')

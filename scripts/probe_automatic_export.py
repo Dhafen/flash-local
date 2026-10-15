@@ -85,6 +85,8 @@ def main():
             raise RuntimeError('Wrong IPA bundle identifier')
         if app_info.get('ITSAppUsesNonExemptEncryption') is not False:
             raise RuntimeError('Explicit reviewed encryption exemption is missing')
+        from check_ios_archive import privacy_manifest
+        privacy_manifest(app / 'PrivacyInfo.xcprivacy')
         subprocess.run(['codesign', '--verify', '--deep', '--strict', str(app)], check=True)
         signature = subprocess.run(['codesign', '-d', '--entitlements', ':-', str(app)],
                                    check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -113,6 +115,7 @@ def main():
     pathlib.Path('ios-signing-probe.json').write_text(json.dumps({
         'bundleIdentifier': 'com.dhafen.flashlocal', 'signatureVerified': True,
         'memoryEntitlementsVerified': True, 'profileType': 'app-store',
+        'privacyManifestVerified': True,
         'exportedLocally': True, 'uploadedToTestFlight': False, 'internalTestingOnly': True,
         'ipaSHA256': digest.hexdigest(), 'sourceRevision': os.environ.get('GITHUB_SHA', 'unknown'),
         'workflowRunID': os.environ.get('GITHUB_RUN_ID'),

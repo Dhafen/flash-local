@@ -30,7 +30,7 @@ def verified_export(ipa, seal_path, source, build, run_id):
     seal = json.loads(seal_path.read_text(encoding='utf-8'))
     if not re.fullmatch(r'[0-9a-f]{40}', source) or not re.fullmatch(r'[1-9][0-9]*', build):
         raise ValueError('Delivery requires exact CI source and monotonically numbered build')
-    for key in ['signatureVerified', 'memoryEntitlementsVerified', 'exportedLocally', 'internalTestingOnly']:
+    for key in ['signatureVerified', 'memoryEntitlementsVerified', 'privacyManifestVerified', 'exportedLocally', 'internalTestingOnly']:
         if seal.get(key) is not True: raise ValueError('Unverified export: ' + key)
     if seal.get('usesNonExemptEncryption') is not False:
         raise ValueError('Encryption declaration is not verified')

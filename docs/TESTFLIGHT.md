@@ -65,7 +65,7 @@ metadata (`C617.1`), measurements use elapsed event durations (`35F9.1`), model
 downloads check space before writing (`E174.1`), and app settings use private
 user defaults (`CA92.1`). No tracking or automatic diagnostic collection is
 declared. The archive gate verifies the manifest and these four audited reasons
-in the actual app bundle, before signing/upload. See Apple's
+in both the archived app and the final exported IPA before upload. See Apple's
 [required reason API documentation](https://developer.apple.com/documentation/bundleresources/app-privacy-configuration/nsprivacyaccessedapitypes/nsprivacyaccessedapitype).
 
 All package/app/reference gates and the Simulator review precede the Release
