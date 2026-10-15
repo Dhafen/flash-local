@@ -95,6 +95,16 @@ regression probe; it is not a throughput prediction for the real model.
 Process footprint, global MLX cache and allocator overhead remain the full
 runner's responsibility and must be measured on the phone.
 
+The full-graph harness generates a 193 KB untrained FP32 fixture with HC, PLE,
+three GDN blocks, one dense attention block and routed/shared experts. Its
+weights are deterministic random values, never copied from a checkpoint.
+`scripts/run_synthetic_reference.py` builds the pinned CPU llama.cpp source and
+records logits for fixed token IDs, including PLE EOS history. The decoder
+parity test compares all logits over five positions with maxAbs <= 0.01 and
+relative L2 <= 1e-3, then tests reset/cancellation. CI runs this separately from
+suboperator tests and rejects skips. This is synthetic numerical testing, not
+actual-model cloud inference or evidence of quality on the REAM weights.
+
 ## Important artifact discrepancy
 
 The source HF config uses `qwen_sparse_attention`; the pinned converter only

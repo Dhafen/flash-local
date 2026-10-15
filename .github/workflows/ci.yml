@@ -48,6 +48,7 @@ jobs:
         run: |
           python3 scripts/fetch_ream_metadata.py
           python3 scripts/make_engram_test_fixture.py
+          python3 scripts/make_qwen4exp_test_model.py
           export GGUF_HEADER_FIXTURE="$GITHUB_WORKSPACE/.test-fixtures/ream.header"
           export TEST_RUNNER_GGUF_HEADER_FIXTURE="$GGUF_HEADER_FIXTURE"
           xcodebuild test -scheme minirun-Package $XCODEBUILD_FLAGS -destination 'platform=macOS' \
@@ -55,9 +56,20 @@ jobs:
             -only-testing:StorageCoreTests -only-testing:iOSBenchTests \
             -only-testing:MinirunKitTests/LocalModelStorageTests \
             -only-testing:MinirunKitTests/VerifiedGGUFArtifactTests \
+            -skip-testing:ModelAdaptersTests/Qwen4ExpDecoderParityTests \
             -resultBundlePath streaming-tests.xcresult 2>&1 | tee streaming-tests.log | tail -60
           if grep -E 'PublishedGGUFTests.*skipped' streaming-tests.log; then exit 1; fi
           if grep -E 'PublishedQwen4ExpLayoutTests.*skipped' streaming-tests.log; then exit 1; fi
+
+      - name: Synthetic full-graph logits against pinned CPU llama.cpp
+        run: |
+          python3 scripts/run_synthetic_reference.py
+          export GGUF_HEADER_FIXTURE="$GITHUB_WORKSPACE/.test-fixtures/ream.header"
+          export TEST_RUNNER_GGUF_HEADER_FIXTURE="$GGUF_HEADER_FIXTURE"
+          xcodebuild test -scheme minirun-Package $XCODEBUILD_FLAGS -destination 'platform=macOS' \
+            -only-testing:ModelAdaptersTests/Qwen4ExpDecoderParityTests \
+            -resultBundlePath parity-tests.xcresult 2>&1 | tee parity-tests.log | tail -80
+          if grep -E 'Qwen4ExpDecoderParityTests.*skipped' parity-tests.log; then exit 1; fi
 
       - name: App tests (macOS)
         run: |
@@ -87,6 +99,10 @@ jobs:
             package-tests.log
             streaming-tests.log
             streaming-tests.xcresult
+            parity-tests.log
+            parity-tests.xcresult
+            .work/reference-build.log
+            .test-fixtures/llama-reference-logits.json
           if-no-files-found: ignore
           retention-days: 14
 

@@ -18,3 +18,4 @@ xcuserdata/
 *.gguf
 *.safetensors
 Tests/Fixtures/deepseek-v41/engram/
+__pycache__/
