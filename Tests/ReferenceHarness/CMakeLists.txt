@@ -43,7 +43,8 @@ add_library(flash-local-tokenizer-runtime STATIC
 target_include_directories(flash-local-tokenizer-runtime PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/../../Sources/CLlamaTokenizer/include")
 target_include_directories(flash-local-tokenizer-runtime PRIVATE
-  "${LLAMA_SOURCE}/common" "${LLAMA_SOURCE}/src" "${LLAMA_SOURCE}/vendor")
+  "${LLAMA_SOURCE}/common" "${LLAMA_SOURCE}/src" "${LLAMA_SOURCE}/vendor"
+  "${LLAMA_SOURCE}/ggml/src")
 target_link_libraries(flash-local-tokenizer-runtime PUBLIC llama)
 target_compile_definitions(flash-local-tokenizer-runtime PRIVATE FLASH_LLAMA_REVISION="${FLASH_LLAMA_REVISION}")
 target_link_libraries(flash-local-tokenizer-reference PRIVATE flash-local-tokenizer-runtime)

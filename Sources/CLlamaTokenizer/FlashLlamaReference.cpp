@@ -1,6 +1,7 @@
 #include "FlashLlamaReference.h"
 #include "llama.h"
 #include "ggml-cpu.h"
+#include "ggml-quants.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -69,7 +70,11 @@ int32_t flr_round_linear_activations(uint32_t weight_type, const float * input,
         }
         const auto from = ggml_get_type_traits_cpu(activation)->from_float;
         const auto to = ggml_get_type_traits(activation)->to_float;
-        if (!from || !to) { reference_error = "Canonical activation conversion unavailable"; return -1; }
+        // Q8_K is an intermediate CPU operand and has no public to_float trait;
+        // call its unchanged canonical dequantizer directly.
+        if (!from || (!to && activation != GGML_TYPE_Q8_K)) {
+            reference_error = "Canonical activation conversion unavailable"; return -1;
+        }
         if (activation == GGML_TYPE_Q8_0 || activation == GGML_TYPE_Q8_K) {
             const int32_t block = int32_t(ggml_blck_size(activation));
             for (int32_t start = 0; start < elements; start += block) {
@@ -80,7 +85,10 @@ int32_t flr_round_linear_activations(uint32_t weight_type, const float * input,
                 }
             }
         }
-        from(input, packed, elements); to(packed, output, elements);
+        from(input, packed, elements);
+        if (activation == GGML_TYPE_Q8_K) {
+            dequantize_row_q8_K(static_cast<const block_q8_K *>(packed), output, elements);
+        } else { to(packed, output, elements); }
         for (int32_t i = 0; i < elements; ++i) if (!std::isfinite(output[i])) {
             reference_error = "Nonfinite rounded projection activation"; return -2;
         }
