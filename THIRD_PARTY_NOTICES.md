@@ -1,5 +1,15 @@
 # Third-party notices
 
+## Flash Local additions: llama.cpp / GGML
+
+- Source: <https://github.com/ggml-org/llama.cpp>
+- Revision: `e467e5b5e5ba43071d6151b3d881deb9300d000e`
+- License: MIT, Copyright (c) 2023-2026 The ggml authors.
+- Full notice: `Sources/CGGUFQuants/LICENSE.llama.cpp`.
+- Only block declarations and CPU dequantization arithmetic are vendored;
+  `Sources/CGGUFQuants/provenance.json` records source hashes and extraction.
+  Reproduce with `python3 scripts/vendor_gguf_dequant.py`.
+
 This file records software and artwork distributed with, or resolved as a
 dependency of, the Minirun source distribution. Model weights are not included
 in this repository and carry their own licenses when obtained separately.

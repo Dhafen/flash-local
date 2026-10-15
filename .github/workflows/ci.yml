@@ -47,7 +47,7 @@ jobs:
       - name: GGUF parser, state and storage correctness
         run: |
           xcodebuild test -scheme minirun-Package $XCODEBUILD_FLAGS -destination 'platform=macOS' \
-            -only-testing:GGUFCoreTests -only-testing:ModelAdaptersTests \
+            -only-testing:GGUFCoreTests -only-testing:ModelAdaptersTests -only-testing:MLXBridgeTests \
             -only-testing:StorageCoreTests -only-testing:iOSBenchTests \
             -resultBundlePath streaming-tests.xcresult 2>&1 | tee streaming-tests.log | tail -60
 

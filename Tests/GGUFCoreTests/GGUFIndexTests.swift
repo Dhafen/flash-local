@@ -106,7 +106,7 @@ final class GGUFIndexTests: XCTestCase {
 
     func testRetainsHashConstantsAsIntegersWithoutFloatRounding() throws {
         var array = Data(); array.le(10, 4); array.le(3, 8)
-        for value: UInt64 in [23_703_573_157_769, 20_109_073_645_365, 8_052_911_324_071] { array.le(value, 8) }
+        for value in [UInt64(23_703_573_157_769), 20_109_073_645_365, 8_052_911_324_071] { array.le(value, 8) }
         let (header, size) = fixture(extras: [("qwen4exp.ple.layer_multipliers", 9, array)])
         let index = try GGUFIndex.parse(header: header, fileByteCount: size)
         XCTAssertEqual(index.metadata["qwen4exp.ple.layer_multipliers"]?.elements?.first?.uint, 23_703_573_157_769)

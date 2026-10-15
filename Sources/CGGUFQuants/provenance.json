@@ -1,0 +1,9 @@
+{
+  "revision": "e467e5b5e5ba43071d6151b3d881deb9300d000e",
+  "source_sha256": {
+    "ggml/src/ggml-quants.c": "5574a2dccf7c07e75b143733e04a5412d3d8c819e7945f5217a7b83a2b2ff8ab",
+    "ggml/src/ggml-common.h": "0061131b615c5721fc88a78feeb22c1f8c450f1c2646a317d80796a653bf595c",
+    "LICENSE": "94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d"
+  },
+  "transform": "Extract six named functions and give dequantizers static linkage; no arithmetic edits"
+}

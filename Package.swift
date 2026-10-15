@@ -23,12 +23,15 @@ let package = Package(
     targets: [
         .target(name: "StorageCore", plugins: ["EmbedGitRevision"]),
         .testTarget(name: "StorageCoreTests", dependencies: ["StorageCore"]),
-        .target(name: "GGUFCore", dependencies: ["StorageCore"]),
+        .target(name: "CGGUFQuants", exclude: ["LICENSE.llama.cpp", "provenance.json"],
+                publicHeadersPath: "include"),
+        .target(name: "GGUFCore", dependencies: ["StorageCore", "CGGUFQuants"]),
         .testTarget(name: "GGUFCoreTests", dependencies: ["GGUFCore", "StorageCore"]),
         .target(
             name: "MLXBridge",
             dependencies: [
                 "StorageCore",
+                "GGUFCore",
                 .product(name: "MLX", package: "mlx-swift"),
             ]
         ),
@@ -37,6 +40,10 @@ let package = Package(
             dependencies: ["StorageCore", "iOSBench"],
             resources: [.copy("Resources/model-catalog.json")]
         ),
+        .testTarget(name: "MLXBridgeTests", dependencies: [
+            "MLXBridge", "GGUFCore", "StorageCore",
+            .product(name: "MLX", package: "mlx-swift"),
+        ]),
         .testTarget(
             name: "MinirunKitTests",
             dependencies: ["MinirunKit", "StorageCore"],

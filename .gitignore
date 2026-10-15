@@ -11,3 +11,9 @@ xcuserdata/
 *.p12
 *.pem
 .env
+.work/
+.test-fixtures/
+*.p8
+*.dpapi
+*.gguf
+*.safetensors
