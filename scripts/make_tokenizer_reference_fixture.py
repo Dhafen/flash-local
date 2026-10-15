@@ -63,7 +63,7 @@ def main():
              "func fib(_ n: Int) -> Int { n < 2 ? n : fib(n-1) + fib(n-2) }\n",
              'SELECT * FROM users WHERE id = 42;\n{"key": [true, null, 1.2e-3]}',
              "https://example.org/a_b?q=x%20y&n=42#fragment", "a" * 4096,
-             "abababab" * 512, " \n\t" * 100, "<tool_response>ordinary text</tool_response>",
+             "abababab" * 512, " \n\t" * 100, "<example>ordinary text</example>",
              "\U00010000\U0001d400\U00020000\U000e0100"]
     rng = random.Random(20261015)
     alphabet = ("abcXYZ0123 '!?\n\r\t" + "åé中日한عहก" + "\u0301\u0308\u200d" + "🚀")

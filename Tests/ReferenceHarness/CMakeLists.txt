@@ -18,8 +18,8 @@ add_subdirectory("${LLAMA_SOURCE}" llama)
 add_executable(flash-local-reference main.cpp)
 target_link_libraries(flash-local-reference PRIVATE llama)
 add_executable(flash-local-tokenizer-reference tokenizer.cpp)
-target_link_libraries(flash-local-tokenizer-reference PRIVATE llama)
-target_sources(flash-local-tokenizer-reference PRIVATE
+add_library(flash-local-tokenizer-runtime STATIC
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../Sources/CLlamaTokenizer/FlashLlamaTokenizer.cpp"
   "${LLAMA_SOURCE}/common/json.cpp"
   "${LLAMA_SOURCE}/common/unicode.cpp"
   "${LLAMA_SOURCE}/common/jinja/lexer.cpp"
@@ -27,5 +27,11 @@ target_sources(flash-local-tokenizer-reference PRIVATE
   "${LLAMA_SOURCE}/common/jinja/runtime.cpp"
   "${LLAMA_SOURCE}/common/jinja/string.cpp"
   "${LLAMA_SOURCE}/common/jinja/value.cpp")
+target_include_directories(flash-local-tokenizer-runtime PUBLIC
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../Sources/CLlamaTokenizer/include")
+target_include_directories(flash-local-tokenizer-runtime PRIVATE
+  "${LLAMA_SOURCE}/common" "${LLAMA_SOURCE}/src" "${LLAMA_SOURCE}/vendor")
+target_link_libraries(flash-local-tokenizer-runtime PUBLIC llama)
+target_link_libraries(flash-local-tokenizer-reference PRIVATE flash-local-tokenizer-runtime)
 target_include_directories(flash-local-tokenizer-reference PRIVATE
   "${LLAMA_SOURCE}/common" "${LLAMA_SOURCE}/src" "${LLAMA_SOURCE}/vendor")

@@ -9,6 +9,32 @@
 - Only block declarations and CPU dequantization arithmetic are vendored;
   `Sources/CGGUFQuants/provenance.json` records source hashes and extraction.
   Reproduce with `python3 scripts/vendor_gguf_dequant.py`.
+- The canonical tokenizer bridge builds the vocabulary loader and Jinja engine
+  directly from that same pinned source checkout, with its full MIT notice.
+- Jinja's JSON dependency is nlohmann/json 3.12.0 from the pinned checkout,
+  MIT, Copyright (c) 2013-2025 Niels Lohmann. Its full notice is included below.
+
+## nlohmann/json (canonical tokenizer/Jinja build)
+
+Copyright (c) 2013-2025 Niels Lohmann
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 This file records software and artwork distributed with, or resolved as a
 dependency of, the Minirun source distribution. Model weights are not included

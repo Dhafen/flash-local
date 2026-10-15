@@ -138,6 +138,9 @@ final class PublishedQwen35TokenizerParityTests: XCTestCase {
             XCTAssertEqual(bytes, Data(text.utf8), "Round trip changed raw UTF-8 in case \(i)")
         }
         XCTAssertEqual(vocab.eos, 248046)
+        for marker in ["<|im_end|>", "<think>", "<tool_response>"] {
+            XCTAssertThrowsError(try vocab.encode(marker), "Structural markup needs a dedicated refusal test")
+        }
         XCTAssertEqual(corpus.chats.count, reference.chats.count)
         XCTAssertGreaterThan(corpus.chats.count, 20)
         for (i, chat) in corpus.chats.enumerated() {

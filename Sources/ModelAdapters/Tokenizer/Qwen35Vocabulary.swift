@@ -1,6 +1,8 @@
 import Foundation
 import GGUFCore
 
+/// An experimental independent parity probe, not the enabled product tokenizer.
+/// The production path uses the pinned llama.cpp/Jinja C bridge instead.
 /// The GPT-2 byte alphabet, Qwen35 pre-splitter and ranked-pair BPE carried by
 /// the pinned GGUF. This is not a sentencepiece/tiktoken vocabulary. In
 /// particular, Qwen35 does NOT enable llama.cpp's `ignore_merges` shortcut.

@@ -8,6 +8,7 @@ public struct Qwen35ChatMessage: Equatable, Sendable, Codable {
     public init(role: Role, content: String) { self.role = role; self.content = content }
 }
 
+/// Experimental parity probe; the product will render through canonical Jinja.
 /// Text-only, completed-turn chat with enable_thinking=false and
 /// preserve_thinking=false. The primary artifact's template is hash-bound;
 /// tool calls, reasoning history and multimodal content need a separate path.

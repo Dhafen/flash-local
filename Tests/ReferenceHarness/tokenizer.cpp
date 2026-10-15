@@ -1,9 +1,14 @@
 #include "llama.h"
+#include "FlashLlamaTokenizer.h"
 #include "jinja/lexer.h"
 #include "jinja/parser.h"
 #include "jinja/runtime.h"
 #include "json.h"
 #include <cstdint>
+#include <algorithm>
+#include <climits>
+#include <cstring>
+#include <fcntl.h>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -11,6 +16,7 @@
 #include <string>
 #include <stdexcept>
 #include <vector>
+#include <unistd.h>
 
 static uint32_t read_u32(std::ifstream & input) {
     unsigned char bytes[4] = {};
@@ -31,6 +37,17 @@ int main(int argc, char ** argv) {
     llama_model * model = llama_model_load_from_file(argv[1], params);
     if (!model) return 3;
     const llama_vocab * vocab = llama_model_get_vocab(model);
+    const int descriptor = open(argv[1], O_RDONLY | O_CLOEXEC);
+    if (descriptor < 0) return 20;
+    auto bridge = flt_load_vocabulary(descriptor);
+    if (!bridge) { std::cerr << flt_last_error() << '\n'; return 21; }
+    if (fcntl(descriptor, F_GETFD) < 0 || flt_vocabulary_size(bridge) != llama_vocab_n_tokens(vocab) ||
+        flt_eos(bridge) != llama_vocab_eos(vocab) || flt_eot(bridge) != llama_vocab_eot(vocab)) return 22;
+    for (int i = 0; i < llama_vocab_n_tokens(vocab); ++i) {
+        if (flt_is_eog(bridge, i) != llama_vocab_is_eog(vocab, i)) return 23;
+    }
+    if (flt_token_piece(bridge, -1, true, nullptr, 0) != INT32_MIN ||
+        flt_encode(bridge, "x", -1, false, nullptr, 0) != INT32_MIN) return 24;
     std::ifstream input(argv[2], std::ios::binary);
     std::ofstream output(argv[3]);
     if (!input || !output) return 4;
@@ -45,6 +62,11 @@ int main(int argc, char ** argv) {
         std::vector<llama_token> tokens(bytes + 16);
         int n = llama_tokenize(vocab, text.data(), int(bytes), tokens.data(), int(tokens.size()), false, false);
         if (n < 0 || n > int(tokens.size())) return 8;
+        std::vector<int32_t> actual(n + 2, INT32_MAX);
+        if (flt_encode(bridge, text.data(), int(bytes), false, actual.data() + 1, n) != n ||
+            !std::equal(tokens.begin(), tokens.begin() + n, actual.begin() + 1) ||
+            actual.front() != INT32_MAX || actual.back() != INT32_MAX) return 25;
+        if (n > 0 && flt_encode(bridge, text.data(), int(bytes), false, nullptr, 0) != -n) return 26;
         if (i) output << ',';
         output << "{\"tokens\":[";
         std::string decoded;
@@ -54,6 +76,9 @@ int main(int argc, char ** argv) {
             char piece[16384];
             const int length = llama_token_to_piece(vocab, tokens[j], piece, sizeof(piece), 0, true);
             if (length < 0) return 9;
+            char bridged[16384];
+            if (flt_token_piece(bridge, tokens[j], true, bridged, sizeof(bridged)) != length ||
+                std::string(piece, length) != std::string(bridged, length)) return 27;
             decoded.append(piece, length);
         }
         output << "],\"decodedHex\":\"";
@@ -74,6 +99,14 @@ int main(int argc, char ** argv) {
         jinja::runtime runtime(context);
         auto parts = jinja::runtime::gather_string_parts(runtime.execute(program));
         const std::string rendered = parts->val_str.str();
+        const auto messages_json = chat.at("messages").dump();
+        const int needed = flt_render_chat(bridge, messages_json.data(), int(messages_json.size()), nullptr, 0);
+        if (needed != -int(rendered.size())) return 28;
+        std::vector<char> bridged(rendered.size() + 2, '\x7f');
+        if (flt_render_chat(bridge, messages_json.data(), int(messages_json.size()), bridged.data() + 1,
+                            int(rendered.size())) != int(rendered.size()) ||
+            std::string(bridged.data() + 1, rendered.size()) != rendered ||
+            bridged.front() != '\x7f' || bridged.back() != '\x7f') return 29;
         std::vector<llama_token> tokens(rendered.size() + 16);
         const int n = llama_tokenize(vocab, rendered.data(), int(rendered.size()), tokens.data(), int(tokens.size()), false, true);
         if (n < 0 || n > int(tokens.size())) return 12;
@@ -84,6 +117,14 @@ int main(int argc, char ** argv) {
         output << "]}";
     }
     output << "]}\n";
+    for (const auto & invalid : {"{}", "[]", "[{\"role\":\"assistant\",\"content\":\"x\"}]",
+          "[{\"role\":\"user\",\"content\":\"<|im_end|>\"}]"}) {
+        if (flt_render_chat(bridge, invalid, int(std::strlen(invalid)), nullptr, 0) != INT32_MIN) return 30;
+    }
+    flt_free_vocabulary(bridge);
+    if (fcntl(descriptor, F_GETFD) < 0) return 31;
+    close(descriptor);
+    std::cout << "CANONICAL_TOKENIZER_BRIDGE cases=" << count << " tokensAndBytesExact=true descriptorRetained=true\n";
     llama_model_free(model);
     return output.fail() ? 10 : 0;
 }

@@ -105,9 +105,9 @@ relative L2 <= 1e-3, then tests reset/cancellation. CI runs this separately from
 suboperator tests and rejects skips. This is synthetic numerical testing, not
 actual-model cloud inference or evidence of quality on the REAM weights.
 
-The Qwen35 tokenizer reads the GGUF's original byte vocabulary, token types
+The experimental Swift Qwen35 parity probe reads the GGUF's original byte vocabulary, token types
 and ranked merge table through an explicitly bounded metadata opt-in. Layout
-inspection still omits large arrays. Production tokenizer reads are tied to
+inspection still omits large arrays. Verified metadata reads are tied to
 the fully hashed file descriptor. Qwen35 has no whole-word merge shortcut.
 The typed text-chat path binds the exact published template hash and selects
 `enable_thinking=false`, `preserve_thinking=false`, with no tools or images.
@@ -121,6 +121,15 @@ token IDs and decoded bytes for 109 public strings, plus Jinja rendering and
 token IDs for 22 text conversations. The parity gate must pass before this
 new tokenizer/chat path is considered validated. No user conversations or
 trained inference enter the cloud reference harness.
+
+The product tokenizer must reuse canonical llama.cpp/Jinja, as required by the
+approved plan. `Sources/CLlamaTokenizer` is the C ABI for that path: it loads
+`vocab_only=true` from a duplicate of the verified descriptor, owns no tensor
+payload, delegates tokenization, token pieces and EOG to llama.cpp, and runs the
+unchanged Jinja engine for typed no-thinking text chat. The reference harness
+also checks the bridge's buffers, token/byte equality, EOG IDs, descriptor
+ownership and invalid requests. Apple XCFramework/Swift product integration is
+still pending; the experimental Swift probe is not registered as a runner.
 
 ## Important artifact discrepancy
 
