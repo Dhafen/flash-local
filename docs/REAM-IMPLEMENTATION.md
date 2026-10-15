@@ -188,6 +188,14 @@ and generated IDs, then repeat after cancellation. This is not trained-model
 quality or iPhone performance evidence. The product iPhone route is implemented;
 its complete current build and hosted visual review remain under validation.
 
+The app's short numerical diagnostic saves the CPU/MLX logit comparisons with
+model hash, source/reference revisions, exact token IDs, measured memory/I/O,
+and the numerical limits. Its versioned JSON also records a timestamp, OS,
+physical memory and hardware class, explicitly distinguishing `iOSDevice`,
+`iOSSimulator` and `macOS`. No hostname or unique device identifier is collected.
+Agreement applies only to the recorded positions; the environment stamp does
+not establish airplane mode, long-context correctness or model quality.
+
 ## Important artifact discrepancy
 
 The source HF config uses `qwen_sparse_attention`; the pinned converter only

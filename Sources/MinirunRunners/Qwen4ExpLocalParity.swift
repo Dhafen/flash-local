@@ -10,6 +10,32 @@ import StorageCore
 /// This never downloads weights or infers success for untested positions.
 public enum Qwen4ExpLocalParity {
     public enum Phase: String, Sendable { case cpuReference, streamedMLX }
+    /// Hardware class only; no hostname, account name or unique device ID.
+    public struct Environment: Codable, Sendable {
+        public let platform: String
+        public let deviceIdentifier: String?
+        public let operatingSystem: String
+        public let physicalMemoryBytes: UInt64
+
+        init() {
+            #if targetEnvironment(simulator)
+            platform = "iOSSimulator"
+            #elseif os(iOS)
+            platform = "iOSDevice"
+            #elseif os(macOS)
+            platform = "macOS"
+            #else
+            platform = "unsupported"
+            #endif
+            #if os(iOS)
+            deviceIdentifier = Sysctl.string("hw.machine")
+            #else
+            deviceIdentifier = Sysctl.string("hw.model")
+            #endif
+            operatingSystem = ProcessInfo.processInfo.operatingSystemVersionString
+            physicalMemoryBytes = ProcessInfo.processInfo.physicalMemory
+        }
+    }
     public struct Position: Codable, Sendable {
         public let position: Int
         public let inputTokenID: Int
@@ -21,6 +47,9 @@ public enum Qwen4ExpLocalParity {
         public let withinNumericalTolerance: Bool
     }
     public struct Report: Codable, Sendable {
+        public let schemaVersion: Int
+        public let timestamp: String
+        public let environment: Environment
         public let modelSHA256: String
         public let modelFileBytes: UInt64
         public let sourceRevision: String
@@ -119,7 +148,9 @@ public enum Qwen4ExpLocalParity {
             guard !io.byteCountOverflowed, cache.isBudgetRespected, cache.faults.isEmpty else {
                 throw GGUFError.invalid("parity reader overflow, cache budget or lease fault")
             }
-            return Report(modelSHA256: artifact.manifest.sha256, modelFileBytes: artifact.manifest.fileByteCount,
+            return Report(schemaVersion: 1, timestamp: ISO8601DateFormatter().string(from: Date()),
+                environment: Environment(),
+                modelSHA256: artifact.manifest.sha256, modelFileBytes: artifact.manifest.fileByteCount,
                 sourceRevision: BuildInfo.gitRevision, referenceRevision: Qwen4ExpCPUReference.sourceRevision,
                 tokenIDs: tokens, positions: positions, absoluteTolerance: absoluteTolerance,
                 relativeL2Tolerance: relativeTolerance,
