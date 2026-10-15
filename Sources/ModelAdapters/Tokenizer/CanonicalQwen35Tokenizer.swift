@@ -7,8 +7,9 @@ import MinirunKit
 
 /// The product tokenizer and chat renderer. All BPE, Unicode splitting, token
 /// pieces, stop IDs and Jinja execution delegate to pinned llama.cpp. Confine
-/// this object to the runner's single inference executor. The C library only
-/// loads vocabulary metadata and never creates an inference context.
+/// this object to the runner's single inference executor. This API only loads
+/// vocabulary metadata and never creates an inference context. The runtime's
+/// separate flr_* CPU diagnostic API is not invoked by this tokenizer.
 public final class CanonicalQwen35Tokenizer {
     public static let supportedTemplateSHA256 = "c3cf9e34abf4f9e36c2d72165aa9c132d3e2a725b6c2586aaa3a8af9d7a81041"
     public struct ChatPrompt: Equatable, Sendable {

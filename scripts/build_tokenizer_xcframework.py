@@ -1,4 +1,4 @@
-"""Build canonical tokenizer/Jinja from pinned source for Apple arm64 platforms.
+"""Build canonical tokenizer/Jinja and diagnostic CPU API for Apple arm64.
 
 Run before Swift package resolution. Nothing downloaded is a model; the local
 XCFramework is ignored by Git and contains CPU code plus a narrow C header.
@@ -87,8 +87,11 @@ def main():
     (runtime / "build-manifest.json").write_text(json.dumps({
         "llamaRevision": REVISION, "slices": records,
         "xcode": subprocess.check_output(["xcodebuild", "-version"], text=True).strip(),
-        "vocabularyOnly": True, "inferenceContextCreated": False,
-        "separateCPUReferenceAPI": True,
+        "tokenizerPath": {"vocabularyOnly": True, "inferenceContextCreated": False},
+        "diagnosticCPUReference": {"included": True, "maximumContextTokens": 128,
+                                   "loadMode": "mmap", "lazyMode": "on", "gpuLayers": 0,
+                                   "weightRepacking": False, "requiresMemoryGovernor": True},
+        "trainedInferenceExecutedDuringBuild": False,
     }, indent=2) + "\n", encoding="utf-8")
     print(f"Canonical vocabulary-only runtime built for {len(records)} Apple platforms at {REVISION}")
 
