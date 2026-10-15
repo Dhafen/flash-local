@@ -10,6 +10,7 @@
 int main(int argc, char ** argv) {
     if (argc != 3 || std::filesystem::file_size(argv[1]) > (32u << 20)) return 2;
     ggml_context * data = nullptr;
+    std::cerr << "MIXED_FIXTURE loading bounded random F32 source\n";
     gguf_context * file = gguf_init_from_file(argv[1], {false, &data});
     if (!file || !data) return 3;
     const auto key = gguf_find_key(file, "general.name");
@@ -41,6 +42,8 @@ int main(int argc, char ** argv) {
         if (tensor->ne[0] % ggml_blck_size(type)) return 6;
         const int64_t rows = ggml_nelements(tensor) / tensor->ne[0];
         const size_t bytes = ggml_row_size(type, tensor->ne[0]) * rows;
+        std::cerr << "MIXED_FIXTURE tensor=" << name << " type=" << ggml_type_name(type)
+                  << " columns=" << tensor->ne[0] << " rows=" << rows << " bytes=" << bytes << '\n';
         packed[i].resize(bytes);
         if (ggml_quantize_chunk(type, static_cast<const float *>(tensor->data), packed[i].data(),
                                 0, rows, tensor->ne[0], nullptr) != bytes) return 7;
@@ -51,6 +54,7 @@ int main(int argc, char ** argv) {
                       GGML_TYPE_Q5_0, GGML_TYPE_Q8_0, GGML_TYPE_Q4_K, GGML_TYPE_Q6_K}) {
         if (!seen[type]) return 8;
     }
+    std::cerr << "MIXED_FIXTURE writing encoded tensors\n";
     const bool written = gguf_write_to_file(file, argv[2], false);
     gguf_free(file); ggml_free(data);
     std::cout << "REAM_MIXED_FIXTURE canonicalQuantizers=true types=8 trainedWeights=false\n";

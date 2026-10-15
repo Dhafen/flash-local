@@ -18,8 +18,17 @@ def main():
     log = work / "reference-build.log"
     with log.open("w", encoding="utf-8") as output:
         def run(args):
-            subprocess.run([str(a) for a in args], cwd=root, stdout=output,
-                           stderr=subprocess.STDOUT, check=True)
+            command = [str(a) for a in args]
+            try:
+                subprocess.run(command, cwd=root, stdout=output,
+                               stderr=subprocess.STDOUT, check=True)
+            except subprocess.CalledProcessError as error:
+                if error.returncode < 0 and pathlib.Path(command[0]).name == "flash-local-mixed-fixture":
+                    # One diagnostic rerun of our bounded random fixture only.
+                    # Keep the original failure, even if the debugger run exits.
+                    subprocess.run(["lldb", "--batch", "-o", "run", "-o", "thread backtrace all", "--"] + command,
+                                   cwd=root, stdout=output, stderr=subprocess.STDOUT, timeout=60)
+                raise
         try:
             source = prepare(root, run)
             run(["cmake", "-S", root / "Tests/ReferenceHarness", "-B", build,
