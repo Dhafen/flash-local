@@ -13,6 +13,10 @@ on:
         description: 'Also build and inspect an unsigned Release archive for device iOS; does not upload'
         type: boolean
         default: false
+      probe_automatic_signing:
+        description: 'After the unsigned archive, try a local automatic Apple distribution export; never upload'
+        type: boolean
+        default: false
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -195,6 +199,27 @@ jobs:
             2>&1 | tee ios-archive.log | tail -60
           python3 scripts/check_ios_archive.py "$RUNNER_TEMP/FlashLocal.xcarchive" --output ios-archive-check.json
 
+      - name: Try automatic Apple provisioning without uploading
+        if: github.event_name == 'workflow_dispatch' && inputs.release_archive && inputs.probe_automatic_signing
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_PRIVATE_KEY_B64: ${{ secrets.ASC_PRIVATE_KEY_B64 }}
+          IOS_DISTRIBUTION_P12_B64: ${{ secrets.IOS_DISTRIBUTION_P12_B64 }}
+          IOS_DISTRIBUTION_P12_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_P12_PASSWORD }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+        run: |
+          bash scripts/prepare_flash_signing.sh
+          export ASC_KEY_PATH="$RUNNER_TEMP/flash-local-signing/AuthKey.p8"
+          python3 scripts/probe_automatic_export.py "$RUNNER_TEMP/FlashLocal.xcarchive"
+
+      - name: Remove temporary signing material and local IPA
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.probe_automatic_signing
+        run: |
+          security list-keychains -d user -s "$HOME/Library/Keychains/login.keychain-db"
+          security delete-keychain "$RUNNER_TEMP/flash-local-signing.keychain-db" 2>/dev/null || true
+          rm -rf "$RUNNER_TEMP/flash-local-signing"
+
       - name: Upload compact text diagnostics
         if: always()
         uses: actions/upload-artifact@v4
@@ -210,6 +235,7 @@ jobs:
             ios-build.log
             ios-archive.log
             ios-archive-check.json
+            ios-signing-probe.json
             .work/reference-build.log
             .work/tokenizer-build.log
             .work/runtime/build-manifest.json
