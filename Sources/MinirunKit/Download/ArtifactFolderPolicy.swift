@@ -61,7 +61,7 @@ public struct DownloadDestinationLayout: Sendable, Equatable {
 
     /// The sentence the folder chooser puts in its own message.
     public var chooserMessage: String {
-        "Choose where to keep this model. Minirun creates a folder named "
+        "Choose where to keep this model. Flash Local creates a folder named "
             + "\(subfolderName) inside it."
     }
 }

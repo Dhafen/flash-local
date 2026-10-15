@@ -94,7 +94,7 @@ final class SoftwareUpdateTests: XCTestCase {
     /// reviewer will check against the code.
     func testTheRunningSentenceNamesTheFeedHostAndDeniesTelemetry() {
         let text = SoftwareUpdatePresentation.runningExplanation
-        XCTAssertTrue(text.contains("downloads.minirun.dev"))
+        XCTAssertTrue(text.contains("github.com"))
         XCTAssertTrue(text.localizedCaseInsensitiveContains("nothing about this mac"))
     }
 
@@ -112,9 +112,8 @@ final class SoftwareUpdateTests: XCTestCase {
     // MARK: - What the shipped bundle declares
 
     /// Sparkle compares `CFBundleVersion`, so the build number is the thing
-    /// that has to increase. The repository's scheme is `YYYYMMDDNN`, which is
-    /// monotonic as an integer for as long as dates increase and no more than
-    /// 99 builds are stamped in a day.
+    /// that has to increase. This independent app starts at build 1 and uses
+    /// positive integer build numbers within each marketing version.
     func testTheBuildNumberSchemeIsMonotonicAsAnInteger() {
         // `Bundle.main` in a hosted test is the app under test, so this is the
         // number Sparkle would actually compare.
@@ -122,18 +121,14 @@ final class SoftwareUpdateTests: XCTestCase {
         let build = try? XCTUnwrap(stamped)
         XCTAssertNotNil(build)
         if let build {
-            XCTAssertEqual(build.count, 10, "the scheme is YYYYMMDDNN")
-            XCTAssertNotNil(
-                UInt64(build), "a build number Sparkle cannot read as a number is not ordered")
+            XCTAssertGreaterThan(UInt64(build) ?? 0, 0,
+                "a build number must be a positive integer")
         }
 
-        let scheme = ["2026081402", "2026081403", "2026081500", "2027010100"]
+        let scheme = ["1", "2", "9", "10"]
         let numbers = scheme.map { UInt64($0) }
         XCTAssertFalse(numbers.contains(nil))
         XCTAssertEqual(numbers.compactMap { $0 }, numbers.compactMap { $0 }.sorted())
-        // Same-day rollover must not tie, and a later date must beat a later
-        // build number from an earlier date.
-        XCTAssertLessThan(UInt64("2026081402")!, UInt64("2026081403")!)
-        XCTAssertLessThan(UInt64("2026081499")!, UInt64("2026081500")!)
+        XCTAssertLessThan(UInt64("9")!, UInt64("10")!)
     }
 }

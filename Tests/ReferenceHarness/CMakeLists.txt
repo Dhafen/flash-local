@@ -21,6 +21,7 @@ add_executable(flash-local-tokenizer-reference tokenizer.cpp)
 target_link_libraries(flash-local-tokenizer-reference PRIVATE llama)
 target_sources(flash-local-tokenizer-reference PRIVATE
   "${LLAMA_SOURCE}/common/json.cpp"
+  "${LLAMA_SOURCE}/common/unicode.cpp"
   "${LLAMA_SOURCE}/common/jinja/lexer.cpp"
   "${LLAMA_SOURCE}/common/jinja/parser.cpp"
   "${LLAMA_SOURCE}/common/jinja/runtime.cpp"
