@@ -79,18 +79,19 @@ final class Qwen4ExpDecoderParityTests: XCTestCase {
         _ = try decoder.logits(for: 1)
         XCTAssertEqual(decoder.position, 1)
 
-        // Lose observability after the entry checkpoint, while state may already
-        // have changed. Further steps must remain refused until explicit reset.
+        // Lose observability at the first expert checkpoint, after the GDN
+        // state/history have changed. Entry and the layer checkpoint succeed.
+        // Further steps must remain refused until explicit reset.
         decoder.reset()
         var observations = 0
         decoder.footprintSnapshot = {
             observations += 1
-            return observations == 1 ? ProcessFootprint.current() : nil
+            return observations < 3 ? ProcessFootprint.current() : nil
         }
         XCTAssertThrowsError(try decoder.logits(for: 1)) { error in
             XCTAssertTrue(error.localizedDescription.contains("physical footprint unavailable"))
         }
-        XCTAssertEqual(observations, 2)
+        XCTAssertEqual(observations, 3)
         XCTAssertEqual(decoder.position, 0)
         decoder.footprintSnapshot = { ProcessFootprint.current() }
         XCTAssertThrowsError(try decoder.logits(for: 1), "Restoring telemetry does not repair partial state")
