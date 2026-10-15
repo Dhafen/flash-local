@@ -37,7 +37,7 @@ let package = Package(
         ),
         .target(
             name: "MinirunKit",
-            dependencies: ["StorageCore", "iOSBench"],
+            dependencies: ["StorageCore", "iOSBench", "GGUFCore"],
             resources: [.copy("Resources/model-catalog.json")]
         ),
         .testTarget(name: "MLXBridgeTests", dependencies: [

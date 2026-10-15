@@ -7,7 +7,7 @@ import XCTest
 @testable import MLXBridge
 
 final class GGUFStreamedLinearTests: XCTestCase {
-    private func withExpertMatrix(_ body: (GGUFIndex, TileReader, BufferPool) throws -> Void) throws {
+    private func withExpertMatrix(cache: Bool = false, _ body: (GGUFIndex, TileReader, BufferPool) throws -> Void) throws {
         var header = Data("GGUF".utf8)
         func integer(_ value: UInt64, _ bytes: Int) {
             for i in 0..<bytes { header.append(UInt8(truncatingIfNeeded: value >> (i * 8))) }
@@ -26,7 +26,7 @@ final class GGUFStreamedLinearTests: XCTestCase {
         try header.write(to: path)
         defer { try? FileManager.default.removeItem(at: path) }
         let pool = try BufferPool(configuration: .init(slotCount: 2, slotBytes: 3 * 4 * 4,
-                                                       retainOnRelease: false, poisonOnRelease: true))
+                                                       retainOnRelease: cache, poisonOnRelease: true))
         let reader = try TileReader(path: path.path, pool: pool,
             configuration: .init(queueDepth: 1, readAhead: 1, noCache: false, slotAcquireTimeout: 5))
         defer { reader.shutdown() }
@@ -80,6 +80,32 @@ final class GGUFStreamedLinearTests: XCTestCase {
                 payloadOffset: index.payloadOffset, sourceID: 1, firstRegionID: 0,
                 tileRows: 1, reader: reader, scratch: scratch, maximumOutputBytes: 4))
             XCTAssertEqual(reader.statistics.bytesRead, 0)
+        }
+    }
+
+    func testBoundedExpertCacheAvoidsRepeatedDiskReadsWithoutChangingOutput() throws {
+        try withExpertMatrix(cache: true) { index, reader, pool in
+            let tensor = try XCTUnwrap(index.tensors["experts"])
+            let scratch = try GGUFLinearScratch(elements: 12)
+            let x = MLXArray([Float(1), 2, 3, 4], [1, 4])
+            func run(expert: UInt64, firstRegion: UInt64) throws -> MLXArray {
+                try GGUFStreamedLinear.run(x, tensor: tensor, expert: expert,
+                    payloadOffset: index.payloadOffset, sourceID: 1, firstRegionID: firstRegion,
+                    tileRows: 3, reader: reader, scratch: scratch).output
+            }
+            let first = try run(expert: 2, firstRegion: 0)
+            XCTAssertEqual(reader.statistics.bytesRead, 80)
+            let cached = try run(expert: 2, firstRegion: 0)
+            XCTAssertEqual(cached.asArray(Float.self), first.asArray(Float.self))
+            XCTAssertEqual(reader.statistics.bytesRead, 80, "The second pass must hit the bounded raw cache")
+            let evicting = try run(expert: 1, firstRegion: 2)
+            XCTAssertEqual(evicting.asArray(Float.self), [220, 260, 300, 340, 380])
+            XCTAssertEqual(reader.statistics.bytesRead, 160)
+            let reloaded = try run(expert: 2, firstRegion: 0)
+            XCTAssertEqual(reloaded.asArray(Float.self), first.asArray(Float.self))
+            XCTAssertEqual(reader.statistics.bytesRead, 240)
+            XCTAssertEqual(pool.census.inUse, 0)
+            XCTAssertLessThanOrEqual(pool.statistics.peakInUseBytes, 96)
         }
     }
 }

@@ -21,6 +21,11 @@ The original project and the existing Priv AI application are not modified.
   5,500,000,000 bytes, with mandatory caller-paid working memory reserve.
 - `Qwen4ExpOperators`: V-first/modulo-head GDN step, causal/dilated convolution,
   sigmoid-gated norm, streamed-projection hyper-connections and top-k routing.
+- `VerifiedGGUFArtifact`: full incremental SHA-256 against the pinned LFS
+  manifest, no-follow rooted open, metadata bounds and a retained descriptor.
+  Runtime readers receive duplicates of the hashed object. File identity,
+  size and timestamps must remain unchanged before/after streamed operations.
+  Header-only validation does not substitute for this full verification.
 
 On live iOS launches, the app registers its own Documents/Models root, creates
 it on resolution, excludes it from backup and uses first-unlock file protection.
@@ -30,7 +35,7 @@ sibling or symlink. External/user-picked locations retain the existing grant
 rules. Previews and injected storage do not gain implicit local authority.
 
 These components do **not** constitute a complete model runner. Tokenizer,
-attention/RoPE, complete PLE path, verified artifact binding, downloader,
+attention/RoPE, complete PLE path, runner binding to verified artifacts, downloader,
 chat integration, app rebranding and signing still need implementation and
 verification. No model is advertised as executable by these additions.
 
