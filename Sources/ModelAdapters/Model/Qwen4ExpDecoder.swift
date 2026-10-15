@@ -131,6 +131,10 @@ public final class Qwen4ExpDecoder {
     public var onFootprintObservation: ((ProcessFootprint) -> Void)?
     // Internal injection point for exercising loss of memory observability.
     var footprintSnapshot: () -> ProcessFootprint? = { ProcessFootprint.current() }
+    #if DEBUG
+    // Synthetic parity tests only. Release builds have no activation observer.
+    var onParityCheckpoint: ((String, [Float]) -> Void)?
+    #endif
     private let weights: GGUFWeightSource
     private var attentionCaches: [Int: Qwen4ExpTextAttention.Cache] = [:]
     private var recurrentStates: [Int: MLXArray] = [:]
@@ -205,8 +209,10 @@ public final class Qwen4ExpDecoder {
                     blockOutput: moe(ffn.mixed, layer: layer, cancellationRequested: cancellationRequested),
                     injection: ffn.injection!)
                 residual.eval()
+                parityCheckpoint("l_last-\(layer)", residual)
             }
             let final = try hc(residual, prefix: "output_hc_", injection: false)
+            parityCheckpoint("result_norm", final.mixed)
             let logits = try weights.linear(final.mixed, tensor: "output.weight")
             logits.eval()
             try checkBudgetAndCancellation(cancellationRequested)
@@ -221,6 +227,14 @@ public final class Qwen4ExpDecoder {
             requiresReset = true
             throw error
         }
+    }
+
+    private func parityCheckpoint(_ name: String, _ value: MLXArray) {
+        #if DEBUG
+        if let observer = onParityCheckpoint, value.size <= 8192 {
+            observer(name, value.asArray(Float.self))
+        }
+        #endif
     }
 
     private func checkBudgetAndCancellation(_ cancellationRequested: () -> Bool) throws {

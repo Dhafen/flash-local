@@ -58,6 +58,21 @@ def main():
             (root / ".test-fixtures/synthetic-qwen4exp-mixed.json").write_text(json.dumps(manifest, indent=2) + "\n")
             run([build / "flash-local-reference", mixed,
                  root / ".test-fixtures/llama-mixed-reference-logits.json"])
+            run([build / "flash-local-reference", mixed,
+                 root / ".test-fixtures/llama-mixed-reference-checkpoints.json", "--checkpoints"])
+            plain_path = root / ".test-fixtures/llama-mixed-reference-logits.json"
+            plain = json.loads(plain_path.read_text())
+            traced = json.loads((root / ".test-fixtures/llama-mixed-reference-checkpoints.json").read_text())
+            if plain['tokens'] != traced['tokens'] or [len(r) for r in plain['logits']] != [len(r) for r in traced['logits']]:
+                raise RuntimeError("CPU checkpoint shadow changed output shape")
+            trace_error = max(abs(a-b) for row, other in zip(plain['logits'], traced['logits']) for a,b in zip(row,other))
+            if trace_error > 1e-7:
+                raise RuntimeError(f"CPU checkpoint shadow perturbed logits: {trace_error}")
+            # Keep every normal reference logit unchanged. Only attach observations
+            # after independently bounding the diagnostic's effect on the CPU pass.
+            plain['checkpoints'] = traced['checkpoints']
+            plain['checkpointShadowMaximumAbsoluteError'] = trace_error
+            plain_path.write_text(json.dumps(plain, indent=2) + "\n")
             run(["python3", root / "scripts/make_tokenizer_reference_fixture.py"])
             run([build / "flash-local-tokenizer-reference",
                  root / ".test-fixtures/qwen35-vocabulary-only.gguf",

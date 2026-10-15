@@ -26,6 +26,7 @@ if(NOT FLASH_LLAMA_DIRTY EQUAL 0)
 endif()
 add_subdirectory("${LLAMA_SOURCE}" llama)
 add_executable(flash-local-reference main.cpp)
+target_include_directories(flash-local-reference PRIVATE "${LLAMA_SOURCE}/common")
 target_link_libraries(flash-local-reference PRIVATE llama)
 add_executable(flash-local-mixed-fixture mixed.cpp)
 target_link_libraries(flash-local-mixed-fixture PRIVATE llama)
@@ -46,6 +47,7 @@ target_include_directories(flash-local-tokenizer-runtime PRIVATE
   "${LLAMA_SOURCE}/common" "${LLAMA_SOURCE}/src" "${LLAMA_SOURCE}/vendor"
   "${LLAMA_SOURCE}/ggml/src")
 target_link_libraries(flash-local-tokenizer-runtime PUBLIC llama)
+target_link_libraries(flash-local-reference PRIVATE flash-local-tokenizer-runtime)
 target_compile_definitions(flash-local-tokenizer-runtime PRIVATE FLASH_LLAMA_REVISION="${FLASH_LLAMA_REVISION}")
 target_link_libraries(flash-local-tokenizer-reference PRIVATE flash-local-tokenizer-runtime)
 target_include_directories(flash-local-tokenizer-reference PRIVATE

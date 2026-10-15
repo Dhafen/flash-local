@@ -71,6 +71,14 @@ the unchanged relative-L2 limit: 0.00374–0.00831 against 0.001 (maximum absolu
 error 0.00120). The FP32 graph passed. The activation-rounding change above is
 the resulting implementation fix and still requires a successful hosted run;
 these pre-fix measurements are not presented as successful mixed inference.
+Run `38779671123` at `80ce2a8` passed the focused operand-rounding tests. The
+mixed graph's first position improved to relative L2 1.08e-7, but position one
+still failed at 0.00167245; positions two through four were within the limit.
+Delivery stopped before upload. A separate diagnostic replay now compares
+bounded layer outputs and the pre-head activations, with quantization-boundary
+observations. CPU and streamed diagnostic replays must stay within 1e-7 of
+their normal logits; the unchanged normal runs remain the numerical oracle.
+The streamed activation observer is DEBUG-only and is never enabled by the app.
 The standalone CPU reference explicitly disables native tuning, Accelerate,
 KleidiAI and llamafile, and selects the runtime's armv8-a target on Apple silicon;
 its settings do not depend on a prior tokenizer build's CMake cache.

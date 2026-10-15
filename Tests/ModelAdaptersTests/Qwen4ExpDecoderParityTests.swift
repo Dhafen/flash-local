@@ -17,6 +17,7 @@ final class Qwen4ExpDecoderParityTests: XCTestCase {
     private struct Reference: Decodable {
         let tokens: [UInt64]
         let logits: [[Float]]
+        let checkpoints: [[String: [Float]]]?
     }
 
     func testCompleteSyntheticGraphMatchesPinnedLlamaCPPLogits() throws {
@@ -52,8 +53,15 @@ final class Qwen4ExpDecoderParityTests: XCTestCase {
         }
         let decoder = try Qwen4ExpDecoder(artifact: artifact, contextTokens: manifest.contextTokens,
             budgetBytes: 5_500_000_000, rawCacheBytes: 2 << 20)
+        var checkpoints: [String: [Float]] = [:]
+        var normalLogits: [[Float]] = []
+        let roundingProbe: GGUFWeightSource?
+        if mixed { roundingProbe = try GGUFWeightSource(artifact: artifact, rawCacheBytes: 2 << 20) }
+        else { roundingProbe = nil }
+        defer { roundingProbe?.shutdown() }
         for (position, token) in manifest.tokens.enumerated() {
             let actual = try decoder.logits(for: token).asArray(Float.self)
+            normalLogits.append(actual)
             let target = reference.logits[position]
             XCTAssertEqual(actual.count, target.count)
             XCTAssertTrue(target.contains { abs($0) > 1e-6 }, "Zero logits are not an informative fixture")
@@ -77,6 +85,39 @@ final class Qwen4ExpDecoderParityTests: XCTestCase {
         }
         print("GGUF_FULL_GRAPH_PROBE mixed=\(mixed) " + String(decoding:
             try JSONEncoder().encode(decoder.projectionStatistics), as: UTF8.self))
+        if mixed {
+            decoder.reset()
+            #if DEBUG
+            decoder.onParityCheckpoint = { checkpoints[$0] = $1 }
+            #endif
+            for (position, token) in manifest.tokens.enumerated() {
+                checkpoints.removeAll(keepingCapacity: true)
+                let shadow = try decoder.logits(for: token).asArray(Float.self)
+                for (a, b) in zip(shadow, normalLogits[position]) {
+                    XCTAssertEqual(a, b, accuracy: 1e-7, "Checkpoint observer changed streamed logits")
+                }
+                let referenceCheckpoints = try XCTUnwrap(reference.checkpoints?[position])
+                for name in ["l_last-0", "l_last-1", "l_last-2", "l_last-3", "result_norm"] {
+                    let cpu = try XCTUnwrap(referenceCheckpoints[name], "Missing CPU checkpoint \(name)")
+                    let gpu = try XCTUnwrap(checkpoints[name], "Missing streamed checkpoint \(name)")
+                    XCTAssertEqual(cpu.count, gpu.count)
+                    let maxError = zip(cpu, gpu).map { pair in abs(pair.0 - pair.1) }.max() ?? 0
+                    let squared = zip(cpu, gpu).reduce(0.0) { $0 + pow(Double($1.0) - Double($1.1), 2) }
+                    let norm = cpu.reduce(0.0) { $0 + Double($1) * Double($1) }
+                    print("REAM_CHECKPOINT position=\(position) name=\(name) maxAbs=\(maxError) relativeL2=\(sqrt(squared / max(norm, 1e-20)))")
+                    if name == "result_norm", let probe = roundingProbe {
+                        let type = try XCTUnwrap(artifact.index.tensors["output.weight"]).quantization
+                        let a = try probe.canonicalActivations(MLXArray(cpu, [1, cpu.count]), type: type, columns: cpu.count).asArray(Float.self)
+                        let b = try probe.canonicalActivations(MLXArray(gpu, [1, gpu.count]), type: type, columns: gpu.count).asArray(Float.self)
+                        let differences = a.indices.filter { abs(a[$0] - b[$0]) > 1e-7 }
+                        print("REAM_ACTIVATION_BOUNDARIES position=\(position) changedElements=\(differences.count) first=\(Array(differences.prefix(8))) rawPairs=\(differences.prefix(8).map { [cpu[$0], gpu[$0], a[$0], b[$0]] })")
+                    }
+                }
+            }
+            #if DEBUG
+            decoder.onParityCheckpoint = nil
+            #endif
+        }
         decoder.reset()
         let firstAgain = try decoder.logits(for: manifest.tokens[0]).asArray(Float.self)
         for (a, b) in zip(firstAgain, reference.logits[0]) { XCTAssertEqual(a, b, accuracy: 0.01) }
