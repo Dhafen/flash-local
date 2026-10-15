@@ -23,12 +23,17 @@ class FakeApple:
             'buildAudienceType': 'INTERNAL_ONLY', 'expired': False}}]
         self.linked = []
         self.posts = []
+        self.group_lookups = []
 
     def all(self, route, query=None):
         if route == 'apps/app-one/betaGroups': return [self.group]
         if route == 'betaGroups/group-one/relationships/betaTesters': return self.testers
         if route == 'builds': return self.builds
-        if route == 'builds/build-one/relationships/betaGroups': return self.linked
+        if route == 'betaGroups':
+            if query != {'filter[builds]': 'build-one', 'limit': '200'}:
+                raise AssertionError('Group reads must select the exact build')
+            self.group_lookups.append((route, query))
+            return self.linked
         raise AssertionError(route)
 
     def request(self, route, method='GET', body=None):
@@ -90,6 +95,14 @@ class PrivateDeliveryTests(unittest.TestCase):
                 delivery.wait_valid(api, 'app-one', '42', '0.1.0', time.monotonic() + 1)
         api = FakeApple(); api.builds.append(api.builds[0])
         with self.assertRaises(ValueError): delivery.find_build(api, 'app-one', '42')
+
+    def test_documented_build_filter_checks_all_group_access_before_association(self):
+        api = FakeApple(); api.linked = [{'id': 'unexpected-group'}]
+        with self.assertRaisesRegex(ValueError, 'unexpected group access'):
+            delivery.attach_and_confirm(api, api.builds[0], 'group-one', time.monotonic() + 1)
+        self.assertEqual(api.posts, [])
+        self.assertEqual(api.group_lookups,
+                         [('betaGroups', {'filter[builds]': 'build-one', 'limit': '200'})])
 
     def test_changed_ipa_or_source_cannot_reuse_signature_validation(self):
         with tempfile.TemporaryDirectory() as folder:

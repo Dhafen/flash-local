@@ -124,14 +124,17 @@ def wait_valid(api, app_id, number, version, deadline):
 
 def attach_and_confirm(api, build, group_id, deadline):
     identifier = resource_id(build['id'])
-    route = 'builds/' + identifier + '/relationships/betaGroups'
-    groups = {item['id'] for item in api.all(route)}
+    # Apple does not allow GET on builds/{id}/relationships/betaGroups.
+    # List beta groups using the documented build filter instead. This also
+    # observes every group, so unexpected access still refuses association.
+    query = {'filter[builds]': identifier, 'limit': '200'}
+    groups = {item['id'] for item in api.all('betaGroups', query=query)}
     if groups - {group_id}: raise ValueError('Build already has unexpected group access')
     if group_id not in groups:
         api.request('betaGroups/' + group_id + '/relationships/builds', method='POST',
             body={'data': [{'type': 'builds', 'id': identifier}]})
     while time.monotonic() < deadline:
-        groups = {item['id'] for item in api.all(route)}
+        groups = {item['id'] for item in api.all('betaGroups', query=query)}
         if groups - {group_id}: raise ValueError('Unexpected group access appeared after association')
         detail = api.request('builds/' + identifier + '/buildBetaDetail')['data']['attributes']
         state = detail.get('internalBuildState')
