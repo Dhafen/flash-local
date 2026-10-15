@@ -40,7 +40,11 @@ The original project and the existing Priv AI application are not modified.
   embedding/PLE, HC, GDN/dense text attention, routed/shared FFN and LM head.
   Constructor validates all required shapes before opening weight readers.
   Failed/cancelled steps require reset. Live footprint checks retain headroom
-  and the process-wide MLX allocator cache is capped at 32 MiB. This graph is
+  before the first weight read, each layer and routed expert. An unavailable
+  footprint refuses the step and requires reset, including loss of telemetry
+  after admission. Synthetic tests cover that refusal, reset/logit recovery,
+  and zero additional reader bytes when budget or OS headroom rejects entry.
+  The process-wide MLX allocator cache is capped at 32 MiB. This graph is
   validated against pinned llama.cpp with tiny random-weight graph/session
   fixtures. The iPhone chat route now uses it through verified GGUF authority;
   trained-model numerical parity remains unverified.

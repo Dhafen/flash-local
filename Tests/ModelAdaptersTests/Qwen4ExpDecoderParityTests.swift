@@ -1,6 +1,7 @@
 import Foundation
 import MLX
 import MinirunKit
+import StorageCore
 import XCTest
 @testable import ModelAdapters
 
@@ -64,5 +65,40 @@ final class Qwen4ExpDecoderParityTests: XCTestCase {
         decoder.reset()
         _ = try decoder.logits(for: 1)
         XCTAssertEqual(decoder.position, 1)
+
+        // Lose observability after the entry checkpoint, while state may already
+        // have changed. Further steps must remain refused until explicit reset.
+        decoder.reset()
+        var observations = 0
+        decoder.footprintSnapshot = {
+            observations += 1
+            return observations == 1 ? ProcessFootprint.current() : nil
+        }
+        XCTAssertThrowsError(try decoder.logits(for: 1)) { error in
+            XCTAssertTrue(error.localizedDescription.contains("physical footprint unavailable"))
+        }
+        XCTAssertEqual(observations, 2)
+        XCTAssertEqual(decoder.position, 0)
+        decoder.footprintSnapshot = { ProcessFootprint.current() }
+        XCTAssertThrowsError(try decoder.logits(for: 1), "Restoring telemetry does not repair partial state")
+        decoder.reset()
+        let recovered = try decoder.logits(for: manifest.tokens[0]).asArray(Float.self)
+        for (a, b) in zip(recovered, reference.logits[0]) { XCTAssertEqual(a, b, accuracy: 0.01) }
+
+        // Reject both the configured process limit and live OS headroom before
+        // touching weights. These observations exercise admission, not allocation.
+        for reading in [
+            ProcessFootprint(footprintBytes: 5_500_000_000, peakFootprintBytes: 5_500_000_000, availableBytes: nil),
+            ProcessFootprint(footprintBytes: 1, peakFootprintBytes: 1, availableBytes: 1)
+        ] {
+            decoder.reset()
+            decoder.footprintSnapshot = { reading }
+            let bytesBefore = decoder.readStatistics
+            XCTAssertThrowsError(try decoder.logits(for: 1)) { error in
+                XCTAssertTrue(error.localizedDescription.contains("live process memory admission"))
+            }
+            XCTAssertEqual(decoder.readStatistics.bytesRead, bytesBefore.bytesRead)
+            XCTAssertEqual(decoder.position, 0)
+        }
     }
 }

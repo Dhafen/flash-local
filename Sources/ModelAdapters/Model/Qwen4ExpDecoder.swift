@@ -129,6 +129,8 @@ public final class Qwen4ExpDecoder {
     /// Existing budget checkpoints also provide run-local memory observations.
     /// Invoked on the decoder's serial executor, never on an I/O worker.
     public var onFootprintObservation: ((ProcessFootprint) -> Void)?
+    // Internal injection point for exercising loss of memory observability.
+    var footprintSnapshot: () -> ProcessFootprint? = { ProcessFootprint.current() }
     private let weights: GGUFWeightSource
     private var attentionCaches: [Int: Qwen4ExpTextAttention.Cache] = [:]
     private var recurrentStates: [Int: MLXArray] = [:]
@@ -172,6 +174,7 @@ public final class Qwen4ExpDecoder {
             throw GGUFError.invalid("decoder token/context/state; reset required after a failed step")
         }
         do {
+            try checkBudgetAndCancellation(cancellationRequested)
             let c = layout.config
             var residual = broadcast(try weights.row(token, tensor: "token_embd.weight")
                 .reshaped([1, 1, c.hiddenSize]), to: [1, c.hyperConnections, c.hiddenSize])
@@ -222,14 +225,15 @@ public final class Qwen4ExpDecoder {
 
     private func checkBudgetAndCancellation(_ cancellationRequested: () -> Bool) throws {
         if cancellationRequested() { throw CancellationError() }
-        if let current = ProcessFootprint.current() {
-            onFootprintObservation?(current)
-            let headroom: UInt64 = 256 << 20
-            guard current.footprintBytes < memoryPlan.budgetBytes,
-                  memoryPlan.budgetBytes - current.footprintBytes >= headroom,
-                  current.availableBytes == nil || current.availableBytes! >= headroom else {
-                throw GGUFError.limit("live process memory admission: footprint=\(current.footprintBytes), budget=\(memoryPlan.budgetBytes), requiredHeadroom=\(headroom), available=\(current.availableBytes.map(String.init) ?? "unavailable")")
-            }
+        guard let current = footprintSnapshot() else {
+            throw GGUFError.limit("physical footprint unavailable; decoder memory admission refused")
+        }
+        onFootprintObservation?(current)
+        let headroom: UInt64 = 256 << 20
+        guard current.footprintBytes < memoryPlan.budgetBytes,
+              memoryPlan.budgetBytes - current.footprintBytes >= headroom,
+              current.availableBytes == nil || current.availableBytes! >= headroom else {
+            throw GGUFError.limit("live process memory admission: footprint=\(current.footprintBytes), budget=\(memoryPlan.budgetBytes), requiredHeadroom=\(headroom), available=\(current.availableBytes.map(String.init) ?? "unavailable")")
         }
     }
 
