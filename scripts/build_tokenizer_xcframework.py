@@ -88,6 +88,8 @@ def main():
         "llamaRevision": REVISION, "slices": records,
         "xcode": subprocess.check_output(["xcodebuild", "-version"], text=True).strip(),
         "tokenizerPath": {"vocabularyOnly": True, "inferenceContextCreated": False},
+        "streamedProjectionActivations": {"included": True, "precision": "pinned-cpu-dot-operand",
+            "maximumRowElements": 65536, "modelOrContextCreated": False, "weightIO": False},
         "diagnosticCPUReference": {"included": True, "maximumContextTokens": 128,
                                    "loadMode": "mmap", "lazyMode": "on", "gpuLayers": 0,
                                    "weightRepacking": False, "requiresMemoryGovernor": True},

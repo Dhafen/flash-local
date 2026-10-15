@@ -69,6 +69,14 @@ final class Qwen4ExpDecoderParityTests: XCTestCase {
             XCTAssertLessThanOrEqual(relative, 1e-3)
         }
         XCTAssertEqual(decoder.position, manifest.tokens.count)
+        if mixed {
+            XCTAssertGreaterThan(decoder.projectionStatistics.activationRoundingCalls, 0)
+            XCTAssertGreaterThan(decoder.projectionStatistics.activationRoundingSeconds, 0)
+        } else {
+            XCTAssertEqual(decoder.projectionStatistics.activationRoundingCalls, 0)
+        }
+        print("GGUF_FULL_GRAPH_PROBE mixed=\(mixed) " + String(decoding:
+            try JSONEncoder().encode(decoder.projectionStatistics), as: UTF8.self))
         decoder.reset()
         let firstAgain = try decoder.logits(for: manifest.tokens[0]).asArray(Float.self)
         for (a, b) in zip(firstAgain, reference.logits[0]) { XCTAssertEqual(a, b, accuracy: 0.01) }

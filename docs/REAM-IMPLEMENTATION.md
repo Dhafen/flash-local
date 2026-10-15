@@ -15,6 +15,13 @@ The original project and the existing Priv AI application are not modified.
   pool/leases, reusable FP32 scratch and eager MLX copy. Reports the extra
   copied tile explicitly. Evaluates each tile before proceeding. Output buffers
   are separately capped; this is not permission to allocate a complete model.
+- Before non-F32 projections, `GGUFWeightSource` rounds activations through the
+  pinned CPU dot kernel's Q8_K/Q8_0/F16/BF16 conversion functions. MLX still
+  performs the FP32 product against unchanged, tile-dequantized weights. This
+  matches the CPU reference's operand precision instead of merely increasing
+  tolerance. Reusable output/packing scratch adds 384 KiB; temporary input and
+  copied MLX activations are each capped at 256 KiB. No helper model/context or
+  weight I/O is created. Projection reports include rounding calls/time.
 - `Qwen4ExpConfig`: metadata-driven architecture and PLE head range validation.
   Published zero compression ratios remain dense; no implicit repair.
 - `Qwen4ExpMemoryPlan`: overflow-checked KV/recurrent state admission under
@@ -59,6 +66,11 @@ F32 operators. It requires all eight encodings in one file. A full five-position
 CPU/streamed-MLX logit comparison uses the existing absolute 0.01 and relative
 L2 0.001 limits; this newly added gate still requires a successful hosted run.
 It does not establish trained-model numerical agreement or phone performance.
+Run `38775973672` at `6c07d1a` reached all five mixed-graph positions but failed
+the unchanged relative-L2 limit: 0.00374–0.00831 against 0.001 (maximum absolute
+error 0.00120). The FP32 graph passed. The activation-rounding change above is
+the resulting implementation fix and still requires a successful hosted run;
+these pre-fix measurements are not presented as successful mixed inference.
 The standalone CPU reference explicitly disables native tuning, Accelerate,
 KleidiAI and llamafile, and selects the runtime's armv8-a target on Apple silicon;
 its settings do not depend on a prior tokenizer build's CMake cache.

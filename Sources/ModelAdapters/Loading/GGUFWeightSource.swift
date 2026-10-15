@@ -4,6 +4,7 @@ import MLX
 import MLXBridge
 import MinirunKit
 import StorageCore
+import LlamaTokenizerRuntime
 
 /// Projection-only cumulative work on the weight source's serial executor.
 /// Logical weight bytes include cache hits. I/O wait includes cache lookup and
@@ -16,8 +17,10 @@ public struct GGUFProjectionStatistics: Codable, Equatable, Sendable {
     public private(set) var waitOnIOSeconds = 0.0
     public private(set) var dequantizeAndCopySeconds = 0.0
     public private(set) var computeSeconds = 0.0
+    public private(set) var activationRoundingCalls: UInt64 = 0
+    public private(set) var activationRoundingSeconds = 0.0
 
-    mutating func record(_ report: GGUFLinearReport) throws {
+    mutating func record(_ report: GGUFLinearReport, roundingSeconds: Double = 0, rounded: Bool = false) throws {
         func add(_ a: UInt64, _ b: UInt64) throws -> UInt64 {
             let value = a.addingReportingOverflow(b)
             guard !value.overflow else { throw GGUFError.limit("projection counter overflow") }
@@ -25,9 +28,11 @@ public struct GGUFProjectionStatistics: Codable, Equatable, Sendable {
         }
         calls = try add(calls, 1); tiles = try add(tiles, UInt64(report.tiles))
         logicalWeightBytes = try add(logicalWeightBytes, report.logicalWeightBytes)
-        wallSeconds += report.wallSeconds; waitOnIOSeconds += report.waitOnIOSeconds
+        if rounded { activationRoundingCalls = try add(activationRoundingCalls, 1) }
+        activationRoundingSeconds += roundingSeconds
+        wallSeconds += report.wallSeconds + roundingSeconds; waitOnIOSeconds += report.waitOnIOSeconds
         dequantizeAndCopySeconds += report.dequantizeAndCopySeconds; computeSeconds += report.computeSeconds
-        guard [wallSeconds, waitOnIOSeconds, dequantizeAndCopySeconds, computeSeconds].allSatisfy({ $0.isFinite && $0 >= 0 }) else {
+        guard [wallSeconds, waitOnIOSeconds, dequantizeAndCopySeconds, computeSeconds, activationRoundingSeconds].allSatisfy({ $0.isFinite && $0 >= 0 }) else {
             throw GGUFError.limit("projection timing overflow")
         }
     }
@@ -35,7 +40,9 @@ public struct GGUFProjectionStatistics: Codable, Equatable, Sendable {
     public func subtracting(_ earlier: Self) throws -> Self {
         guard calls >= earlier.calls, tiles >= earlier.tiles, logicalWeightBytes >= earlier.logicalWeightBytes,
               wallSeconds >= earlier.wallSeconds, waitOnIOSeconds >= earlier.waitOnIOSeconds,
-              dequantizeAndCopySeconds >= earlier.dequantizeAndCopySeconds, computeSeconds >= earlier.computeSeconds else {
+              dequantizeAndCopySeconds >= earlier.dequantizeAndCopySeconds, computeSeconds >= earlier.computeSeconds,
+              activationRoundingCalls >= earlier.activationRoundingCalls,
+              activationRoundingSeconds >= earlier.activationRoundingSeconds else {
             throw GGUFError.invalid("projection counters went backwards")
         }
         var value = Self()
@@ -44,6 +51,8 @@ public struct GGUFProjectionStatistics: Codable, Equatable, Sendable {
         value.wallSeconds = wallSeconds - earlier.wallSeconds; value.waitOnIOSeconds = waitOnIOSeconds - earlier.waitOnIOSeconds
         value.dequantizeAndCopySeconds = dequantizeAndCopySeconds - earlier.dequantizeAndCopySeconds
         value.computeSeconds = computeSeconds - earlier.computeSeconds
+        value.activationRoundingCalls = activationRoundingCalls - earlier.activationRoundingCalls
+        value.activationRoundingSeconds = activationRoundingSeconds - earlier.activationRoundingSeconds
         return value
     }
 }
@@ -60,6 +69,8 @@ public final class GGUFWeightSource {
     private let reader: TileReader
     private let scratch: GGUFLinearScratch
     private let smallScratch: AlignedBuffer
+    private let activationScratch: AlignedBuffer
+    private let activationPackingScratch: AlignedBuffer
     private let sourceIDs: [String: UInt64]
     private let tileBytes: Int
     private var closed = false
@@ -77,7 +88,10 @@ public final class GGUFWeightSource {
         self.rawCacheBytes = pool.configuration.budgetBytes
         scratch = try GGUFLinearScratch(elements: 2 * 1024 * 1024)
         smallScratch = try AlignedBuffer(count: 65536 * 4)
+        activationScratch = try AlignedBuffer(count: 65536 * 4)
+        activationPackingScratch = try AlignedBuffer(count: 65536 * 2)
         dequantizationScratchBytes = scratch.byteCount + smallScratch.count
+            + activationScratch.count + activationPackingScratch.count
         sourceIDs = Dictionary(uniqueKeysWithValues: artifact.index.tensors.keys.sorted().enumerated().map {
             ($0.element, UInt64($0.offset + 1))
         })
@@ -110,12 +124,41 @@ public final class GGUFWeightSource {
         // Each tensor has its own stable source ID; low 32 bits name tiles,
         // high 32 bits name an expert. Cache keys do not grow with token count.
         let firstRegion = (expert ?? 0) << 32
-        let result = try GGUFStreamedLinear.run(x, tensor: tensor, expert: expert,
+        let roundingStart = MonotonicClock.now()
+        let activations = try canonicalActivations(x, type: tensor.quantization, columns: columns)
+        let roundingSeconds = tensor.quantization == .f32 ? 0 : MonotonicClock.seconds(since: roundingStart)
+        let result = try GGUFStreamedLinear.run(activations, tensor: tensor, expert: expert,
             payloadOffset: artifact.index.payloadOffset, sourceID: sourceIDs[name]!,
             firstRegionID: firstRegion, tileRows: rows, reader: reader, scratch: scratch)
         try artifact.assertUnchanged()
-        try projectionStatistics.record(result.report)
+        try projectionStatistics.record(result.report, roundingSeconds: roundingSeconds, rounded: tensor.quantization != .f32)
         return result.output
+    }
+
+    // Canonical CPU dot kernels round their RHS to Q8_K/Q8_0/F16/BF16 before
+    // multiplication. Preserve that arithmetic while MLX still computes the
+    // row-streamed FP32 product. Never quantize or rewrite the model weights.
+    func canonicalActivations(_ x: MLXArray, type: GGUFQuantization, columns: Int) throws -> MLXArray {
+        if type == .f32 { return x }
+        guard x.ndim == 2, x.shape[1] == columns, columns > 0, columns <= 65536,
+              x.shape[0] > 0, x.shape[0] <= 65536 / columns else {
+            throw GGUFError.limit("canonical activation matrix bound")
+        }
+        let values = x.asType(.float32).asArray(Float.self)
+        let output = activationScratch.pointer.assumingMemoryBound(to: Float.self)
+        try values.withUnsafeBufferPointer { input in
+            for row in 0..<x.shape[0] {
+                let code = flr_round_linear_activations(type.rawValue, input.baseAddress! + row * columns,
+                    Int32(columns), output + row * columns, Int32(columns),
+                    activationPackingScratch.pointer, Int32(activationPackingScratch.count))
+                guard code == 0 else {
+                    throw GGUFError.invalid("canonical activation rounding: \(String(cString: flr_last_error()))")
+                }
+            }
+        }
+        let result = MLXArray(UnsafeBufferPointer(start: output, count: values.count), x.shape)
+        result.eval() // own the copied values before reusing either scratch buffer
+        return result
     }
 
     /// Norms and convolution kernels only; routers use the streamed linear.

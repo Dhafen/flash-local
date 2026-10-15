@@ -36,6 +36,7 @@ int main(int argc, char ** argv) {
     llama_backend_init();
     auto mp = llama_model_default_params();
     mp.n_gpu_layers = 0; mp.load_mode = LLAMA_LOAD_MODE_NONE; mp.lazy_mode = LLAMA_LAZY_MODE_OFF; mp.load_mtp = false;
+    mp.use_extra_bufts = false;
     auto model = llama_model_load_from_file(argv[1], mp);
     if (!model) return 9;
     auto cp = llama_context_default_params();

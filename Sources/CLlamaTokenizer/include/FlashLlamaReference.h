@@ -19,6 +19,11 @@ int32_t flr_vocabulary_size(const flr_context *);
 // One explicit token, one full vocabulary of logits. A failed decode poisons the
 // context: release it rather than resuming from partially advanced state.
 int32_t flr_step(flr_context *, int32_t token, float * output, int32_t capacity);
+// Production projection helper: canonical CPU activation rounding only. No
+// model/context/file is opened. One bounded row; caller owns reusable buffers.
+int32_t flr_round_linear_activations(uint32_t weight_type, const float * input,
+    int32_t elements, float * output, int32_t output_capacity,
+    void * packed_scratch, int32_t packed_capacity_bytes);
 #ifdef __cplusplus
 }
 #endif

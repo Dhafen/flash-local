@@ -83,4 +83,38 @@ final class GGUFWeightSourceTests: XCTestCase {
             source.shutdown() // idempotent
         }
     }
+
+    func testCanonicalActivationRoundingUsesWeightSpecificCPUPrecisionAndOwnsCopies() throws {
+        try withSource { source in
+            let input: [Float] = [1, 0.49, 0.25, -1, 0.125] + Array(repeating: 0, count: 251)
+            let x = MLXArray(input, [1, 256])
+            let q8Step = Float(Float16(Float(1) / 127))
+            for type in [GGUFQuantization.q4_0, .q5_0, .q8_0] {
+                let actual = try source.canonicalActivations(x, type: type, columns: 256).asArray(Float.self)
+                for (a, q) in zip(actual.prefix(5), [Float(127), 62, 32, -127, 16]) {
+                    XCTAssertEqual(a, q * q8Step, accuracy: 1e-7)
+                }
+            }
+            for type in [GGUFQuantization.q4_K, .q6_K] {
+                let actual = try source.canonicalActivations(x, type: type, columns: 256).asArray(Float.self)
+                for (a, q) in zip(actual.prefix(5), [Float(127), 62, 32, -127, 16]) {
+                    XCTAssertEqual(a, q / 127, accuracy: 1e-7)
+                }
+            }
+            let small: [Float] = [1.0001, 1.004, -0.3333, 0]
+            let smallX = MLXArray(small, [1, 4])
+            let half = try source.canonicalActivations(smallX, type: .f16, columns: 4)
+            XCTAssertEqual(half.asArray(Float.self), small.map { Float(Float16($0)) })
+            let bf = try source.canonicalActivations(smallX, type: .bf16, columns: 4).asArray(Float.self)
+            XCTAssertEqual(bf[0], 1)
+            XCTAssertEqual(bf[1], 1.0078125)
+            // Reusing scratch for another projection must not mutate the first.
+            _ = try source.canonicalActivations(MLXArray.zeros([1, 4]), type: .f16, columns: 4)
+            XCTAssertEqual(half.asArray(Float.self), small.map { Float(Float16($0)) })
+            XCTAssertThrowsError(try source.canonicalActivations(smallX, type: .q6_K, columns: 4))
+            XCTAssertThrowsError(try source.canonicalActivations(MLXArray([Float.nan], [1, 1]), type: .f16, columns: 1))
+            XCTAssertThrowsError(try source.canonicalActivations(MLXArray.zeros([2, 65536]), type: .f16, columns: 65536))
+            XCTAssertEqual(source.readStatistics.bytesRead, 0, "Activation rounding performs no weight I/O")
+        }
+    }
 }

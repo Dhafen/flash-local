@@ -14,6 +14,7 @@ int main(int argc, char ** argv) {
     mp.load_mode = LLAMA_LOAD_MODE_NONE;
     mp.lazy_mode = LLAMA_LAZY_MODE_OFF;
     mp.load_mtp = false;
+    mp.use_extra_bufts = false;
     llama_model * model = llama_model_load_from_file(argv[1], mp);
     if (!model) return 3;
     auto cp = llama_context_default_params();
