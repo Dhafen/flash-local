@@ -31,6 +31,11 @@ The original project and the existing Priv AI application are not modified.
   Online FP32 softmax avoids full-context KV expansion or a quadratic mask.
   Context exhaustion refuses instead of evicting. QSA and chunked prefill
   still require separate implementation and validation.
+- `GGUFWeightSource`: connects the verification capability to a fixed raw LRU
+  pool, reusable linear scratch, capped small tensors and one-row embedding/
+  PLE reads. Per-tensor/expert/tile identities are stable across tokens. Full
+  file integrity is checked before construction, and mutation stamps before
+  and after each operation. Integration tests use synthetic verified files.
 
 On live iOS launches, the app registers its own Documents/Models root, creates
 it on resolution, excludes it from backup and uses first-unlock file protection.

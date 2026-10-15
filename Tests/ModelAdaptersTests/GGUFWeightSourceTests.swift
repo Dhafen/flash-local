@@ -1,0 +1,73 @@
+import Foundation
+import GGUFCore
+import MLX
+import MinirunKit
+import XCTest
+@testable import ModelAdapters
+
+final class GGUFWeightSourceTests: XCTestCase {
+    private func withSource(_ body: (GGUFWeightSource) throws -> Void) throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        var header = Data("GGUF".utf8)
+        func put(_ value: UInt64, _ count: Int) {
+            for i in 0..<count { header.append(UInt8(truncatingIfNeeded: value >> (i * 8))) }
+        }
+        put(3, 4); put(3, 8); put(0, 8)
+        for (name, dimensions, offset) in [("experts", [UInt64(4), 5, 3], UInt64(0)),
+                                          ("embedding", [4, 3], 256), ("norm", [4], 320)] {
+            let bytes = Data(name.utf8); put(UInt64(bytes.count), 8); header.append(bytes)
+            put(UInt64(dimensions.count), 4)
+            for dimension in dimensions { put(dimension, 8) }
+            put(0, 4); put(offset, 8)
+        }
+        header.append(Data(repeating: 0, count: ((header.count + 31) / 32 * 32) - header.count))
+        var payload = Data(count: 336)
+        func store(_ value: Float, offset: Int) {
+            var bits = value.bitPattern.littleEndian
+            withUnsafeBytes(of: &bits) { payload.replaceSubrange(offset..<(offset + 4), with: $0) }
+        }
+        for i in 0..<60 { store(Float(i), offset: i * 4) }
+        for i in 0..<12 { store(Float(i + 1), offset: 256 + i * 4) }
+        for i in 0..<4 { store(Float(i + 1), offset: 320 + i * 4) }
+        header.append(payload)
+        let manifest = try GGUFModelManifest(fileName: "model.fixture", fileByteCount: UInt64(header.count),
+                                             sha256: FileDigestComputer.sha256(of: header))
+        try header.write(to: root.appendingPathComponent(manifest.fileName))
+        let artifact = try VerifiedGGUFArtifact.verify(insideRoot: root, manifest: manifest)
+        let source = try GGUFWeightSource(artifact: artifact, rawCacheBytes: 8192, tileBytes: 4096, noCache: false)
+        defer { source.shutdown() }
+        try body(source)
+    }
+
+    func testVerifiedExpertAndEmbeddingReadsShareBoundedCache() throws {
+        try withSource { source in
+            let x = MLXArray([Float(1), 2, 3, 4], [1, 4])
+            let first = try source.linear(x, tensor: "experts", expert: 2)
+            XCTAssertEqual(first.asArray(Float.self), [420, 460, 500, 540, 580])
+            XCTAssertEqual(source.readStatistics.bytesRead, 80)
+            let cached = try source.linear(x, tensor: "experts", expert: 2)
+            XCTAssertEqual(cached.asArray(Float.self), first.asArray(Float.self))
+            XCTAssertEqual(source.readStatistics.bytesRead, 80)
+            XCTAssertEqual(try source.row(1, tensor: "embedding").asArray(Float.self), [5, 6, 7, 8])
+            XCTAssertEqual(try source.smallTensor("norm").asArray(Float.self), [1, 2, 3, 4])
+            XCTAssertEqual(source.rawCacheBytes, 8192)
+            XCTAssertLessThanOrEqual(source.poolStatistics.peakInUseBytes, 8192)
+        }
+    }
+
+    func testMissingTensorBadExpertAndClosedSourceFailWithoutReads() throws {
+        try withSource { source in
+            let x = MLXArray([Float(1), 2, 3, 4], [1, 4])
+            XCTAssertThrowsError(try source.linear(x, tensor: "absent"))
+            XCTAssertThrowsError(try source.linear(x, tensor: "experts", expert: 3))
+            XCTAssertThrowsError(try source.row(3, tensor: "embedding"))
+            XCTAssertThrowsError(try source.row(0, tensor: "experts"))
+            XCTAssertEqual(source.readStatistics.bytesRead, 0)
+            source.shutdown()
+            XCTAssertThrowsError(try source.linear(x, tensor: "embedding"))
+            source.shutdown() // idempotent
+        }
+    }
+}

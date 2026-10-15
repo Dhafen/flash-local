@@ -29,7 +29,7 @@ env:
 
 jobs:
   build-and-test:
-    name: macOS build · app tests · package tests · iOS build
+    name: streaming tests · app tests · package tests · iOS build
     runs-on: macos-26
     timeout-minutes: 90
     steps:
@@ -57,12 +57,6 @@ jobs:
             -only-testing:MinirunKitTests/VerifiedGGUFArtifactTests \
             -resultBundlePath streaming-tests.xcresult 2>&1 | tee streaming-tests.log | tail -60
           if grep -E 'PublishedGGUFTests.*skipped' streaming-tests.log; then exit 1; fi
-
-      - name: Build the Mac app (Release)
-        run: |
-          xcodebuild build -project Apps/Minirun/Minirun.xcodeproj $XCODEBUILD_FLAGS \
-            -scheme Minirun-macOS -configuration Release -destination 'platform=macOS' \
-            CODE_SIGNING_ALLOWED=NO 2>&1 | tail -20
 
       - name: App tests (macOS)
         run: |

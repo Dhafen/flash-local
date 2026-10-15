@@ -65,7 +65,7 @@ let package = Package(
         ),
         .testTarget(
             name: "ModelAdaptersTests",
-            dependencies: ["ModelAdapters", "GGUFCore", "StorageCore"]
+            dependencies: ["ModelAdapters", "GGUFCore", "StorageCore", "MinirunKit"]
         ),
         .target(
             name: "MinirunRunners",
