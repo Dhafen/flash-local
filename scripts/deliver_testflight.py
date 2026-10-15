@@ -56,7 +56,13 @@ def private_target(api, app_id, group_id, allowed):
     target = None
     for group in groups:
         attrs = group['attributes']
-        if attrs.get('publicLinkEnabled') is not False or attrs.get('hasAccessToAllBuilds') is not False:
+        # Apple returns null for public-link fields on internal groups: those
+        # attributes apply only to external testing. Require an internal group
+        # and no URL before interpreting null as "not applicable".
+        links_disabled = attrs.get('publicLinkEnabled') is False or (
+            attrs.get('isInternalGroup') is True and attrs.get('publicLinkEnabled') is None
+            and attrs.get('publicLink') is None)
+        if not links_disabled or attrs.get('hasAccessToAllBuilds') is not False:
             raise ValueError('App has public or automatically distributed beta access')
         if group['id'] == group_id: target = group
     if target is None or target['attributes'].get('isInternalGroup') is not True:

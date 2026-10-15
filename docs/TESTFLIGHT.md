@@ -5,9 +5,10 @@ run `38740774972` at `eebae31`. The exported signature and App Store profile bot
 contained increased-memory-limit and extended-virtual-addressing. The unsigned
 app was about 28 MB; model weights were absent. No IPA was uploaded in that run.
 
-The upload path is implemented separately and remains unverified against a real
-new-app upload until the App Store Connect app record exists. Apple requires
-that record to be created on its website, not through the apps REST resource:
+The app record and an internal group containing only the verified account holder
+are configured. The upload path remains unverified against an actual upload.
+Apple requires the app record to be created on its website, not through the
+apps REST resource:
 https://developer.apple.com/documentation/appstoreconnectapi/apps
 
 ## Account setup
@@ -18,6 +19,12 @@ Create an iOS record for `com.dhafen.flashlocal`. Configure repository variables
 the intended own internal beta tester's resource ID. Do not add other testers
 or create a public link. Every beta group for this app must have public links
 and automatic access to all builds disabled.
+
+Apple returns null public-link fields for internal groups, where public links
+do not apply. The delivery guard accepts that only for a confirmed internal
+group with no public-link URL; external or ambiguous access still refuses.
+The internal tester is verified against the account holder for this app's
+group, rather than reusing a tester resource ID from a different app.
 
 Repository secrets are `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_PRIVATE_KEY_B64`,
 `IOS_DISTRIBUTION_P12_B64` and `IOS_DISTRIBUTION_P12_PASSWORD`. Values, profiles,

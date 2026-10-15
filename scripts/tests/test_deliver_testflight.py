@@ -62,6 +62,18 @@ class PrivateDeliveryTests(unittest.TestCase):
         api.group['attributes']['isInternalGroup'] = True
         with self.assertRaises(ValueError): delivery.private_target(api, 'app-one', 'group-one', [])
 
+    def test_null_public_link_is_inapplicable_only_for_internal_groups_without_a_url(self):
+        api = FakeApple()
+        api.group['attributes'].update(publicLinkEnabled=None, publicLink=None)
+        delivery.private_target(api, 'app-one', 'group-one', ['own-tester'])
+        api.group['attributes']['publicLink'] = 'https://testflight.apple.com/join/unexpected'
+        with self.assertRaises(ValueError): delivery.private_target(api, 'app-one', 'group-one', ['own-tester'])
+        api.group['attributes'].update(publicLink=None, isInternalGroup=False)
+        with self.assertRaises(ValueError): delivery.private_target(api, 'app-one', 'group-one', ['own-tester'])
+        api.group['attributes'].update(isInternalGroup=True, hasAccessToAllBuilds=None)
+        with self.assertRaises(ValueError): delivery.private_target(api, 'app-one', 'group-one', ['own-tester'])
+        self.assertEqual(api.posts, [])
+
     def test_processed_internal_build_is_attached_once_and_observed_in_testing(self):
         api = FakeApple()
         build = delivery.wait_valid(api, 'app-one', '42', '0.1.0', time.monotonic() + 1)
