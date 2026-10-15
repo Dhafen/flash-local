@@ -296,7 +296,7 @@ struct ConversationView: View {
 
     private func refusedCard(_ error: RunError) -> some View {
         NamedErrorCard(
-            headline: "Minirun refused this turn.",
+            headline: "Flash Local refused this turn.",
             message:
                 "Nothing was read. The configuration was refused before the run started, "
                 + "rather than adjusted until it fitted.",
@@ -385,7 +385,7 @@ struct ConversationView: View {
             banner(
                 tone: .refuse,
                 text:
-                    "Thermal state \(telemetry.thermalState.rawValue). Minirun is not "
+                    "Thermal state \(telemetry.thermalState.rawValue). Flash Local is not "
                     + "throttling the run — the device is.",
                 actionTitle: "Stop") { model.stopTurn() }
         }
@@ -844,7 +844,7 @@ enum ConversationErrorCopy {
         if lowercased.contains("cancelled") || lowercased.contains("stopped") {
             return "Generation stopped."
         }
-        return "Minirun could not complete this reply."
+        return "Flash Local could not complete this reply."
     }
 }
 

@@ -661,7 +661,7 @@ struct RunFault: Equatable, Sendable {
             return "The run completed; the budget did not hold. The number is written to "
                 + "history — reporting a breach honestly beats hiding it."
         case .thermal:
-            return "Minirun is not throttling the run — the device is. Reducing work here "
+            return "Flash Local is not throttling the run — the device is. Reducing work here "
                 + "would make the stated budget a lie about the run."
         case .runnerRefused:
             return "Nothing was read. The configuration was refused before the run started."

@@ -311,7 +311,7 @@ struct DownloadDetailPage: View {
             // SF Mono it read as a log line nobody reads.
             Text(
                 "The CDN's own ETag on the 200 or 206 is the Xet hash, a different number for "
-                    + "the same bytes. Minirun never reads it as a digest: doing so is the one "
+                    + "the same bytes. Flash Local never reads it as a digest: doing so is the one "
                     + "mistake here that produces a green check on wrong bytes."
             )
             .font(MRType.prose)
@@ -431,7 +431,7 @@ enum ForgetTransferConfirmation {
 
     static func message(destinationPath: String?) -> String {
         "Destination: \(destinationPath ?? "not recorded")\n\n"
-            + "This removes Minirun's record of the transfer. "
+            + "This removes Flash Local's record of the transfer. "
             + filesAreSafeSentence
     }
 }

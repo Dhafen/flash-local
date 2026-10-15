@@ -11,7 +11,7 @@ import Foundation
 /// The layout is deliberately boring and greppable:
 ///
 /// ```text
-/// ~/Library/Application Support/wang.wangdongdong.minirun/Conversations/<uuid>.json
+/// ~/Library/Application Support/com.dhafen.flashlocal/Conversations/<uuid>.json
 /// ```
 struct ConversationStore: Sendable {
 
@@ -63,7 +63,7 @@ struct ConversationStore: Sendable {
             for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil,
             create: true)
         let root = base
-            .appendingPathComponent(Bundle.main.bundleIdentifier ?? "wang.wangdongdong.minirun", isDirectory: true)
+            .appendingPathComponent(Bundle.main.bundleIdentifier ?? "com.dhafen.flashlocal", isDirectory: true)
             .appendingPathComponent("Conversations", isDirectory: true)
         return ConversationStore(directory: root, fileManager: fileManager)
     }

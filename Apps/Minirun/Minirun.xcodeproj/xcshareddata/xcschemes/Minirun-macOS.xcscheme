@@ -16,7 +16,7 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "843E1CB36F8B6EFA506A6820"
-               BuildableName = "Minirun-macOS.app"
+               BuildableName = "FlashLocal.app"
                BlueprintName = "Minirun-macOS"
                ReferencedContainer = "container:Minirun.xcodeproj">
             </BuildableReference>
@@ -33,7 +33,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "843E1CB36F8B6EFA506A6820"
-            BuildableName = "Minirun-macOS.app"
+            BuildableName = "FlashLocal.app"
             BlueprintName = "Minirun-macOS"
             ReferencedContainer = "container:Minirun.xcodeproj">
          </BuildableReference>
@@ -69,7 +69,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "843E1CB36F8B6EFA506A6820"
-            BuildableName = "Minirun-macOS.app"
+            BuildableName = "FlashLocal.app"
             BlueprintName = "Minirun-macOS"
             ReferencedContainer = "container:Minirun.xcodeproj">
          </BuildableReference>
@@ -88,7 +88,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "843E1CB36F8B6EFA506A6820"
-            BuildableName = "Minirun-macOS.app"
+            BuildableName = "FlashLocal.app"
             BlueprintName = "Minirun-macOS"
             ReferencedContainer = "container:Minirun.xcodeproj">
          </BuildableReference>

@@ -1723,7 +1723,7 @@ final class StorageLocationTests: XCTestCase {
             "Will be saved to /Volumes/K3NVME/DeepSeek-V4.1-Flash-minirun")
         XCTAssertEqual(
             layout.chooserMessage,
-            "Choose where to keep this model. Minirun creates a folder named "
+            "Choose where to keep this model. Flash Local creates a folder named "
                 + "DeepSeek-V4.1-Flash-minirun inside it.")
     }
 
@@ -1770,13 +1770,13 @@ final class StorageLocationTests: XCTestCase {
             encoding: .utf8)
 
         XCTAssertFalse(addSource.contains("Menu(\"Mounted drives\")"))
-        XCTAssertTrue(storageSource.contains("title: \"Folders Minirun can access\""))
+        XCTAssertTrue(storageSource.contains("title: \"Folders Flash Local can access\""))
         // Both are `MRPageSection` now — a hairline and a sentence-case
         // heading — rather than a `Panel` and an ALL-CAPS `SectionHeader`. The
         // separation the test is about is unchanged: grants above, hardware
         // below, and the sentence between them saying which is which.
         XCTAssertTrue(storageSource.contains("MRPageSection(title: \"Mounted drives\")"))
-        XCTAssertTrue(storageSource.contains("Minirun can read only the folders"))
+        XCTAssertTrue(storageSource.contains("Flash Local can read only the folders"))
         XCTAssertTrue(storageSource.contains("struct StorageRefreshButton"))
         XCTAssertTrue(storageSource.contains("Text(\"Rescan\")"))
         XCTAssertTrue(storageSource.contains("model.refreshVolumes()"))
@@ -1861,7 +1861,7 @@ final class StorageLocationTests: XCTestCase {
     func testGeneralAndAboutCopyDoNotLeakImplementationDetails() {
         XCTAssertEqual(
             ConversationStoragePresentation.folderDescription,
-            "Saved privately in Minirun's app data")
+            "Saved privately in Flash Local's app data")
         XCTAssertFalse(ConversationStoragePresentation.folderDescription.contains("/"))
         // The version used to be one composed line, "Version 1.2.3", and the
         // rule it carried was that a build number must never be smuggled into
@@ -1873,13 +1873,13 @@ final class StorageLocationTests: XCTestCase {
         XCTAssertNotEqual(AboutPresentation.versionLabel, AboutPresentation.buildLabel)
         XCTAssertEqual(AboutPresentation.linksTitle, "Links")
         XCTAssertEqual(AboutPresentation.websiteTitle, "Website")
-        XCTAssertEqual(AboutPresentation.websiteLabel, "minirun.dev")
+        XCTAssertEqual(AboutPresentation.websiteLabel, "GitHub")
         XCTAssertEqual(AboutPresentation.websiteURL.scheme, "https")
-        XCTAssertEqual(AboutPresentation.websiteURL.host, "minirun.dev")
-        XCTAssertEqual(AboutPresentation.privacyLabel, "minirun.dev/privacy")
-        XCTAssertEqual(AboutPresentation.privacyURL.path, "/privacy")
-        XCTAssertEqual(AboutPresentation.termsLabel, "minirun.dev/terms")
-        XCTAssertEqual(AboutPresentation.termsURL.path, "/terms")
+        XCTAssertEqual(AboutPresentation.websiteURL.host, "github.com")
+        XCTAssertEqual(AboutPresentation.privacyLabel, "Privacy policy")
+        XCTAssertEqual(AboutPresentation.privacyURL.path, "/Dhafen/flash-local/blob/main/PRIVACY.md")
+        XCTAssertEqual(AboutPresentation.termsLabel, "Apache-2.0")
+        XCTAssertEqual(AboutPresentation.termsURL.path, "/Dhafen/flash-local/blob/main/LICENSE")
         XCTAssertEqual(
             GeneralSettingsPresentation.subtitle,
             "Choose how new chats start and where conversations are kept.")

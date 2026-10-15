@@ -41,6 +41,9 @@ jobs:
           sudo xcode-select -s /Applications/Xcode_26.2.app
           xcodebuild -version
 
+      - name: Generate fork project with pinned XcodeGen
+        run: python3 scripts/generate_xcode_project.py
+
       - name: Resolve Swift packages
         run: xcodebuild -resolvePackageDependencies -project Apps/Minirun/Minirun.xcodeproj -scheme Minirun-macOS $XCODEBUILD_FLAGS
 
@@ -78,6 +81,15 @@ jobs:
             -scheme Minirun-macOS -destination 'platform=macOS' \
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee app-tests.log | tail -40
 
+      - name: macOS brand review in light and dark
+        run: |
+          xcodebuild test -project Apps/Minirun/Minirun.xcodeproj $XCODEBUILD_FLAGS \
+            -scheme Minirun-macOS -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO \
+            -only-testing:MinirunTests/ForkBrandRenderTests -resultBundlePath mac-brand.xcresult \
+            2>&1 | tee mac-brand.log | tail -50
+          grep -E 'ForkBrandRenderTests.*passed' mac-brand.log
+          xcrun xcresulttool export attachments --path mac-brand.xcresult --output-path brand-macos
+
       - name: Package tests (MinirunKit)
         run: |
           set -o pipefail
@@ -103,6 +115,7 @@ jobs:
             parity-tests.xcresult
             .work/reference-build.log
             .test-fixtures/llama-reference-logits.json
+            .test-fixtures/synthetic-qwen4exp.json
           if-no-files-found: ignore
           include-hidden-files: true
           retention-days: 14
@@ -112,3 +125,30 @@ jobs:
           xcodebuild build -project Apps/Minirun/Minirun.xcodeproj $XCODEBUILD_FLAGS \
             -scheme Minirun-iOS -destination 'generic/platform=iOS Simulator' \
             CODE_SIGNING_ALLOWED=NO 2>&1 | tail -20
+
+      - name: iOS brand review in light and dark
+        run: |
+          SIMULATOR=$(xcrun simctl list devices available --json | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(x["udid"] for v in d["devices"].values() for x in v if x["name"] == "iPhone 17 Pro Max" and x.get("isAvailable")))')
+          xcodebuild test -project Apps/Minirun/Minirun.xcodeproj $XCODEBUILD_FLAGS \
+            -scheme Minirun-iOS -destination "platform=iOS Simulator,id=$SIMULATOR" CODE_SIGNING_ALLOWED=NO \
+            -only-testing:MinirunIOSTests/ForkBrandRenderTests -resultBundlePath ios-brand.xcresult \
+            2>&1 | tee ios-brand.log | tail -60
+          grep -E 'ForkBrandRenderTests.*passed' ios-brand.log
+          xcrun xcresulttool export attachments --path ios-brand.xcresult --output-path brand-ios
+
+      - name: Upload generated project and visual reviews
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fork-project-and-visuals
+          path: |
+            Apps/Minirun/Minirun.xcodeproj/project.pbxproj
+            Apps/Minirun/Minirun.xcodeproj/xcshareddata/xcschemes/*.xcscheme
+            Apps/Minirun/Info-iOS.plist
+            Apps/Minirun/Info-macOS.plist
+            brand-macos/
+            brand-ios/
+            mac-brand.log
+            ios-brand.log
+          if-no-files-found: ignore
+          retention-days: 14

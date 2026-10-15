@@ -115,7 +115,7 @@ struct MemoryDialView: View {
 
     private var deviceTooSmall: some View {
         NamedErrorCard(
-            headline: "Minirun will not run \(entry.descriptor.displayName) here.",
+            headline: "Flash Local will not run \(entry.descriptor.displayName) here.",
             message:
                 "This device offers \(MRFormat.bytesDecimal(plan.deviceCeilingBytes)). "
                 + "\(entry.descriptor.displayName) needs "
@@ -395,7 +395,7 @@ struct MemoryDialView: View {
 
     private var readOnlyFooter: some View {
         Text(
-            "Stop the turn to restate the budget. Minirun does not change a budget mid-run."
+            "Stop the turn to restate the budget. Flash Local does not change a budget mid-run."
         )
         .font(MRType.caption)
         .foregroundStyle(MRColor.caution)

@@ -46,6 +46,10 @@ struct AboutPage: View {
             build
             links
             icons
+            Text(AboutPresentation.originNotice)
+                .font(.footnote)
+                .foregroundStyle(MRColor.secondary)
+                .padding(.top, MRSpace.s4)
         }
         .padding(pagePadding)
         .frame(maxWidth: 720, alignment: .leading)
@@ -66,6 +70,7 @@ struct AboutPage: View {
                 .renderingMode(.original)
                 .resizable()
                 .scaledToFit()
+                .accessibilityLabel("Flash Local")
                 .frame(width: 64, height: 64)
                 .clipShape(RoundedRectangle(cornerRadius: MRRadius.tile, style: .continuous))
         }
@@ -147,23 +152,24 @@ struct AboutPage: View {
 }
 
 enum AboutPresentation {
-    static let productName = "Minirun"
+    static let productName = "Flash Local"
+    static let originNotice = "Based on Minirun, copyright 2026 Dong Wang, under Apache-2.0. This independent fork is not an official Minirun release."
     static let purpose = "Run large models on this device, streaming their weights from disk."
     static let privacyNote =
-        "Conversations stay in Minirun's app data. Model files stay in folders you choose."
+        "Conversations and inference stay on this device. Model downloads contact Hugging Face."
     static let buildTitle = "This build"
     static let versionLabel = "Version"
     static let buildLabel = "Build"
     static let linksTitle = "Links"
     static let websiteTitle = "Website"
     static let privacyTitle = "Privacy Policy"
-    static let termsTitle = "Terms of Service"
-    static let websiteLabel = "minirun.dev"
-    static let websiteURL = URL(string: "https://minirun.dev")!
-    static let privacyLabel = "minirun.dev/privacy"
-    static let privacyURL = URL(string: "https://minirun.dev/privacy")!
-    static let termsLabel = "minirun.dev/terms"
-    static let termsURL = URL(string: "https://minirun.dev/terms")!
+    static let termsTitle = "Source license"
+    static let websiteLabel = "GitHub"
+    static let websiteURL = URL(string: "https://github.com/Dhafen/flash-local")!
+    static let privacyLabel = "Privacy policy"
+    static let privacyURL = URL(string: "https://github.com/Dhafen/flash-local/blob/main/PRIVACY.md")!
+    static let termsLabel = "Apache-2.0"
+    static let termsURL = URL(string: "https://github.com/Dhafen/flash-local/blob/main/LICENSE")!
 
     static let iconsTitle = "Icons"
     /// Verbatim in substance with `Assets.xcassets/LobeIconsNotice.dataset` and

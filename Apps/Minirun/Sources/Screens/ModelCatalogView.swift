@@ -178,14 +178,14 @@ struct ModelCatalogList: View {
             EmptyStateView(
                 systemImage: "folder.badge.plus",
                 headline: "No model folders added",
-                message: "Add a folder in Storage so Minirun can find local model containers.",
+                message: "Add a folder in Storage so Flash Local can find local model containers.",
                 actionTitle: "Open Storage",
                 action: { model.openSettings(.storage) })
                 .frame(minHeight: 360)
         #else
             VStack(alignment: .leading, spacing: MRSpace.s3) {
                 MRInlineNote(
-                    message: "Add a folder in Storage so Minirun can find local model "
+                    message: "Add a folder in Storage so Flash Local can find local model "
                         + "containers.",
                     title: "No model folders added",
                     tone: .idle,
@@ -209,7 +209,7 @@ struct ModelCatalogList: View {
                 .font(MRType.headline)
                 .foregroundStyle(MRColor.primary)
             Text(
-                "The added folders do not currently contain a recognized Minirun model. "
+                "The added folders do not currently contain a recognized local model. "
                     + "Use Find Models to browse published containers."
             )
             .font(MRType.prose)
@@ -228,7 +228,7 @@ struct FindModelsButton: View {
 
     var body: some View {
         Button("Find Models") { isPresented = true }
-            .help("Browse Minirun models published on Hugging Face")
+            .help("Browse compatible local models published on Hugging Face")
             .accessibilityLabel("find models")
             .sheet(isPresented: $isPresented) {
                 RemoteModelBrowserView()

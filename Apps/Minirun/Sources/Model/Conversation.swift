@@ -203,7 +203,7 @@ enum MessageFailure: String, Codable, Equatable, Sendable {
         case .informational:
             return "The run finished with a warning."
         case .unknown:
-            return "Minirun could not complete this reply."
+            return "Flash Local could not complete this reply."
         }
     }
 

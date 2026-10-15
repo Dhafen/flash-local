@@ -943,7 +943,7 @@ final class InstalledModels {
         verificationExpired = false
         // One sentence, shown on the row and held with the paused pass, because
         // two spellings of one state is one spelling too many.
-        let reason = "Paused where it stopped; open Minirun to continue from there."
+        let reason = "Paused where it stopped; open Flash Local to continue from there."
         pausedVerification = PausedVerification(
             artifact: artifact, request: request, reason: reason)
         verificationOutcome[artifact.rootPath] = reason

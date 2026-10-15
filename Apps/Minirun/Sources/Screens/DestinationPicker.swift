@@ -309,10 +309,10 @@ struct DestinationPicker: View {
     /// confirm is the parent, not the artifact.
     private var chooserMessage: String {
         guard let subfolderName else {
-            return "Choose where to keep this model. Minirun creates a folder for it inside "
+            return "Choose where to keep this model. Flash Local creates a folder for it inside "
                 + "the one you choose."
         }
-        return "Choose where to keep this model. Minirun creates a folder named "
+        return "Choose where to keep this model. Flash Local creates a folder named "
             + "\(subfolderName) inside it."
     }
 
@@ -426,7 +426,7 @@ struct DestinationPicker: View {
             } else if subfolderName == nil {
                 NamedErrorCard(
                     headline: "This model publishes no folder name.",
-                    message: "Minirun will not write a repository into a folder it cannot name.",
+                    message: "Flash Local will not write a repository into a folder it cannot name.",
                     namedError: "artifact folder: no canonical repository name",
                     tone: .refuse)
             }
@@ -465,7 +465,7 @@ struct DestinationPicker: View {
             case .unknown(let reason):
                 NamedErrorCard(
                     headline: "Available space could not be confirmed.",
-                    message: "Minirun will not start without a safe capacity decision.",
+                    message: "Flash Local will not start without a safe capacity decision.",
                     namedError: reason,
                     tone: .caution)
             }

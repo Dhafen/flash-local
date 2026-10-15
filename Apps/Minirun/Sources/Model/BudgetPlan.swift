@@ -257,7 +257,7 @@ struct ReadAheadRefusal: Equatable, Sendable {
     let requestedDepth: Int
 
     var message: String {
-        "Saved read-ahead depth \(requestedDepth) is unavailable. Minirun currently supports "
+        "Saved read-ahead depth \(requestedDepth) is unavailable. Flash Local currently supports "
             + "Auto (one layer) or Off. Choose Auto or Off before running."
     }
 
@@ -836,7 +836,7 @@ struct BudgetPlan: Equatable, Sendable {
         }
         switch preset {
         case .floor:
-            return "The minimum that runs. Below this Minirun refuses. Nothing is pinned: "
+            return "The minimum that runs. Below this Flash Local refuses. Nothing is pinned: "
                 + "every layer streams, every token."
         case .balanced, .generous:
             let candidate = with(budgetBytes: target)

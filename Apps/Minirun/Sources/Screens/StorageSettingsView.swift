@@ -140,7 +140,7 @@ struct StorageSettingsPage: View {
     /// The persistent folder grants discovery may scan. What a scan finds is a
     /// model fact and is intentionally rendered on Models, not repeated here.
     private var storageLocations: some View {
-        MRPageSection(title: "Folders Minirun can access", showsSeparator: false) {
+        MRPageSection(title: "Folders Flash Local can access", showsSeparator: false) {
             Text(StorageLocationsPresentation.explanation)
                 .font(MRType.prose)
                 .foregroundStyle(MRColor.tertiary)
@@ -189,7 +189,7 @@ struct StorageSettingsPage: View {
                 HStack(alignment: .top, spacing: MRSpace.s3) {
                     Image(
                         systemName: StorageFolderPresentation.systemImage(
-                            isInternal: isInternal(path),
+                            isInternal: key == .appLocalModels ? true : isInternal(path),
                             isMounted: scan?.isMounted ?? false)
                     )
                     .imageScale(.large)
@@ -197,7 +197,7 @@ struct StorageSettingsPage: View {
                     .frame(width: 24)
                     .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: MRSpace.s1) {
-                        Text(scan?.displayName ?? path ?? key.rawValue)
+                        Text(key == .appLocalModels ? "On My iPhone — Models" : (scan?.displayName ?? path ?? key.rawValue))
                             .font(MRType.prose.weight(.medium))
                             .foregroundStyle(MRColor.primary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -271,7 +271,7 @@ struct StorageSettingsPage: View {
                 // no second port to move the drive to.
                 if report == nil {
                     Text(
-                        "Drive assessment is available on Mac. On iPhone, Minirun reports "
+                        "Drive assessment is available on Mac. On iPhone, Flash Local reports "
                             + "capacity and access without claiming an unmeasured read rate."
                     )
                     .font(MRType.prose)
@@ -354,7 +354,7 @@ struct StorageSettingsPage: View {
     private var volumes: some View {
         MRPageSection(title: "Mounted drives") {
             Text(
-                "These drives are visible to the system. Minirun can read only the folders "
+                "These drives are visible to the system. Flash Local can read only the folders "
                     + "you add above."
             )
             .font(MRType.prose)
@@ -481,9 +481,15 @@ enum StorageFolderPresentation {
 }
 
 enum StorageLocationsPresentation {
+    #if os(iOS)
     static let explanation =
-        "Minirun scans only the folders you add here. A folder keeps its read access across "
-        + "a relaunch and a drive replug; remove it whenever Minirun should stop using it."
+        "Models are stored in this app's Models folder, visible in Files under On My iPhone. "
+        + "You can also add another local folder. Model files are excluded from backup."
+    #else
+    static let explanation =
+        "Flash Local scans only the folders you add here. A folder keeps its read access across "
+        + "a relaunch and a drive replug; remove it whenever Flash Local should stop using it."
+    #endif
 }
 
 struct StorageLocationRemovalRequest {

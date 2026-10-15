@@ -20,7 +20,7 @@ packages:
     exactVersion: 2.9.5
 
 options:
-  bundleIdPrefix: wang.wangdongdong
+  bundleIdPrefix: com.dhafen
   createIntermediateGroups: true
   generateEmptyDirectories: false
   deploymentTarget:
@@ -30,6 +30,7 @@ options:
 targets:
 
   Minirun-macOS:
+    productName: FlashLocal
     type: application
     platform: macOS
     sources:
@@ -39,7 +40,8 @@ targets:
     info:
       path: Info-macOS.plist
       properties:
-        CFBundleName: Minirun
+        CFBundleName: "Flash Local"
+        CFBundleDisplayName: "Flash Local"
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         NSHumanReadableCopyright: "Copyright © 2026 Dong Wang"
@@ -51,8 +53,8 @@ targets:
         # placeholder and therefore refuses to run the updater at all — see
         # `SoftwareUpdatePolicy` — so nothing here reaches the network until the
         # release owner pastes a real key in.
-        SUFeedURL: https://downloads.minirun.dev/appcast.xml
-        SUPublicEDKey: m4VqOWh+EnkcPXXo7vnY66/X4ltF4hls4RJKTX9feM8=
+        SUFeedURL: https://github.com/Dhafen/flash-local/releases.atom
+        SUPublicEDKey: FLASH_LOCAL_UPDATER_NOT_CONFIGURED
         # Required for a sandboxed app: Sparkle installs through the Installer
         # XPC service inside its own framework.
         SUEnableInstallerLauncherService: true
@@ -90,8 +92,8 @@ targets:
     settings:
       base:
         ARCHS: arm64
-        PRODUCT_BUNDLE_IDENTIFIER: wang.wangdongdong.minirun
-        PRODUCT_NAME: Minirun
+        PRODUCT_BUNDLE_IDENTIFIER: com.dhafen.flashlocal
+        PRODUCT_NAME: FlashLocal
         PRODUCT_MODULE_NAME: MinirunApp
         CODE_SIGN_STYLE: Automatic
         CODE_SIGN_ENTITLEMENTS: Minirun-macOS.entitlements
@@ -99,8 +101,8 @@ targets:
         SWIFT_VERSION: "5.0"
         MACOSX_DEPLOYMENT_TARGET: "15.0"
         ENABLE_HARDENED_RUNTIME: "YES"
-        CURRENT_PROJECT_VERSION: "2026091101"
-        MARKETING_VERSION: "0.5"
+        CURRENT_PROJECT_VERSION: "1"
+        MARKETING_VERSION: "0.1.0"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOLS: "NO"
 
@@ -114,15 +116,16 @@ targets:
     settings:
       base:
         ARCHS: arm64
-        PRODUCT_BUNDLE_IDENTIFIER: wang.wangdongdong.minirun.tests
+        PRODUCT_BUNDLE_IDENTIFIER: com.dhafen.flashlocal.tests
         CODE_SIGN_STYLE: Automatic
         GENERATE_INFOPLIST_FILE: "YES"
         SWIFT_VERSION: "5.0"
         MACOSX_DEPLOYMENT_TARGET: "15.0"
-        TEST_HOST: $(BUILT_PRODUCTS_DIR)/Minirun.app/Contents/MacOS/Minirun
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/FlashLocal.app/Contents/MacOS/FlashLocal
         BUNDLE_LOADER: $(TEST_HOST)
 
   Minirun-iOS:
+    productName: FlashLocal
     type: application
     platform: iOS
     sources:
@@ -132,7 +135,8 @@ targets:
     info:
       path: Info-iOS.plist
       properties:
-        CFBundleName: Minirun
+        CFBundleName: "Flash Local"
+        CFBundleDisplayName: "Flash Local"
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         UILaunchScreen: {}
@@ -165,8 +169,8 @@ targets:
     settings:
       base:
         ARCHS: arm64
-        PRODUCT_BUNDLE_IDENTIFIER: wang.wangdongdong.minirun
-        PRODUCT_NAME: Minirun
+        PRODUCT_BUNDLE_IDENTIFIER: com.dhafen.flashlocal
+        PRODUCT_NAME: FlashLocal
         PRODUCT_MODULE_NAME: MinirunApp
         CODE_SIGN_STYLE: Automatic
         CODE_SIGN_ENTITLEMENTS: Minirun-iOS.entitlements
@@ -178,8 +182,8 @@ targets:
         # four orientations or declare full-screen for App Store validation, and
         # nothing here has been run on an iPad. Widen this when it has.
         TARGETED_DEVICE_FAMILY: "1"
-        CURRENT_PROJECT_VERSION: "2026091101"
-        MARKETING_VERSION: "0.5"
+        CURRENT_PROJECT_VERSION: "1"
+        MARKETING_VERSION: "0.1.0"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOLS: "NO"
 
@@ -203,12 +207,12 @@ targets:
     settings:
       base:
         ARCHS: arm64
-        PRODUCT_BUNDLE_IDENTIFIER: wang.wangdongdong.minirun.ios-tests
+        PRODUCT_BUNDLE_IDENTIFIER: com.dhafen.flashlocal.ios-tests
         CODE_SIGN_STYLE: Automatic
         GENERATE_INFOPLIST_FILE: "YES"
         SWIFT_VERSION: "5.0"
         IPHONEOS_DEPLOYMENT_TARGET: "18.0"
-        TEST_HOST: $(BUILT_PRODUCTS_DIR)/Minirun.app/Minirun
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/FlashLocal.app/FlashLocal
         BUNDLE_LOADER: $(TEST_HOST)
 
 schemes:

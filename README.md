@@ -14,7 +14,7 @@ See [implementation and validation](docs/REAM-IMPLEMENTATION.md) and the [draft 
 
 ## Build
 
-The original internal schemes and module names are retained during development. Product rebranding and signing must be completed before distribution. Run the xcodebuild gates in [AGENTS.md](AGENTS.md) and [the implementation notes](docs/REAM-IMPLEMENTATION.md). Xcode/macOS is required; a Windows host can drive the hosted build.
+The app uses the Flash Local identity and its own bundle identifier. Original internal schemes and module names are retained. Signing and TestFlight distribution remain pending. Run the xcodebuild gates in [AGENTS.md](AGENTS.md) and [the implementation notes](docs/REAM-IMPLEMENTATION.md). Xcode/macOS is required; a Windows host can drive the hosted build.
 
 ## License and origin
 

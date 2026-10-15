@@ -206,7 +206,7 @@
 		2BB1F5994A3E1F690A831B57 /* InstalledModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstalledModels.swift; sourceTree = "<group>"; };
 		307968BBED41DE917D47936C /* DeepSeekV41PreparationMemoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeepSeekV41PreparationMemoryTests.swift; sourceTree = "<group>"; };
 		34012DB1B47A8BA43CDF840A /* BudgetPlanTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BudgetPlanTests.swift; sourceTree = "<group>"; };
-		34C3142300667C3D461599E3 /* Minirun-iOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = "Minirun-iOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		34C3142300667C3D461599E3 /* FlashLocal.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = "FlashLocal.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		38E30B7578E4871024BE0168 /* DeepSeekV4ProductRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeepSeekV4ProductRuntime.swift; sourceTree = "<group>"; };
 		40CD85A0EA5D6BF84A9CD902 /* PreviewTokenizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewTokenizer.swift; sourceTree = "<group>"; };
 		448526E15DEF07D45E52731C /* StorageLocationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageLocationTests.swift; sourceTree = "<group>"; };
@@ -261,7 +261,7 @@
 		EB2D2CE1AA18A176403302A4 /* DownloadDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadDetailView.swift; sourceTree = "<group>"; };
 		EDD386F255C7724A1E7C6F7D /* VerificationAnnouncements.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VerificationAnnouncements.swift; sourceTree = "<group>"; };
 		F2B06BE2189BEE49CE15A4B9 /* ConversationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationStore.swift; sourceTree = "<group>"; };
-		F588B1426C240EE083A2F400 /* Minirun-macOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Minirun-macOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		F588B1426C240EE083A2F400 /* FlashLocal.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "FlashLocal.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		F6534E68BABDC703360D074B /* ModelDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelDetailView.swift; sourceTree = "<group>"; };
 		FA6160603DA0660B9C83DEFA /* VerificationBackgroundTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VerificationBackgroundTests.swift; sourceTree = "<group>"; };
 		FB453987F156E3F9B87A3A0B /* ProductPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductPage.swift; sourceTree = "<group>"; };
@@ -312,8 +312,8 @@
 		2389A93F0168CBDAF8EA32EA /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				34C3142300667C3D461599E3 /* Minirun-iOS.app */,
-				F588B1426C240EE083A2F400 /* Minirun-macOS.app */,
+				34C3142300667C3D461599E3 /* FlashLocal.app */,
+				F588B1426C240EE083A2F400 /* FlashLocal.app */,
 				E8C9BE0C23B5659FB7FC2C12 /* MinirunIOSTests.xctest */,
 				5512A8E1E6DB1B3048A98A49 /* MinirunTests.xctest */,
 			);
@@ -516,7 +516,7 @@
 				C33BAC42C1787E371234F056 /* Sparkle */,
 			);
 			productName = "Minirun-macOS";
-			productReference = F588B1426C240EE083A2F400 /* Minirun-macOS.app */;
+			productReference = F588B1426C240EE083A2F400 /* FlashLocal.app */;
 			productType = "com.apple.product-type.application";
 		};
 		93D7A21823C08AA5A9AA7CA8 /* MinirunIOSTests */ = {
@@ -563,7 +563,7 @@
 				5DD26BAFF02D3AA926FC3719 /* StorageCore */,
 			);
 			productName = "Minirun-iOS";
-			productReference = 34C3142300667C3D461599E3 /* Minirun-iOS.app */;
+			productReference = 34C3142300667C3D461599E3 /* FlashLocal.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -834,7 +834,7 @@
 				CODE_SIGN_ENTITLEMENTS = "Minirun-iOS.entitlements";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2026091101;
+				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "Info-iOS.plist";
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
@@ -842,10 +842,10 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.5;
-				PRODUCT_BUNDLE_IDENTIFIER = wang.wangdongdong.minirun;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.dhafen.flashlocal;
 				PRODUCT_MODULE_NAME = MinirunApp;
-				PRODUCT_NAME = Minirun;
+				PRODUCT_NAME = FlashLocal;
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
@@ -928,11 +928,11 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = "wang.wangdongdong.minirun.ios-tests";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.dhafen.flashlocal.ios-tests";
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Minirun.app/Minirun";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/FlashLocal.app/FlashLocal";
 			};
 			name = Debug;
 		};
@@ -945,7 +945,7 @@
 				CODE_SIGN_ENTITLEMENTS = "Minirun-macOS.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 2026091101;
+				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "Info-macOS.plist";
@@ -954,10 +954,10 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 0.5;
-				PRODUCT_BUNDLE_IDENTIFIER = wang.wangdongdong.minirun;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.dhafen.flashlocal;
 				PRODUCT_MODULE_NAME = MinirunApp;
-				PRODUCT_NAME = Minirun;
+				PRODUCT_NAME = FlashLocal;
 				SDKROOT = macosx;
 				SWIFT_VERSION = 5.0;
 			};
@@ -972,7 +972,7 @@
 				CODE_SIGN_ENTITLEMENTS = "Minirun-iOS.entitlements";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2026091101;
+				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "Info-iOS.plist";
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
@@ -980,10 +980,10 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.5;
-				PRODUCT_BUNDLE_IDENTIFIER = wang.wangdongdong.minirun;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.dhafen.flashlocal;
 				PRODUCT_MODULE_NAME = MinirunApp;
-				PRODUCT_NAME = Minirun;
+				PRODUCT_NAME = FlashLocal;
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
@@ -1004,10 +1004,10 @@
 					"@loader_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				PRODUCT_BUNDLE_IDENTIFIER = wang.wangdongdong.minirun.tests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.dhafen.flashlocal.tests;
 				SDKROOT = macosx;
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Minirun.app/Contents/MacOS/Minirun";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/FlashLocal.app/Contents/MacOS/FlashLocal";
 			};
 			name = Debug;
 		};
@@ -1076,7 +1076,7 @@
 				CODE_SIGN_ENTITLEMENTS = "Minirun-macOS.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 2026091101;
+				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "Info-macOS.plist";
@@ -1085,10 +1085,10 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 0.5;
-				PRODUCT_BUNDLE_IDENTIFIER = wang.wangdongdong.minirun;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.dhafen.flashlocal;
 				PRODUCT_MODULE_NAME = MinirunApp;
-				PRODUCT_NAME = Minirun;
+				PRODUCT_NAME = FlashLocal;
 				SDKROOT = macosx;
 				SWIFT_VERSION = 5.0;
 			};
@@ -1108,10 +1108,10 @@
 					"@loader_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				PRODUCT_BUNDLE_IDENTIFIER = wang.wangdongdong.minirun.tests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.dhafen.flashlocal.tests;
 				SDKROOT = macosx;
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Minirun.app/Contents/MacOS/Minirun";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/FlashLocal.app/Contents/MacOS/FlashLocal";
 			};
 			name = Release;
 		};
@@ -1128,11 +1128,11 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = "wang.wangdongdong.minirun.ios-tests";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.dhafen.flashlocal.ios-tests";
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Minirun.app/Minirun";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/FlashLocal.app/FlashLocal";
 			};
 			name = Release;
 		};

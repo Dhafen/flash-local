@@ -151,7 +151,7 @@ final class RunTraceRecorder: @unchecked Sendable {
     /// fallback is spelled out rather than force-unwrapped into a crash nobody
     /// can reproduce — the identifier a pull off the device names:
     /// `devicectl device copy from --domain-type appDataContainer
-    /// --domain-identifier wang.wangdongdong.minirun`.
+    /// --domain-identifier com.dhafen.flashlocal`.
     static func applicationSupportDirectory(
         fileManager: FileManager = .default
     ) throws -> URL {
@@ -160,7 +160,7 @@ final class RunTraceRecorder: @unchecked Sendable {
             create: true)
         return base
             .appendingPathComponent(
-                Bundle.main.bundleIdentifier ?? "wang.wangdongdong.minirun",
+                Bundle.main.bundleIdentifier ?? "com.dhafen.flashlocal",
                 isDirectory: true)
             .appendingPathComponent("RunTraces", isDirectory: true)
     }
@@ -467,7 +467,7 @@ final class RunTraceRecorder: @unchecked Sendable {
     /// recorder and a chat has one run, so this is a queue with one client;
     /// it is `static` so the queue does not outlive its source by accident.
     private static let heartbeatQueue = DispatchQueue(
-        label: "wang.wangdongdong.minirun.run-trace-heartbeat", qos: .utility)
+        label: "com.dhafen.flashlocal.run-trace-heartbeat", qos: .utility)
 
     // MARK: Reading a phase detail
 

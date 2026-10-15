@@ -142,7 +142,7 @@ final class IOSProductPresentationTests: XCTestCase {
         XCTAssertEqual(AboutPresentation.linksTitle, "Links")
         XCTAssertEqual(AboutPresentation.websiteTitle, "Website")
         XCTAssertEqual(AboutPresentation.privacyTitle, "Privacy Policy")
-        XCTAssertEqual(AboutPresentation.termsTitle, "Terms of Service")
+        XCTAssertEqual(AboutPresentation.termsTitle, "Source license")
         XCTAssertEqual(AboutPresentation.buildTitle, "This build")
         XCTAssertTrue(source.contains("MRPageSection(title: AboutPresentation.linksTitle)"))
         XCTAssertTrue(source.contains("linkFact("))

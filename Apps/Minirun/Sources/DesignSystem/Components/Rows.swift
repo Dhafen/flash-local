@@ -455,7 +455,7 @@ struct VolumeRow: View {
         }
         guard let dependable = volume.space.dependableBytes else {
             return .unknown(
-                reason: "this volume reported no available capacity; Minirun will not treat an "
+                reason: "this volume reported no available capacity; Flash Local will not treat an "
                     + "unprobed volume as an empty one")
         }
         guard dependable >= 0 else {
