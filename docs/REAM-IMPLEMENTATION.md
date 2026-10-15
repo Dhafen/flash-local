@@ -128,8 +128,21 @@ approved plan. `Sources/CLlamaTokenizer` is the C ABI for that path: it loads
 payload, delegates tokenization, token pieces and EOG to llama.cpp, and runs the
 unchanged Jinja engine for typed no-thinking text chat. The reference harness
 also checks the bridge's buffers, token/byte equality, EOG IDs, descriptor
-ownership and invalid requests. Apple XCFramework/Swift product integration is
-still pending; the experimental Swift probe is not registered as a runner.
+ownership and invalid requests. `build_tokenizer_xcframework.py` builds arm64
+Mac/device/Simulator slices from the same source pin before Swift package
+resolution. `CanonicalQwen35Tokenizer` binds the C API to verified GGUF
+capabilities; its tests compare all public strings/conversations and reject
+file mutation after vocabulary loading. The experimental Swift probe is not
+registered as a runner. These additions remain under CI validation.
+
+`Qwen4ExpTextGeneration` connects canonical text prompts to the streamed
+decoder, with deterministic greedy sampling, EOG handling, byte-correct UTF-8
+streaming, cancellation, explicit context/output limits and I/O/physical-memory
+telemetry. It distinguishes sampled run footprint from process-lifetime peak.
+A separate 237 KB random-weight fixture adds a tiny byte vocabulary to the full
+test graph; the CPU reference and Swift engine must produce identical prompt
+and generated IDs, then repeat after cancellation. This is not trained-model
+quality or iPhone performance evidence. Product UI integration remains pending.
 
 ## Important artifact discrepancy
 

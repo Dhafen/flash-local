@@ -79,10 +79,12 @@ jobs:
             -only-testing:ModelAdaptersTests/Qwen4ExpDecoderParityTests \
             -only-testing:ModelAdaptersTests/PublishedQwen35TokenizerParityTests \
             -only-testing:ModelAdaptersTests/CanonicalQwen35TokenizerParityTests \
+            -only-testing:MinirunRunnersTests/Qwen4ExpTextGenerationParityTests \
             -resultBundlePath parity-tests.xcresult 2>&1 | tee parity-tests.log | tail -80
           if grep -E 'Qwen4ExpDecoderParityTests.*skipped' parity-tests.log; then exit 1; fi
           if grep -E 'PublishedQwen35TokenizerParityTests.*skipped' parity-tests.log; then exit 1; fi
           if grep -E 'CanonicalQwen35TokenizerParityTests.*skipped' parity-tests.log; then exit 1; fi
+          if grep -E 'Qwen4ExpTextGenerationParityTests.*skipped' parity-tests.log; then exit 1; fi
 
       - name: App tests (macOS)
         run: |
@@ -109,7 +111,7 @@ jobs:
       - name: Failing tests, if any
         if: failure()
         run: |
-          grep -hE "error: -\[|' failed \(|Executed [0-9]+ tests" app-tests.log package-tests.log 2>/dev/null | sed 's/^.*Test Case/Test Case/' | sort -u | head -80 || true
+          grep -hE "error:|failed: caught error|' failed \(|Executed [0-9]+ tests" streaming-tests.log parity-tests.log app-tests.log package-tests.log mac-brand.log 2>/dev/null | sed 's/^.*Test Case/Test Case/' | sort -u | head -80 || true
 
       - name: Upload test logs
         if: always()
@@ -130,6 +132,8 @@ jobs:
             .test-fixtures/synthetic-qwen4exp.json
             .test-fixtures/qwen35-tokenizer-reference.json
             .test-fixtures/qwen35-tokenizer-corpus.json
+            .test-fixtures/synthetic-qwen4exp-chat.json
+            .test-fixtures/qwen4exp-session-reference.json
           if-no-files-found: ignore
           include-hidden-files: true
           retention-days: 14
@@ -138,7 +142,7 @@ jobs:
         run: |
           xcodebuild build -project Apps/Minirun/Minirun.xcodeproj $XCODEBUILD_FLAGS \
             -scheme Minirun-iOS -destination 'generic/platform=iOS Simulator' \
-            CODE_SIGNING_ALLOWED=NO 2>&1 | tail -20
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee ios-build.log | tail -30
 
       - name: iOS brand review in light and dark
         run: |
@@ -164,5 +168,27 @@ jobs:
             brand-ios/
             mac-brand.log
             ios-brand.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload compact text diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-text-logs
+          path: |
+            streaming-tests.log
+            parity-tests.log
+            app-tests.log
+            package-tests.log
+            mac-brand.log
+            ios-brand.log
+            ios-build.log
+            .work/reference-build.log
+            .work/tokenizer-build.log
+            .work/runtime/build-manifest.json
+            .test-fixtures/*reference*.json
+            .test-fixtures/synthetic-qwen4exp*.json
+          include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 14

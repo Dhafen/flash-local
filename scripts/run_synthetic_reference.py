@@ -23,7 +23,7 @@ def main():
             run(["cmake", "-S", root / "Tests/ReferenceHarness", "-B", build,
                  f"-DLLAMA_SOURCE={source}", "-DCMAKE_BUILD_TYPE=Release"])
             run(["cmake", "--build", build, "--target", "flash-local-reference",
-                 "flash-local-tokenizer-reference", "--parallel", "3"])
+                 "flash-local-tokenizer-reference", "flash-local-session-reference", "--parallel", "3"])
             model = root / ".test-fixtures/synthetic-qwen4exp.gguf"
             if not model.is_file() or model.stat().st_size > 1_000_000:
                 raise RuntimeError("Only the tiny synthetic fixture may run in this harness")
@@ -34,6 +34,13 @@ def main():
                  root / ".test-fixtures/qwen35-tokenizer-corpus.bin",
                  root / ".test-fixtures/qwen35-tokenizer-reference.json",
                  root / ".test-fixtures/qwen35-tokenizer-corpus.json"])
+            run(["python3", root / "scripts/make_qwen4exp_test_model.py", "--chat"])
+            chat = root / ".test-fixtures/synthetic-qwen4exp-chat.gguf"
+            if not chat.is_file() or chat.stat().st_size > 1_000_000:
+                raise RuntimeError("Only the tiny random-weight chat fixture may run")
+            run([build / "flash-local-session-reference", chat,
+                 root / ".test-fixtures/synthetic-qwen4exp-chat.json",
+                 root / ".test-fixtures/qwen4exp-session-reference.json"])
         except Exception:
             output.flush()
             print(log.read_text(encoding="utf-8", errors="replace")[-18000:])

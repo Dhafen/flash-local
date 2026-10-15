@@ -76,6 +76,7 @@ let package = Package(
             name: "MinirunRunners",
             dependencies: [
                 "MinirunKit",
+                "GGUFCore",
                 "BenchScenarios",
                 "ModelAdapters",
                 "StorageCore",
@@ -84,7 +85,7 @@ let package = Package(
         ),
         .testTarget(
             name: "MinirunRunnersTests",
-            dependencies: ["MinirunRunners", "ModelAdapters", "StorageCore"]
+            dependencies: ["MinirunRunners", "ModelAdapters", "StorageCore", "MinirunKit"]
         ),
         .plugin(name: "EmbedGitRevision", capability: .buildTool()),
     ]

@@ -12,10 +12,8 @@ import struct
 from fetch_ream_metadata import HEADER_SHA256
 
 
-def main():
-    root = pathlib.Path(__file__).resolve().parents[1]
-    folder = root / ".test-fixtures"
-    header = (folder / "ream.header").read_bytes()
+def metadata_prefix(header):
+    """Return exact KV boundary and chat template without retaining vocab arrays."""
     if hashlib.sha256(header).hexdigest() != HEADER_SHA256:
         raise RuntimeError("Tokenizer source header hash mismatch")
     position = 24
@@ -26,12 +24,14 @@ def main():
         position += struct.calcsize("<" + fmt)
         return value
 
-    def string():
+    def string(retain=False):
         nonlocal position
         count = integer("Q")
         if count > 2 << 20 or position + count > len(header):
             raise RuntimeError("Invalid bounded string")
+        start = position
         position += count
+        return header[start:position].decode("utf-8") if retain else None
 
     def skip(kind):
         if kind == 8:
@@ -47,9 +47,23 @@ def main():
                      6: "f", 7: "B", 10: "Q", 11: "q", 12: "d"}[kind])
 
     metadata_count = struct.unpack_from("<Q", header, 16)[0]
+    template = None
     for _ in range(metadata_count):
-        string()
-        skip(integer("I"))
+        key, kind = string(True), integer("I")
+        if key == "tokenizer.chat_template":
+            if kind != 8:
+                raise RuntimeError("Chat template is not a string")
+            template = string(True)
+        else:
+            skip(kind)
+    return position, template
+
+
+def main():
+    root = pathlib.Path(__file__).resolve().parents[1]
+    folder = root / ".test-fixtures"
+    header = (folder / "ream.header").read_bytes()
+    position, _ = metadata_prefix(header)
     # A legal metadata-only GGUF: all original KV bytes, zero tensors.
     vocabulary = header[:8] + struct.pack("<Q", 0) + header[16:position]
     vocabulary += bytes((-len(vocabulary)) % 32)

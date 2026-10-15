@@ -35,3 +35,6 @@ target_link_libraries(flash-local-tokenizer-runtime PUBLIC llama)
 target_link_libraries(flash-local-tokenizer-reference PRIVATE flash-local-tokenizer-runtime)
 target_include_directories(flash-local-tokenizer-reference PRIVATE
   "${LLAMA_SOURCE}/common" "${LLAMA_SOURCE}/src" "${LLAMA_SOURCE}/vendor")
+add_executable(flash-local-session-reference session.cpp)
+target_include_directories(flash-local-session-reference PRIVATE "${LLAMA_SOURCE}/common")
+target_link_libraries(flash-local-session-reference PRIVATE flash-local-tokenizer-runtime)

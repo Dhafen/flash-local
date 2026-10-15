@@ -18,7 +18,7 @@ def prepare(root: pathlib.Path, run):
         run(["git", "-C", source, "diff", "--exit-code"])
         run(["git", "-C", source, "diff", "--cached", "--exit-code"])
     unknown = subprocess.check_output(
-        ["git", "-C", str(source), "ls-files", "--others", "--exclude-standard"], text=True)
+        ["git", "-C", str(source), "ls-files", "--others"], text=True)
     if unknown.strip():
         raise RuntimeError("Untracked files could alter the pinned source build")
     run(["git", "-C", source, "sparse-checkout", "set", "src", "include", "ggml", "cmake", "vendor", "common"])

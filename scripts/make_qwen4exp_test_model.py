@@ -10,14 +10,36 @@ import math
 import pathlib
 import random
 import struct
+import argparse
 
 
-def main():
+def main(chat=False):
     rng = random.Random(20261015)
     meta = {"general.architecture": (8, "qwen4exp"), "general.name": (8, "synthetic-graph-test"),
             "tokenizer.ggml.model": (8, "none")}
+    vocabulary_size = 262 if chat else 16
+    if chat:
+        from make_tokenizer_reference_fixture import metadata_prefix
+        root = pathlib.Path(__file__).resolve().parents[1]
+        _, template = metadata_prefix((root / ".test-fixtures/ream.header").read_bytes())
+        if not template:
+            raise RuntimeError("Pinned chat template missing")
+        direct = set(range(33, 127)) | set(range(161, 173)) | set(range(174, 256))
+        extra, alphabet = 256, []
+        for byte in range(256):
+            alphabet.append(chr(byte if byte in direct else extra))
+            if byte not in direct: extra += 1
+        meta.update({
+            "tokenizer.ggml.model": (8, "gpt2"), "tokenizer.ggml.pre": (8, "qwen35"),
+            "tokenizer.ggml.tokens": (9, (8, alphabet + ["<|im_start|>", "<|im_end|>", "<|endoftext|>", "<think>", "</think>", "ab"])),
+            "tokenizer.ggml.token_type": (9, (4, [1] * 256 + [3, 3, 3, 4, 4, 1])),
+            "tokenizer.ggml.merges": (9, (8, ["a b"])),
+            "tokenizer.ggml.bos_token_id": (4, 258), "tokenizer.ggml.eos_token_id": (4, 257),
+            "tokenizer.ggml.add_bos_token": (7, False), "tokenizer.ggml.add_eos_token": (7, False),
+            "tokenizer.chat_template": (8, template),
+        })
     integers = {
-        "block_count": 4, "embedding_length": 16, "vocab_size": 16, "context_length": 4096,
+        "block_count": 4, "embedding_length": 16, "vocab_size": vocabulary_size, "context_length": 4096,
         "feed_forward_length": 8, "attention.head_count": 2, "attention.head_count_kv": 1,
         "attention.key_length": 8, "attention.value_length": 8, "rope.dimension_count": 2,
         "expert_count": 3, "expert_used_count": 2, "expert_feed_forward_length": 8,
@@ -50,8 +72,8 @@ def main():
         tensor(prefix + "up.weight", [4, 32])
         if injection: tensor(prefix + "inject.weight", [32, 2])
 
-    tensor("token_embd.weight", [16, 16])
-    tensor("output.weight", [16, 16])
+    tensor("token_embd.weight", [16, vocabulary_size])
+    tensor("output.weight", [16, vocabulary_size])
     tensor("per_layer_token_embd.weight", [8, 10])
     hc("output_hc_", False)
     for layer in range(4):
@@ -90,7 +112,7 @@ def main():
         if kind == 9:
             element, entries = item
             return struct.pack("<IQ", element, len(entries)) + b"".join(value(element, e) for e in entries)
-        return struct.pack({4: "<I", 6: "<f", 10: "<Q"}[kind], item)
+        return struct.pack({4: "<I", 6: "<f", 7: "<?", 10: "<Q"}[kind], item)
 
     header = bytearray(struct.pack("<4sIQQ", b"GGUF", 3, len(tensors), len(meta)))
     for key, (kind, item) in meta.items(): header += text(key) + struct.pack("<I", kind) + value(kind, item)
@@ -105,12 +127,17 @@ def main():
     model = bytes(header + payload)
     folder = pathlib.Path(__file__).resolve().parents[1] / ".test-fixtures"
     folder.mkdir(exist_ok=True)
-    (folder / "synthetic-qwen4exp.gguf").write_bytes(model)
-    manifest = dict(fileName="synthetic-qwen4exp.gguf", fileByteCount=len(model),
-                    sha256=hashlib.sha256(model).hexdigest(), tokens=[1, 2, 3, 15, 4], contextTokens=32)
-    (folder / "synthetic-qwen4exp.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    stem = "synthetic-qwen4exp-chat" if chat else "synthetic-qwen4exp"
+    (folder / (stem + ".gguf")).write_bytes(model)
+    manifest = dict(fileName=stem + ".gguf", fileByteCount=len(model),
+                    sha256=hashlib.sha256(model).hexdigest(), tokens=[1, 2, 3, 15, 4], contextTokens=128 if chat else 32)
+    if chat:
+        manifest.update(messages=[{"role": "user", "content": "Hi"}], maximumNewTokens=8)
+    (folder / (stem + ".json")).write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     print(f"Generated {len(tensors)} random synthetic tensors, {len(model)} bytes; no trained weights")
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--chat", action="store_true", help="Add tiny byte vocabulary and pinned chat template")
+    main(chat=parser.parse_args().chat)
