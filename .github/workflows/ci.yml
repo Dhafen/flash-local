@@ -63,6 +63,7 @@ jobs:
             -only-testing:MinirunRunnersTests/Qwen4ExpGenerationPrimitivesTests \
             -only-testing:MinirunKitTests/LocalModelStorageTests \
             -only-testing:MinirunKitTests/VerifiedGGUFArtifactTests \
+            -only-testing:MinirunKitTests/GGUFModelTransferTests \
             -skip-testing:ModelAdaptersTests/Qwen4ExpDecoderParityTests \
             -skip-testing:ModelAdaptersTests/PublishedQwen35TokenizerParityTests \
             -skip-testing:ModelAdaptersTests/CanonicalQwen35TokenizerParityTests \
