@@ -9,6 +9,7 @@ let package = Package(
     ],
     products: [
         .library(name: "StorageCore", targets: ["StorageCore"]),
+        .library(name: "GGUFCore", targets: ["GGUFCore"]),
         .library(name: "MLXBridge", targets: ["MLXBridge"]),
         .library(name: "ModelAdapters", targets: ["ModelAdapters"]),
         .library(name: "iOSBench", targets: ["iOSBench"]),
@@ -22,6 +23,8 @@ let package = Package(
     targets: [
         .target(name: "StorageCore", plugins: ["EmbedGitRevision"]),
         .testTarget(name: "StorageCoreTests", dependencies: ["StorageCore"]),
+        .target(name: "GGUFCore", dependencies: ["StorageCore"]),
+        .testTarget(name: "GGUFCoreTests", dependencies: ["GGUFCore", "StorageCore"]),
         .target(
             name: "MLXBridge",
             dependencies: [
@@ -46,12 +49,16 @@ let package = Package(
         ),
         .target(
             name: "ModelAdapters",
-            dependencies: ["MLXBridge", "MinirunKit", "StorageCore"]
+            dependencies: ["MLXBridge", "MinirunKit", "StorageCore", "GGUFCore"]
         ),
         .target(
             name: "BenchScenarios",
             dependencies: ["ModelAdapters", "iOSBench", "StorageCore"],
             resources: [.copy("Resources/k3-flagship-config.json")]
+        ),
+        .testTarget(
+            name: "ModelAdaptersTests",
+            dependencies: ["ModelAdapters", "GGUFCore", "StorageCore"]
         ),
         .target(
             name: "MinirunRunners",

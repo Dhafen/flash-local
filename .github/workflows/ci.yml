@@ -35,15 +35,21 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Select the newest Xcode 26
+      - name: Select pinned Xcode 26.2
         run: |
-          XCODE=$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)
-          echo "Using $XCODE"
-          sudo xcode-select -s "$XCODE"
+          test "$(uname -m)" = arm64
+          sudo xcode-select -s /Applications/Xcode_26.2.app
           xcodebuild -version
 
       - name: Resolve Swift packages
         run: xcodebuild -resolvePackageDependencies -project Apps/Minirun/Minirun.xcodeproj -scheme Minirun-macOS $XCODEBUILD_FLAGS
+
+      - name: GGUF parser, state and storage correctness
+        run: |
+          xcodebuild test -scheme minirun-Package $XCODEBUILD_FLAGS -destination 'platform=macOS' \
+            -only-testing:GGUFCoreTests -only-testing:ModelAdaptersTests \
+            -only-testing:StorageCoreTests -only-testing:iOSBenchTests \
+            -resultBundlePath streaming-tests.xcresult 2>&1 | tee streaming-tests.log | tail -60
 
       - name: Build the Mac app (Release)
         run: |
@@ -77,6 +83,8 @@ jobs:
           path: |
             app-tests.log
             package-tests.log
+            streaming-tests.log
+            streaming-tests.xcresult
           if-no-files-found: ignore
           retention-days: 14
 
