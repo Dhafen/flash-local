@@ -68,12 +68,12 @@ uses the pinned `ggml_quantize_chunk` for Q4_K/Q5_0/Q6_K routed experts,
 Q8_0 embeddings/shared projection, Q4_0 PLE, F16 HC, BF16 routers and retained
 F32 operators. It requires all eight encodings in one file. A full five-position
 CPU/streamed-MLX logit comparison uses the existing absolute 0.01 and relative
-L2 0.001 limits; this newly added gate still requires a successful hosted run.
+L2 0.001 limits; the corrected graph passed at `8ad2057` and `5b602d2`.
 It does not establish trained-model numerical agreement or phone performance.
 Run `38775973672` at `6c07d1a` reached all five mixed-graph positions but failed
 the unchanged relative-L2 limit: 0.00374–0.00831 against 0.001 (maximum absolute
 error 0.00120). The FP32 graph passed. The activation-rounding change above is
-the resulting implementation fix and still requires a successful hosted run;
+the resulting implementation fix, subsequently validated with the attention fix;
 these pre-fix measurements are not presented as successful mixed inference.
 Run `38779671123` at `80ce2a8` passed the focused operand-rounding tests. The
 mixed graph's first position improved to relative L2 1.08e-7, but position one
@@ -236,7 +236,9 @@ A separate 237 KB random-weight fixture adds a tiny byte vocabulary to the full
 test graph; the CPU reference and Swift engine must produce identical prompt
 and generated IDs, then repeat after cancellation. This is not trained-model
 quality or iPhone performance evidence. The product iPhone route is implemented;
-its complete current build and hosted visual review remain under validation.
+build `0.1.0 (56)` passed compilation and hosted visual review in light/dark on
+macOS and iOS Simulator. The captures label preview text explicitly; they are
+not physical-phone inference evidence.
 
 The app's short numerical diagnostic saves the CPU/MLX logit comparisons with
 model hash, source/reference revisions, exact token IDs, measured memory/I/O,
@@ -256,5 +258,11 @@ quality results. A repaired artifact requires a distinct manifest/hash and
 separate reference validation. PLE layer IDs are intentionally converted from
 HF's one-based indexing; that difference is not a defect.
 
-No iPhone memory, token throughput, 65K context, full-model numerical agreement
-or new TestFlight delivery has yet been established for this fork.
+TestFlight `0.1.0 (56)` from app source `5b602d2` is now confirmed `VALID`,
+`INTERNAL_ONLY` and `IN_BETA_TESTING` for the sole configured private group.
+Run `38791263363` passed all preceding gates and uploaded successfully, then
+failed its final unsupported beta-group GET. The corrected API helper in
+`f78d164` completed and verified association against that existing build.
+The CI conclusion remains failure; recovery is recorded separately. No
+physical-phone installation, memory, throughput, full-model numerical
+agreement, offline inference, 65K context or quality comparison is established.

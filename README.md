@@ -10,7 +10,9 @@ Implemented foundations include bounded GGUF indexing, mixed GGML dequantization
 
 The iPhone chat route now connects a fully verified local GGUF to the canonical llama.cpp tokenizer/Jinja bridge and streamed Qwen4Exp generation. It includes resumable bounded downloads, cancellation, chat persistence and live memory/I/O figures. Complete sessions match the pinned CPU reference on a tiny untrained fixture; this does not validate the 56.1 GB weights. The initial app policy is 1,024 context tokens and a 4 GB process budget.
 
-Full-model logit agreement, offline iPhone generation, measured phone memory/performance and 65K context remain unverified. The actual device Release app has passed automatic Apple distribution export, including its App Store signature/profile and both memory entitlements. Its App Store Connect record and private internal tester are configured; actual TestFlight upload remains unverified. The inherited model catalog is not evidence of REAM support.
+Private TestFlight version **0.1.0 (56)**, app source `5b602d2`, is uploaded and Apple confirms `VALID`, `INTERNAL_ONLY` and `IN_BETA_TESTING` for the configured own-tester group. The actual exported app passed signature/profile, both memory entitlement and privacy-manifest checks. All build/test gates passed before upload; the CI run's final group lookup failed and was recovered through the corrected Apple API query in `f78d164`. See the [delivery record](docs/TESTFLIGHT.md) for that distinction.
+
+Installation and actual model execution on a physical iPhone are not yet confirmed. Full-model logit agreement, offline generation, measured phone memory/performance, 65K context and comparative quality remain unverified. The inherited model catalog is not evidence of REAM support.
 
 See [implementation and validation](docs/REAM-IMPLEMENTATION.md) and the [draft implementation PR](https://github.com/Dhafen/flash-local/pull/1). GitHub Actions builds on Apple silicon with pinned Xcode 26.2. Actual model inference is not run in the cloud.
 

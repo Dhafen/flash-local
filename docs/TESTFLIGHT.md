@@ -1,12 +1,25 @@
 # Private internal TestFlight delivery
 
-The real arm64 iPhone Release archive and Apple distribution export passed in
-run `38740774972` at `eebae31`. The exported signature and App Store profile both
-contained increased-memory-limit and extended-virtual-addressing. The unsigned
-app was about 28 MB; model weights were absent. No IPA was uploaded in that run.
+Version **0.1.0 (56)** from app source `5b602d2` was built, signed and uploaded
+by run `38791263363`. All preceding test/build gates passed. The exported Apple
+signature and App Store profile contained both increased-memory-limit and
+extended-virtual-addressing; its privacy manifest was verified. The unsigned
+app was 28,179,909 bytes with no model payload. The uploaded IPA SHA-256 is
+`445849a1f69b14e7ebedb62b9a55d829c803c62bcafd79a3c64518e0ec460c26`.
 
-The app record and an internal group containing only the verified account holder
-are configured. The upload path remains unverified against an actual upload.
+Apple processing reached `VALID` and `INTERNAL_ONLY`. The run then failed on
+an unsupported GET of the build's beta-group relationship. The documented
+`GET /v1/betaGroups?filter[builds]=...` fixed that query in `f78d164`, with
+19 passing local delivery tests. Using that helper against the existing build
+completed the private group association without another upload. Apple then
+confirmed `IN_BETA_TESTING`, exactly the configured group, and unchanged sole
+account-holder membership. The original CI conclusion remains failure; the
+separately recorded API recovery is the delivery evidence. No other testers,
+public links or automatic access to all builds were enabled.
+
+Installation and inference on the user's physical iPhone remain unverified.
+TestFlight availability does not prove the model, memory or context goals.
+
 Apple requires the app record to be created on its website, not through the
 apps REST resource:
 https://developer.apple.com/documentation/appstoreconnectapi/apps
@@ -92,3 +105,4 @@ processing and confirmed availability; none of these proves installation,
 Apple's upload and group-association documentation:
 https://developer.apple.com/help/app-store-connect/manage-builds/upload-builds/
 https://developer.apple.com/documentation/appstoreconnectapi/post-v1-betagroups-_id_-relationships-builds
+https://developer.apple.com/documentation/appstoreconnectapi/get-v1-betagroups
