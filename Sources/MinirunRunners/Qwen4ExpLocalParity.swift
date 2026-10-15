@@ -115,7 +115,10 @@ public enum Qwen4ExpLocalParity {
                 positions.append(result); progress(.streamedMLX, i + 1, tokens.count)
             }
             let io = decoder.readStatistics
-            guard !io.byteCountOverflowed else { throw GGUFError.invalid("parity reader counter overflow") }
+            let cache = decoder.rawCacheStatistics
+            guard !io.byteCountOverflowed, cache.isBudgetRespected, cache.faults.isEmpty else {
+                throw GGUFError.invalid("parity reader overflow, cache budget or lease fault")
+            }
             return Report(modelSHA256: artifact.manifest.sha256, modelFileBytes: artifact.manifest.fileByteCount,
                 sourceRevision: BuildInfo.gitRevision, referenceRevision: Qwen4ExpCPUReference.sourceRevision,
                 tokenIDs: tokens, positions: positions, absoluteTolerance: absoluteTolerance,

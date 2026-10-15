@@ -92,7 +92,7 @@ struct REAMRunReport: Codable, Sendable {
 /// operation. A verified descriptor is the only authority that enables Send.
 @Observable @MainActor
 final class REAMAppModel {
-    enum Activity { case idle, downloading, verifying, generating, resetting, stopping }
+    enum Activity { case idle, downloading, verifying, generating, checkingNumerics, resetting, stopping }
     private(set) var activity = Activity.idle
     private(set) var messages: [REAMMessage] = []
     private(set) var status = "Modellen är inte hämtad."
@@ -103,6 +103,8 @@ final class REAMAppModel {
     private(set) var generationProgress: Qwen4ExpTextGeneration.Progress?
     private(set) var summary: Qwen4ExpTextGeneration.Summary?
     private(set) var lastMeasurementURL: URL?
+    private(set) var lastNumericsURL: URL?
+    private(set) var lastNumericsReport: Qwen4ExpLocalParity.Report?
     private(set) var isPreview = false
     var draft = ""
     let root: URL
@@ -119,7 +121,8 @@ final class REAMAppModel {
     @ObservationIgnored private var prepared = false
     @ObservationIgnored private let chatFile: URL?
     var isBusy: Bool { activity != .idle }
-    var canChat: Bool { artifact != nil && !isBusy && !isPreview }
+    var canRunNumerics: Bool { artifact != nil && !isBusy && !isPreview }
+    var canChat: Bool { canRunNumerics && lastNumericsReport?.passedAtTestedPositions != false }
     var modelSize: String { ByteCountFormatter.string(fromByteCount: Int64(source.manifest.fileByteCount), countStyle: .file) }
 
     init(root: URL, source: PinnedGGUFDownload = .primaryREAM, chatFile: URL? = nil,
@@ -332,6 +335,54 @@ final class REAMAppModel {
                 lastMeasurementURL = try await worker.value
                 status = "Mätningen sparades i Flash Local › Diagnostics i Filer."
             } catch { self.error = "Mätningen kunde inte sparas: " + error.localizedDescription }
+            finish(id)
+        }
+    }
+    /// Explicit, short local comparison using a public fixed prompt. The CPU
+    /// model is released before MLX starts; this never contacts a reference API.
+    func checkNumerics() {
+        guard canRunNumerics, let artifact else { return }
+        let (id, flag) = begin(.checkingNumerics, status: "Startar kort lokal numerikjämförelse…")
+        // A cancelled retry must not erase a previously observed mismatch.
+        let budget = budgetBytes, cache = settings.rawCacheBytes
+        let directory = root.deletingLastPathComponent().appendingPathComponent("Diagnostics", isDirectory: true)
+        typealias Update = (Qwen4ExpLocalParity.Phase, Int, Int)
+        let channel = AsyncStream<Update>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        let worker = Task.detached(priority: .userInitiated) { () -> Result<(Qwen4ExpLocalParity.Report, URL), Error> in
+            defer { channel.continuation.finish() }
+            return Result {
+                let report = try Qwen4ExpLocalParity.run(artifact: artifact,
+                    messages: [.init(role: .user, content: "Hi")], budgetBytes: budget, rawCacheBytes: cache,
+                    cancellationRequested: { flag.requested() },
+                    onProgress: { _ = channel.continuation.yield(($0, $1, $2)) })
+                if flag.requested() { throw CancellationError() }
+                try LocalModelStorage.prepare(root: directory)
+                let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+                let data = try encoder.encode(report)
+                guard data.count <= 4 << 20 else { throw CocoaError(.fileWriteOutOfSpace) }
+                let file = directory.appendingPathComponent("parity-\(UUID().uuidString).json")
+                try data.write(to: file, options: .atomic)
+                return (report, file)
+            }
+        }
+        cancelWorker = { worker.cancel() }
+        operation = Task {
+            for await (phase, complete, total) in channel.stream where activity != .stopping {
+                status = "Numeriktest · \(phase == .cpuReference ? "CPU-referens" : "streamad MLX") · \(complete)/\(total)"
+            }
+            switch await worker.value {
+            case .success(let value):
+                lastNumericsReport = value.0; lastNumericsURL = value.1
+                status = value.0.passedAtTestedPositions
+                    ? "Kort numeriktest inom toleranserna vid \(value.0.positions.count) positioner. Rapport i Diagnostics."
+                    : "Numerikavvikelse upptäckt. Se rapporten i Diagnostics."
+                if !value.0.passedAtTestedPositions {
+                    error = "Generering är spärrad efter numerikavvikelsen. En ny jämförelse måste klara testet."
+                }
+            case .failure(let failure):
+                if !flag.requested() { error = failure.localizedDescription }
+                status = "Numeriktestet slutfördes inte."
+            }
             finish(id)
         }
     }

@@ -228,7 +228,7 @@ public final class Qwen4ExpDecoder {
             guard current.footprintBytes < memoryPlan.budgetBytes,
                   memoryPlan.budgetBytes - current.footprintBytes >= headroom,
                   current.availableBytes == nil || current.availableBytes! >= headroom else {
-                throw GGUFError.limit("live process memory headroom")
+                throw GGUFError.limit("live process memory admission: footprint=\(current.footprintBytes), budget=\(memoryPlan.budgetBytes), requiredHeadroom=\(headroom), available=\(current.availableBytes.map(String.init) ?? "unavailable")")
             }
         }
     }

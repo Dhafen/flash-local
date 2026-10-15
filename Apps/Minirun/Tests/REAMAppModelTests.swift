@@ -1,6 +1,7 @@
 import Foundation
 import MinirunKit
 import ModelAdapters
+import MinirunRunners
 import XCTest
 @testable import MinirunApp
 
@@ -87,6 +88,15 @@ final class REAMAppModelTests: XCTestCase {
         #if os(macOS)
         XCTAssertEqual(report.platform, "macOS", "A hosted Mac test must not label itself an iPhone measurement")
         #endif
+        model.checkNumerics(); await model.waitUntilIdle()
+        XCTAssertNil(model.error)
+        let parityURL = try XCTUnwrap(model.lastNumericsURL)
+        let parity = try JSONDecoder().decode(Qwen4ExpLocalParity.Report.self, from: Data(contentsOf: parityURL))
+        XCTAssertTrue(parity.passedAtTestedPositions)
+        XCTAssertEqual(parity.tokenIDs, reference.promptTokenIDs)
+        XCTAssertEqual(parity.modelSHA256, fixture.sha256)
+        XCTAssertEqual(parity.positions.count, reference.promptTokenIDs.count)
+        XCTAssertEqual(model.messages.map(\.text), saved.map(\.text), "A diagnostic must not invent chat turns")
         try FileManager.default.removeItem(at: localFile)
         model.refreshStorage()
         XCTAssertFalse(model.canChat)
@@ -126,7 +136,7 @@ final class REAMAppModelTests: XCTestCase {
     func testPreviewNeverStartsServicesOrClaimsRealReadiness() {
         let model = REAMAppModel.reviewPreview()
         let initial = model.messages.map(\.text)
-        model.prepare(); model.download(); model.verify(); model.draft = "Try"; model.send()
+        model.prepare(); model.download(); model.verify(); model.draft = "Try"; model.send(); model.checkNumerics()
         XCTAssertTrue(model.isPreview); XCTAssertFalse(model.canChat); XCTAssertFalse(model.isBusy)
         XCTAssertEqual(model.messages.map(\.text), initial)
         XCTAssertNil(model.summary)

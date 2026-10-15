@@ -22,6 +22,8 @@ struct REAMRootView: View {
                     ToolbarItem(placement: .automatic) {
                         Menu {
                             NavigationLink("Om Flash Local") { AboutView() }
+                            Button("Kontrollera numerik (kort test)") { model.checkNumerics() }
+                                .disabled(!model.canRunNumerics)
                             NavigationLink("Licenser på enheten") {
                                 ScrollView {
                                     Text(REAMBundledNotices.text).font(.footnote).textSelection(.enabled).padding()

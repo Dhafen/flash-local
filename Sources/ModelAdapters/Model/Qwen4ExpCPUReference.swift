@@ -19,6 +19,8 @@ public final class Qwen4ExpCPUReference {
         let lock = NSLock()
         var reason: Stop?
         var peak: UInt64 = 0
+        var lastFootprint: UInt64 = 0
+        var lastAvailable: UInt64?
         init(budget: UInt64, cancelled: @escaping @Sendable () -> Bool) {
             self.budget = budget; self.cancelled = cancelled
         }
@@ -29,6 +31,7 @@ public final class Qwen4ExpCPUReference {
             if cancellation { reason = .cancelled }
             guard let footprint else { reason = reason ?? .unavailable; return true }
             peak = max(peak, footprint.footprintBytes)
+            lastFootprint = footprint.footprintBytes; lastAvailable = footprint.availableBytes
             let headroom: UInt64 = 512 << 20
             if footprint.footprintBytes >= budget || budget - footprint.footprintBytes < headroom
                 || footprint.availableBytes.map({ $0 < headroom }) == true { reason = reason ?? .memory }
@@ -38,7 +41,7 @@ public final class Qwen4ExpCPUReference {
             lock.lock(); defer { lock.unlock() }
             switch reason {
             case .cancelled: return CancellationError()
-            case .memory: return GGUFError.limit("local CPU reference exceeded memory headroom; parity remains unverified")
+            case .memory: return GGUFError.limit("local CPU reference memory admission: footprint=\(lastFootprint), sampledPeak=\(peak), budget=\(budget), requiredHeadroom=536870912, available=\(lastAvailable.map(String.init) ?? "unavailable"); parity remains unverified")
             case .unavailable: return GGUFError.limit("local CPU reference footprint unavailable")
             case nil: return GGUFError.invalid(fallback)
             }
