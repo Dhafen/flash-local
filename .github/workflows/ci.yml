@@ -60,6 +60,7 @@ jobs:
           xcodebuild test -scheme minirun-Package $XCODEBUILD_FLAGS -destination 'platform=macOS' \
             -only-testing:GGUFCoreTests -only-testing:ModelAdaptersTests -only-testing:MLXBridgeTests \
             -only-testing:StorageCoreTests -only-testing:iOSBenchTests \
+            -only-testing:MinirunRunnersTests/Qwen4ExpGenerationPrimitivesTests \
             -only-testing:MinirunKitTests/LocalModelStorageTests \
             -only-testing:MinirunKitTests/VerifiedGGUFArtifactTests \
             -skip-testing:ModelAdaptersTests/Qwen4ExpDecoderParityTests \

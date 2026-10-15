@@ -66,7 +66,7 @@ def main():
                 directory.mkdir(exist_ok=True)
                 combined = directory / "libLlamaTokenizerRuntime.a"
                 run(["xcrun", "libtool", "-static", "-o", combined, *archives])
-                run(["xcrun", "lipo", "-verify_arch", "arm64", combined])
+                run(["xcrun", "lipo", combined, "-verify_arch", "arm64"])
                 libraries += ["-library", str(combined), "-headers", str(headers)]
                 records.append({"platform": name, "sdk": sdk, "minimumOS": minimum,
                                 "architecture": "arm64", "bytes": combined.stat().st_size,

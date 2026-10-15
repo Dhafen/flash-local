@@ -126,6 +126,9 @@ public final class Qwen4ExpDecoder {
     public let layout: Layout
     public let memoryPlan: Qwen4ExpMemoryPlan
     public private(set) var position = 0
+    /// Existing budget checkpoints also provide run-local memory observations.
+    /// Invoked on the decoder's serial executor, never on an I/O worker.
+    public var onFootprintObservation: ((ProcessFootprint) -> Void)?
     private let weights: GGUFWeightSource
     private var attentionCaches: [Int: Qwen4ExpTextAttention.Cache] = [:]
     private var recurrentStates: [Int: MLXArray] = [:]
@@ -218,6 +221,7 @@ public final class Qwen4ExpDecoder {
     private func checkBudgetAndCancellation(_ cancellationRequested: () -> Bool) throws {
         if cancellationRequested() { throw CancellationError() }
         if let current = ProcessFootprint.current() {
+            onFootprintObservation?(current)
             let headroom: UInt64 = 256 << 20
             guard current.footprintBytes < memoryPlan.budgetBytes,
                   memoryPlan.budgetBytes - current.footprintBytes >= headroom,
