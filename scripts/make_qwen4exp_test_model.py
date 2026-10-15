@@ -32,7 +32,7 @@ def main(chat=False):
         meta.update({
             "tokenizer.ggml.model": (8, "gpt2"), "tokenizer.ggml.pre": (8, "qwen35"),
             "tokenizer.ggml.tokens": (9, (8, alphabet + ["<|im_start|>", "<|im_end|>", "<|endoftext|>", "<think>", "</think>", "ab"])),
-            "tokenizer.ggml.token_type": (9, (4, [1] * 256 + [3, 3, 3, 4, 4, 1])),
+            "tokenizer.ggml.token_type": (9, (5, [1] * 256 + [3, 3, 3, 4, 4, 1])),
             "tokenizer.ggml.merges": (9, (8, ["a b"])),
             "tokenizer.ggml.bos_token_id": (4, 258), "tokenizer.ggml.eos_token_id": (4, 257),
             "tokenizer.ggml.add_bos_token": (7, False), "tokenizer.ggml.add_eos_token": (7, False),
@@ -112,7 +112,7 @@ def main(chat=False):
         if kind == 9:
             element, entries = item
             return struct.pack("<IQ", element, len(entries)) + b"".join(value(element, e) for e in entries)
-        return struct.pack({4: "<I", 6: "<f", 7: "<?", 10: "<Q"}[kind], item)
+        return struct.pack({4: "<I", 5: "<i", 6: "<f", 7: "<?", 10: "<Q"}[kind], item)
 
     header = bytearray(struct.pack("<4sIQQ", b"GGUF", 3, len(tensors), len(meta)))
     for key, (kind, item) in meta.items(): header += text(key) + struct.pack("<I", kind) + value(kind, item)
