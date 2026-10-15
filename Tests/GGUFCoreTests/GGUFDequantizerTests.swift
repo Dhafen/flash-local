@@ -52,17 +52,17 @@ final class GGUFDequantizerTests: XCTestCase {
     }
 
     func testIEEEHalfAndBF16AreDifferentEncodings() throws {
-        XCTAssertEqual(try decode([0, 0x3c, 0, 0xc0, 1, 0], type: .f16, count: 3), [1, -2, 1 / 16_777_216])
+        XCTAssertEqual(try decode([0, 0x3c, 0, 0xc0, 1, 0], type: .f16, count: 3), [1, -2, Float(1) / 16_777_216])
         XCTAssertEqual(try decode([0x80, 0x3f, 0, 0xc0], type: .bf16, count: 2), [1, -2])
         XCTAssertEqual(try decode([0, 0, 0x80, 0x3f, 0, 0, 0, 0xc0], type: .f32, count: 2), [1, -2])
     }
 
-    func testRejectsTruncationBlockRemainderAndOversizedTile() {
+    func testRejectsTruncationBlockRemainderAndOversizedTile() throws {
         XCTAssertThrowsError(try decode([0, 0], type: .q4_0, count: 32))
         XCTAssertThrowsError(try decode(Array(repeating: 0, count: 18), type: .q4_0, count: 31))
         var output = [Float](repeating: 0, count: 1)
-        output.withUnsafeMutableBufferPointer { buffer in
-            Data([0, 0, 0, 0]).withUnsafeBytes { bytes in
+        try output.withUnsafeMutableBufferPointer { buffer in
+            try Data([0, 0, 0, 0]).withUnsafeBytes { bytes in
                 XCTAssertThrowsError(try GGUFDequantizer.decode(bytes, type: .f32,
                     elements: GGUFDequantizer.maximumTileElements + 1, into: buffer))
             }

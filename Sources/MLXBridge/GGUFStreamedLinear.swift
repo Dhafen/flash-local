@@ -20,7 +20,7 @@ public final class GGUFLinearScratch {
     public var byteCount: Int { buffer.count }
 }
 
-public struct GGUFLinearReport: Sendable {
+public struct GGUFLinearReport: Sendable, Codable {
     public let tiles: Int
     public let logicalWeightBytes: UInt64
     public let scratchBytes: Int

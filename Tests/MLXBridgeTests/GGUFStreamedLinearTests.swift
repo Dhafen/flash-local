@@ -59,6 +59,8 @@ final class GGUFStreamedLinearTests: XCTestCase {
                     payloadOffset: index.payloadOffset, sourceID: 1, firstRegionID: 0,
                     tileRows: rows, reader: reader, scratch: GGUFLinearScratch(elements: 12))
                 XCTAssertEqual(result.output.asArray(Float.self), [20, 60, 100, 140, 180, 10, 50, 90, 130, 170])
+                let report = try JSONEncoder().encode(result.report)
+                print("GGUF_MATRIX_PROBE tileRows=\(rows) " + String(decoding: report, as: UTF8.self))
             }
         }
     }
