@@ -47,6 +47,7 @@ jobs:
       - name: GGUF parser, state and storage correctness
         run: |
           python3 scripts/fetch_ream_metadata.py
+          python3 scripts/make_engram_test_fixture.py
           export GGUF_HEADER_FIXTURE="$GITHUB_WORKSPACE/.test-fixtures/ream.header"
           export TEST_RUNNER_GGUF_HEADER_FIXTURE="$GGUF_HEADER_FIXTURE"
           xcodebuild test -scheme minirun-Package $XCODEBUILD_FLAGS -destination 'platform=macOS' \

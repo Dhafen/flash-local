@@ -47,12 +47,18 @@ that fixture; CI fetches it and rejects a skipped published-header test.
 On Apple silicon, run the package suites with xcodebuild (not swift test):
 
 ```sh
+python3 scripts/make_engram_test_fixture.py
 xcodebuild test -scheme minirun-Package -destination 'platform=macOS' \
   -skipPackagePluginValidation -skipMacroValidation \
   -only-testing:GGUFCoreTests -only-testing:MLXBridgeTests \
   -only-testing:ModelAdaptersTests -only-testing:StorageCoreTests \
   -only-testing:iOSBenchTests
 ```
+
+The expanded StorageCore suite exposed an omitted upstream Engram fixture.
+The independent Python fixture generator supplies 157 deterministic synthetic
+rows in two v1 parts, including the partial final page. This restores executable
+tests without claiming those bytes came from the unpublished model converter.
 
 Numerical tests include manually constructed nonzero GGML quantization blocks,
 independent matrix dot products with poisoned released slots, scalar golden

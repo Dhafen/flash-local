@@ -17,3 +17,4 @@ xcuserdata/
 *.dpapi
 *.gguf
 *.safetensors
+Tests/Fixtures/deepseek-v41/engram/
