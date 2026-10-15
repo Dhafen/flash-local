@@ -36,6 +36,10 @@ The original project and the existing Priv AI application are not modified.
 - `Qwen4ExpTextAttention`: one-token dense text attention, per-head Q/gate
   interleaving, head RMSNorm, partial RoPE and chunked FP16 KV storage.
   Online FP32 softmax avoids full-context KV expansion or a quadratic mask.
+  Two chunked passes round the post-RoPE query and globally normalized
+  probabilities to FP16, as required by the reference's FP16 K/V dot kernels.
+  The second pass revisits the resident KV chunks, without additional weight
+  reads. This trades additional score computation for reference arithmetic.
   Context exhaustion refuses instead of evicting. QSA and chunked prefill
   still require separate implementation and validation.
 - `GGUFWeightSource`: connects the verification capability to a fixed raw LRU
@@ -79,6 +83,16 @@ bounded layer outputs and the pre-head activations, with quantization-boundary
 observations. CPU and streamed diagnostic replays must stay within 1e-7 of
 their normal logits; the unchanged normal runs remain the numerical oracle.
 The streamed activation observer is DEBUG-only and is never enabled by the app.
+Run `38783214287` at `aa4b39e` localized the mixed discrepancy to the final
+dense-attention layer: the three recurrent-layer outputs stayed within
+relative L2 1.2e-7 across all positions, while layer three reached 0.000274
+at position one. The reference CPU's F16 K/V matrices also convert their RHS
+(query and normalized softmax) to F16; the original MLX attention left these
+operands in F32. The two-pass attention correction above is awaiting hosted
+validation with the unchanged logit limits. The full-prefix scalar attention
+test compares eight prefixes across chunk sizes 1/3/8, independently rounds
+the operands, and emits bounded-cache/timing metadata. These tiny hosted
+measurements do not establish long-context or iPhone performance.
 The standalone CPU reference explicitly disables native tuning, Accelerate,
 KleidiAI and llamafile, and selects the runtime's armv8-a target on Apple silicon;
 its settings do not depend on a prior tokenizer build's CMake cache.

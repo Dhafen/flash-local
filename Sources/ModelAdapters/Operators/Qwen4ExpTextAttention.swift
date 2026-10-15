@@ -38,9 +38,10 @@ public enum Qwen4ExpTextAttention {
         }
 
         /// Query [queryHeads, dim], key/value [kvHeads, dim]. GQA uses contiguous
-        /// query groups per KV head. KV chunks are FP16; reductions are FP32.
-        /// Online softmax avoids expanding the entire KV cache to all Q heads
-        /// or materialising a context-by-context attention matrix.
+        /// query groups per KV head. KV chunks and dot-product operands are
+        /// FP16, matching the pinned CPU reference; accumulations are FP32.
+        /// Two bounded passes normalize before rounding the probabilities,
+        /// without expanding the full KV cache to all Q heads.
         public func appendAndAttend(query: MLXArray, key: MLXArray, value: MLXArray) throws -> MLXArray {
             guard count < contextLimit else { throw GGUFError.limit("context exhausted; no silent truncation") }
             guard query.ndim == 2, (1...256).contains(query.shape[0]),
@@ -62,22 +63,35 @@ public enum Qwen4ExpTextAttention {
             }
             count += 1
             let groups = query.shape[0] / keyValueHeads
-            let groupedQuery = query.asType(.float32).reshaped([keyValueHeads, groups, headDimension])
+            // GGML's F16 K matrix selects an F16 RHS dot operand, even when
+            // the score accumulator is explicitly F32. Round after RoPE.
+            let groupedQuery = query.asType(.float16).asType(.float32)
+                .reshaped([keyValueHeads, groups, headDimension])
             var maximum = MLXArray.full([keyValueHeads, groups, 1], values: MLXArray(-Float.infinity), dtype: .float32)
             var denominator = MLXArray.zeros([keyValueHeads, groups, 1], dtype: .float32)
-            var numerator = MLXArray.zeros([keyValueHeads, groups, headDimension], dtype: .float32)
             for chunk in keys.indices {
                 let scores = matmul(groupedQuery, keys[chunk].asType(.float32).transposed(0, 2, 1))
                     / Float(sqrt(Double(headDimension)))
                 let nextMaximum = MLX.maximum(maximum, scores.max(axis: -1, keepDims: true))
                 let oldScale = exp(maximum - nextMaximum)
                 let probabilities = exp(scores - nextMaximum)
-                numerator = numerator * oldScale + matmul(probabilities, values[chunk].asType(.float32))
                 denominator = denominator * oldScale + sum(probabilities, axis: -1, keepDims: true)
                 maximum = nextMaximum
-                numerator.eval(); denominator.eval(); maximum.eval()
+                denominator.eval(); maximum.eval()
             }
-            let output = (numerator / denominator).reshaped(query.shape)
+            // The V matrix likewise selects an F16 RHS. Rounding exp(scores)
+            // before normalization would change the operation. Revisit only
+            // one KV chunk at a time after the global denominator is known.
+            var numerator = MLXArray.zeros([keyValueHeads, groups, headDimension], dtype: .float32)
+            for chunk in keys.indices {
+                let scores = matmul(groupedQuery, keys[chunk].asType(.float32).transposed(0, 2, 1))
+                    / Float(sqrt(Double(headDimension)))
+                let probabilities = (exp(scores - maximum) / denominator)
+                    .asType(.float16).asType(.float32)
+                numerator = numerator + matmul(probabilities, values[chunk].asType(.float32))
+                numerator.eval()
+            }
+            let output = numerator.reshaped(query.shape)
             output.eval()
             return output
         }
