@@ -27,6 +27,8 @@ endif()
 add_subdirectory("${LLAMA_SOURCE}" llama)
 add_executable(flash-local-reference main.cpp)
 target_link_libraries(flash-local-reference PRIVATE llama)
+add_executable(flash-local-mixed-fixture mixed.cpp)
+target_link_libraries(flash-local-mixed-fixture PRIVATE llama)
 add_executable(flash-local-tokenizer-reference tokenizer.cpp)
 add_library(flash-local-tokenizer-runtime STATIC
   "${CMAKE_CURRENT_SOURCE_DIR}/../../Sources/CLlamaTokenizer/FlashLlamaTokenizer.cpp"

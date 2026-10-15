@@ -1,6 +1,8 @@
 """Regenerable synthetic graph fixture, not checkpoint/model distribution.
 
-All weights are deterministic random FP32. Includes HC, PLE, three GDN layers,
+This writer emits deterministic random FP32 weights. The wider --mixed graph
+is subsequently encoded with canonical GGML quantizers by the C++ harness.
+Includes HC, PLE, three GDN layers,
 one dense attention layer, routed/shared experts and EOS hash history. The
 separate pinned llama.cpp harness supplies expected logits, not this writer.
 """
@@ -13,7 +15,11 @@ import struct
 import argparse
 
 
-def main(chat=False):
+def main(chat=False, mixed=False):
+    if chat and mixed:
+        raise ValueError("Mixed fixture has a separate graph-only vocabulary")
+    hidden, width, rank, ple = (256, 256, 32, 32) if mixed else (16, 8, 4, 8)
+    wide = hidden * 2
     rng = random.Random(20261015)
     meta = {"general.architecture": (8, "qwen4exp"), "general.name": (8, "synthetic-graph-test"),
             "tokenizer.ggml.model": (8, "none")}
@@ -39,16 +45,16 @@ def main(chat=False):
             "tokenizer.chat_template": (8, template),
         })
     integers = {
-        "block_count": 4, "embedding_length": 16, "vocab_size": vocabulary_size, "context_length": 4096,
-        "feed_forward_length": 8, "attention.head_count": 2, "attention.head_count_kv": 1,
+        "block_count": 4, "embedding_length": hidden, "vocab_size": vocabulary_size, "context_length": 4096,
+        "feed_forward_length": width, "attention.head_count": 2, "attention.head_count_kv": 1,
         "attention.key_length": 8, "attention.value_length": 8, "rope.dimension_count": 2,
-        "expert_count": 3, "expert_used_count": 2, "expert_feed_forward_length": 8,
-        "expert_shared_feed_forward_length": 8, "ssm.conv_kernel": 2, "ssm.state_size": 128,
+        "expert_count": 3, "expert_used_count": 2, "expert_feed_forward_length": width,
+        "expert_shared_feed_forward_length": width, "ssm.conv_kernel": 2, "ssm.state_size": 128,
         "ssm.group_count": 1, "ssm.time_step_rank": 1, "ssm.inner_size": 128,
-        "full_attention_interval": 4, "hyper_connection.count": 2, "hyper_connection.low_rank": 4,
+        "full_attention_interval": 4, "hyper_connection.count": 2, "hyper_connection.low_rank": rank,
         "attention.indexer.head_count": 1, "attention.indexer.key_length": 8,
         "attention.indexer.top_k": 4, "ple.ngram_size": 3, "ple.heads_per_ngram": 1,
-        "ple.conv_kernel": 2, "ple.eos_token_id": 15, "embedding_length_per_layer_input": 8,
+        "ple.conv_kernel": 2, "ple.eos_token_id": 15, "embedding_length_per_layer_input": ple,
     }
     for key, value in integers.items(): meta["qwen4exp." + key] = (4, value)
     for key, value in {"rope.freq_base": 10000.0, "attention.layer_norm_rms_epsilon": 1e-6}.items():
@@ -63,46 +69,46 @@ def main(chat=False):
 
     def tensor(name, dimensions, constant=None):
         count = math.prod(dimensions)
-        values = [constant if constant is not None else rng.uniform(-0.08, 0.08) for _ in range(count)]
+        values = [constant if constant is not None else rng.uniform(-0.08, 0.08) * math.sqrt(16 / hidden) for _ in range(count)]
         tensors.append((name, dimensions, struct.pack("<" + "f" * count, *values)))
 
     def hc(prefix, injection=True):
-        tensor(prefix + "norm.weight", [32], 1.0)
-        tensor(prefix + "down.weight", [32, 4])
-        tensor(prefix + "up.weight", [4, 32])
-        if injection: tensor(prefix + "inject.weight", [32, 2])
+        tensor(prefix + "norm.weight", [wide], 1.0)
+        tensor(prefix + "down.weight", [wide, rank])
+        tensor(prefix + "up.weight", [rank, wide])
+        if injection: tensor(prefix + "inject.weight", [wide, 2])
 
-    tensor("token_embd.weight", [16, vocabulary_size])
-    tensor("output.weight", [16, vocabulary_size])
-    tensor("per_layer_token_embd.weight", [8, 10])
+    tensor("token_embd.weight", [hidden, vocabulary_size])
+    tensor("output.weight", [hidden, vocabulary_size])
+    tensor("per_layer_token_embd.weight", [ple, 10])
     hc("output_hc_", False)
     for layer in range(4):
         p = f"blk.{layer}."
         hc(p + "hc_attn_"); hc(p + "hc_ffn_")
-        tensor(p + "ffn_gate_inp.weight", [16, 3])
-        tensor(p + "ffn_gate_inp_shexp.weight", [16])
+        tensor(p + "ffn_gate_inp.weight", [hidden, 3])
+        tensor(p + "ffn_gate_inp_shexp.weight", [hidden])
         for projection in ["gate", "up"]:
-            tensor(p + f"ffn_{projection}_exps.weight", [16, 8, 3])
-            tensor(p + f"ffn_{projection}_shexp.weight", [16, 8])
-        tensor(p + "ffn_down_exps.weight", [8, 16, 3])
-        tensor(p + "ffn_down_shexp.weight", [8, 16])
+            tensor(p + f"ffn_{projection}_exps.weight", [hidden, width, 3])
+            tensor(p + f"ffn_{projection}_shexp.weight", [hidden, width])
+        tensor(p + "ffn_down_exps.weight", [width, hidden, 3])
+        tensor(p + "ffn_down_shexp.weight", [width, hidden])
         if layer == 3:
-            tensor(p + "attn_q.weight", [16, 32])
-            tensor(p + "attn_k.weight", [16, 8]); tensor(p + "attn_v.weight", [16, 8])
-            tensor(p + "attn_output.weight", [16, 16])
+            tensor(p + "attn_q.weight", [hidden, 32])
+            tensor(p + "attn_k.weight", [hidden, 8]); tensor(p + "attn_v.weight", [hidden, 8])
+            tensor(p + "attn_output.weight", [16, hidden])
             tensor(p + "attn_q_norm.weight", [8], 1.0); tensor(p + "attn_k_norm.weight", [8], 1.0)
-            tensor(p + "indexer.q_proj.weight", [16, 8]); tensor(p + "indexer.k_proj.weight", [16, 8])
+            tensor(p + "indexer.q_proj.weight", [hidden, 8]); tensor(p + "indexer.k_proj.weight", [hidden, 8])
             tensor(p + "indexer.q_norm.weight", [8], 1.0); tensor(p + "indexer.k_norm.weight", [8], 1.0)
         else:
-            tensor(p + "attn_qkv.weight", [16, 384]); tensor(p + "attn_gate.weight", [16, 128])
-            tensor(p + "ssm_alpha.weight", [16, 1]); tensor(p + "ssm_beta.weight", [16, 1])
-            tensor(p + "ssm_conv1d.weight", [2, 384]); tensor(p + "ssm_out.weight", [128, 16])
+            tensor(p + "attn_qkv.weight", [hidden, 384]); tensor(p + "attn_gate.weight", [hidden, 128])
+            tensor(p + "ssm_alpha.weight", [hidden, 1]); tensor(p + "ssm_beta.weight", [hidden, 1])
+            tensor(p + "ssm_conv1d.weight", [2, 384]); tensor(p + "ssm_out.weight", [128, hidden])
             tensor(p + "ssm_a", [1], -0.25); tensor(p + "ssm_dt.bias", [1], -1.0)
             tensor(p + "ssm_norm.weight", [128], 1.0)
         if layer == 1:
-            tensor(p + "ple_key.weight", [16, 32]); tensor(p + "ple_value.weight", [16, 16])
-            for norm in ["key", "query", "conv"]: tensor(p + f"ple_norm_{norm}.weight", [32], 1.0)
-            tensor(p + "ple_conv1d.weight", [2, 32])
+            tensor(p + "ple_key.weight", [2 * ple, wide]); tensor(p + "ple_value.weight", [2 * ple, hidden])
+            for norm in ["key", "query", "conv"]: tensor(p + f"ple_norm_{norm}.weight", [wide], 1.0)
+            tensor(p + "ple_conv1d.weight", [2, wide])
 
     def text(value):
         raw = value.encode(); return struct.pack("<Q", len(raw)) + raw
@@ -127,7 +133,7 @@ def main(chat=False):
     model = bytes(header + payload)
     folder = pathlib.Path(__file__).resolve().parents[1] / ".test-fixtures"
     folder.mkdir(exist_ok=True)
-    stem = "synthetic-qwen4exp-chat" if chat else "synthetic-qwen4exp"
+    stem = "synthetic-qwen4exp-mixed-source" if mixed else ("synthetic-qwen4exp-chat" if chat else "synthetic-qwen4exp")
     (folder / (stem + ".gguf")).write_bytes(model)
     manifest = dict(fileName=stem + ".gguf", fileByteCount=len(model),
                     sha256=hashlib.sha256(model).hexdigest(), tokens=[1, 2, 3, 15, 4], contextTokens=128 if chat else 32)
@@ -140,4 +146,6 @@ def main(chat=False):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--chat", action="store_true", help="Add tiny byte vocabulary and pinned chat template")
-    main(chat=parser.parse_args().chat)
+    parser.add_argument("--mixed", action="store_true", help="Generate wider random graph for canonical mixed quantization")
+    args = parser.parse_args()
+    main(chat=args.chat, mixed=args.mixed)

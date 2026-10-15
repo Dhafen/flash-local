@@ -165,6 +165,7 @@ jobs:
             -only-testing:MinirunRunnersTests/Qwen4ExpLocalParityTests \
             -resultBundlePath parity-tests.xcresult 2>&1 | tee parity-tests.log | tail -80
           if grep -E 'Qwen4ExpDecoderParityTests.*skipped' parity-tests.log; then exit 1; fi
+          grep -E 'testCompleteMixedQuantizedGraphMatchesPinnedLlamaCPPLogits.*passed' parity-tests.log
           if grep -E 'PublishedQwen35TokenizerParityTests.*skipped' parity-tests.log; then exit 1; fi
           if grep -E 'CanonicalQwen35TokenizerParityTests.*skipped' parity-tests.log; then exit 1; fi
           if grep -E 'Qwen4ExpTextGenerationParityTests.*skipped' parity-tests.log; then exit 1; fi
@@ -221,6 +222,8 @@ jobs:
             .work/tokenizer-build.log
             .work/runtime/build-manifest.json
             .test-fixtures/llama-reference-logits.json
+            .test-fixtures/llama-mixed-reference-logits.json
+            .test-fixtures/synthetic-qwen4exp-mixed.json
             .test-fixtures/synthetic-qwen4exp.json
             .test-fixtures/qwen35-tokenizer-reference.json
             .test-fixtures/qwen35-tokenizer-corpus.json

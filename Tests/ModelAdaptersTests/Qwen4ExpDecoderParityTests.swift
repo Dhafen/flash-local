@@ -1,4 +1,5 @@
 import Foundation
+import GGUFCore
 import MLX
 import MinirunKit
 import StorageCore
@@ -19,13 +20,21 @@ final class Qwen4ExpDecoderParityTests: XCTestCase {
     }
 
     func testCompleteSyntheticGraphMatchesPinnedLlamaCPPLogits() throws {
+        try checkCompleteGraph(mixed: false)
+    }
+
+    func testCompleteMixedQuantizedGraphMatchesPinnedLlamaCPPLogits() throws {
+        try checkCompleteGraph(mixed: true)
+    }
+
+    private func checkCompleteGraph(mixed: Bool) throws {
         let environment = ProcessInfo.processInfo.environment
         guard let header = environment["GGUF_HEADER_FIXTURE"] ?? environment["TEST_RUNNER_GGUF_HEADER_FIXTURE"] else {
             throw XCTSkip("Set GGUF_HEADER_FIXTURE and run the synthetic reference harness first")
         }
         let folder = URL(fileURLWithPath: header).deletingLastPathComponent()
-        let manifestURL = folder.appendingPathComponent("synthetic-qwen4exp.json")
-        let referenceURL = folder.appendingPathComponent("llama-reference-logits.json")
+        let manifestURL = folder.appendingPathComponent(mixed ? "synthetic-qwen4exp-mixed.json" : "synthetic-qwen4exp.json")
+        let referenceURL = folder.appendingPathComponent(mixed ? "llama-mixed-reference-logits.json" : "llama-reference-logits.json")
         guard FileManager.default.fileExists(atPath: manifestURL.path),
               FileManager.default.fileExists(atPath: referenceURL.path) else {
             throw XCTSkip("Generate tiny model and pinned CPU reference; trained weights are unnecessary")
@@ -37,6 +46,10 @@ final class Qwen4ExpDecoderParityTests: XCTestCase {
         let expected = try GGUFModelManifest(fileName: manifest.fileName,
             fileByteCount: manifest.fileByteCount, sha256: manifest.sha256)
         let artifact = try VerifiedGGUFArtifact.verify(insideRoot: folder, manifest: expected)
+        if mixed {
+            XCTAssertEqual(Set(artifact.index.tensors.values.map { $0.quantization.rawValue }),
+                           Set(GGUFQuantization.allCases.map { $0.rawValue }))
+        }
         let decoder = try Qwen4ExpDecoder(artifact: artifact, contextTokens: manifest.contextTokens,
             budgetBytes: 5_500_000_000, rawCacheBytes: 2 << 20)
         for (position, token) in manifest.tokens.enumerated() {
@@ -51,7 +64,7 @@ final class Qwen4ExpDecoderParityTests: XCTestCase {
                 referenceSquared += pow(Double(b), 2)
             }
             let relative = sqrt(errorSquared / max(referenceSquared, 1e-20))
-            print("QWEN4EXP_LOGIT_PARITY position=\(position) maxAbs=\(maximum) relativeL2=\(relative)")
+            print("QWEN4EXP_LOGIT_PARITY mixed=\(mixed) position=\(position) maxAbs=\(maximum) relativeL2=\(relative)")
             XCTAssertLessThanOrEqual(maximum, 0.01)
             XCTAssertLessThanOrEqual(relative, 1e-3)
         }

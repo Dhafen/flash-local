@@ -3,6 +3,8 @@
 Never accepts a user model/prompt. Actual REAM weights are not fetched or run.
 """
 import pathlib
+import hashlib
+import json
 import subprocess
 
 from llama_reference_source import REVISION, prepare
@@ -23,11 +25,24 @@ def main():
             run(["cmake", "-S", root / "Tests/ReferenceHarness", "-B", build,
                  f"-DLLAMA_SOURCE={source}", "-DCMAKE_BUILD_TYPE=Release"])
             run(["cmake", "--build", build, "--target", "flash-local-reference",
-                 "flash-local-tokenizer-reference", "flash-local-session-reference", "--parallel", "3"])
+                 "flash-local-tokenizer-reference", "flash-local-session-reference",
+                 "flash-local-mixed-fixture", "--parallel", "3"])
             model = root / ".test-fixtures/synthetic-qwen4exp.gguf"
             if not model.is_file() or model.stat().st_size > 1_000_000:
                 raise RuntimeError("Only the tiny synthetic fixture may run in this harness")
             run([build / "flash-local-reference", model, root / ".test-fixtures/llama-reference-logits.json"])
+            run(["python3", root / "scripts/make_qwen4exp_test_model.py", "--mixed"])
+            mixed = root / ".test-fixtures/synthetic-qwen4exp-mixed.gguf"
+            run([build / "flash-local-mixed-fixture",
+                 root / ".test-fixtures/synthetic-qwen4exp-mixed-source.gguf", mixed])
+            if mixed.stat().st_size > 32 << 20:
+                raise RuntimeError("Mixed reference is restricted to the generated random fixture")
+            manifest = json.loads((root / ".test-fixtures/synthetic-qwen4exp-mixed-source.json").read_text())
+            manifest.update(fileName=mixed.name, fileByteCount=mixed.stat().st_size,
+                            sha256=hashlib.sha256(mixed.read_bytes()).hexdigest())
+            (root / ".test-fixtures/synthetic-qwen4exp-mixed.json").write_text(json.dumps(manifest, indent=2) + "\n")
+            run([build / "flash-local-reference", mixed,
+                 root / ".test-fixtures/llama-mixed-reference-logits.json"])
             run(["python3", root / "scripts/make_tokenizer_reference_fixture.py"])
             run([build / "flash-local-tokenizer-reference",
                  root / ".test-fixtures/qwen35-vocabulary-only.gguf",
