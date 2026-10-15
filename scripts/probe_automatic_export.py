@@ -2,6 +2,7 @@
 import argparse
 import datetime
 import json
+import hashlib
 import os
 import pathlib
 import plistlib
@@ -79,6 +80,11 @@ def main():
                 if mode:
                     (pathlib.Path(temp) / item.filename).chmod(mode)
         app = pathlib.Path(temp) / 'Payload/FlashLocal.app'
+        app_info = plistlib.loads((app / 'Info.plist').read_bytes())
+        if app_info.get('CFBundleIdentifier') != 'com.dhafen.flashlocal':
+            raise RuntimeError('Wrong IPA bundle identifier')
+        if app_info.get('ITSAppUsesNonExemptEncryption') is not False:
+            raise RuntimeError('Explicit reviewed encryption exemption is missing')
         subprocess.run(['codesign', '--verify', '--deep', '--strict', str(app)], check=True)
         signature = subprocess.run(['codesign', '-d', '--entitlements', ':-', str(app)],
                                    check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -101,10 +107,17 @@ def main():
         print('Exported memory capability admission: ' + json.dumps(observed, sort_keys=True))
         if not all(all(status.values()) for status in observed.values()):
             raise RuntimeError('Required memory entitlement absent from exported app or profile')
+    digest = hashlib.sha256()
+    with ipas[0].open('rb') as stream:
+        for chunk in iter(lambda: stream.read(4 << 20), b''): digest.update(chunk)
     pathlib.Path('ios-signing-probe.json').write_text(json.dumps({
         'bundleIdentifier': 'com.dhafen.flashlocal', 'signatureVerified': True,
         'memoryEntitlementsVerified': True, 'profileType': 'app-store',
-        'exportedLocally': True, 'uploadedToTestFlight': False}, indent=2) + '\n', encoding='utf-8')
+        'exportedLocally': True, 'uploadedToTestFlight': False, 'internalTestingOnly': True,
+        'ipaSHA256': digest.hexdigest(), 'sourceRevision': os.environ.get('GITHUB_SHA', 'unknown'),
+        'workflowRunID': os.environ.get('GITHUB_RUN_ID'),
+        'usesNonExemptEncryption': False,
+        'version': app_info['CFBundleShortVersionString'], 'build': app_info['CFBundleVersion']}, indent=2) + '\n', encoding='utf-8')
     print('Automatic distribution export verified both memory entitlements. No build was uploaded.')
 
 

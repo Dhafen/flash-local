@@ -21,10 +21,18 @@ on:
         description: 'Compile the real device Release app and probe signing; skip tests/simulator (no test coverage claim)'
         type: boolean
         default: false
+      check_delivery_tools:
+        description: 'Only check Xcode delivery tool interfaces and Python delivery tests; no credentials or upload'
+        type: boolean
+        default: false
+      upload_private_testflight:
+        description: 'After all tests, archive and verified signing, upload to the configured own-tester internal group'
+        type: boolean
+        default: false
 
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.ref }}${{ inputs.upload_private_testflight && '-delivery' || '' }}
+  cancel-in-progress: ${{ !inputs.upload_private_testflight }}
 
 permissions:
   contents: read
@@ -41,12 +49,49 @@ env:
   XCODEBUILD_FLAGS: -skipPackagePluginValidation -skipMacroValidation
 
 jobs:
-  build-and-test:
-    name: ${{ inputs.provisioning_only && 'device archive · signing probe (no test coverage)' || 'streaming tests · app tests · package tests · iOS build' }}
+  delivery-tool-check:
+    if: github.event_name == 'workflow_dispatch' && inputs.check_delivery_tools
     runs-on: macos-26
-    timeout-minutes: 90
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - run: |
+          test "$(uname -m)" = arm64
+          sudo xcode-select -s /Applications/Xcode_26.2.app
+          python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
+          python3 scripts/deliver_testflight.py --check-tools
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: delivery-tool-check
+          path: testflight-tools-check.json
+          retention-days: 7
+
+  build-and-test:
+    if: ${{ !inputs.check_delivery_tools }}
+    name: ${{ inputs.provisioning_only && 'device archive · signing probe (no test coverage)' || 'streaming tests · app tests · package tests · iOS build' }}
+    runs-on: macos-26
+    timeout-minutes: ${{ inputs.upload_private_testflight && 120 || 90 }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Validate private delivery configuration before any build
+        if: github.event_name == 'workflow_dispatch' && inputs.upload_private_testflight
+        env:
+          APP_STORE_APP_ID: ${{ vars.APP_STORE_APP_ID }}
+          TESTFLIGHT_INTERNAL_GROUP_ID: ${{ vars.TESTFLIGHT_INTERNAL_GROUP_ID }}
+          TESTFLIGHT_ALLOWED_TESTER_IDS: ${{ vars.TESTFLIGHT_ALLOWED_TESTER_IDS }}
+        run: |
+          test '${{ inputs.release_archive }}' = true
+          test '${{ inputs.probe_automatic_signing }}' = true
+          test '${{ inputs.provisioning_only }}' = false
+          test -n "$APP_STORE_APP_ID"
+          test -n "$TESTFLIGHT_INTERNAL_GROUP_ID"
+          test -n "$TESTFLIGHT_ALLOWED_TESTER_IDS"
 
       - name: Validate isolated provisioning probe inputs
         if: github.event_name == 'workflow_dispatch' && inputs.provisioning_only
@@ -59,6 +104,9 @@ jobs:
           test "$(uname -m)" = arm64
           sudo xcode-select -s /Applications/Xcode_26.2.app
           xcodebuild -version
+
+      - name: Delivery logic tests
+        run: python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
 
       - name: Build pinned tokenizer XCFramework (Mac, iPhone, Simulator)
         run: python3 scripts/build_tokenizer_xcframework.py
@@ -224,6 +272,7 @@ jobs:
           xcodebuild archive -project Apps/Minirun/Minirun.xcodeproj $XCODEBUILD_FLAGS \
             -scheme Minirun-iOS -configuration Release -destination 'generic/platform=iOS' \
             -archivePath "$RUNNER_TEMP/FlashLocal.xcarchive" CODE_SIGNING_ALLOWED=NO \
+            CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
             2>&1 | tee ios-archive.log | tail -60
           python3 scripts/check_ios_archive.py "$RUNNER_TEMP/FlashLocal.xcarchive" --output ios-archive-check.json
 
@@ -240,6 +289,16 @@ jobs:
           bash scripts/prepare_flash_signing.sh
           export ASC_KEY_PATH="$RUNNER_TEMP/flash-local-signing/AuthKey.p8"
           python3 scripts/probe_automatic_export.py "$RUNNER_TEMP/FlashLocal.xcarchive"
+
+      - name: Upload and verify the own-tester private TestFlight build
+        if: github.event_name == 'workflow_dispatch' && inputs.upload_private_testflight
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          APP_STORE_APP_ID: ${{ vars.APP_STORE_APP_ID }}
+          TESTFLIGHT_INTERNAL_GROUP_ID: ${{ vars.TESTFLIGHT_INTERNAL_GROUP_ID }}
+          TESTFLIGHT_ALLOWED_TESTER_IDS: ${{ vars.TESTFLIGHT_ALLOWED_TESTER_IDS }}
+        run: python3 scripts/deliver_testflight.py
 
       - name: Remove temporary signing material and local IPA
         if: always() && github.event_name == 'workflow_dispatch' && inputs.probe_automatic_signing
@@ -264,6 +323,8 @@ jobs:
             ios-archive.log
             ios-archive-check.json
             ios-signing-probe.json
+            testflight-tools-check.json
+            testflight-delivery.json
             .work/reference-build.log
             .work/tokenizer-build.log
             .work/runtime/build-manifest.json

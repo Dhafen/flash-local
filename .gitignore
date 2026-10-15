@@ -33,3 +33,5 @@ __pycache__/
 /ios-signing-probe.json
 /brand-macos/
 /brand-ios/
+/testflight-tools-check.json
+/testflight-delivery.json
