@@ -10,13 +10,13 @@ Implemented foundations include bounded GGUF indexing, mixed GGML dequantization
 
 The iPhone chat route now connects a fully verified local GGUF to the canonical llama.cpp tokenizer/Jinja bridge and streamed Qwen4Exp generation. It includes resumable bounded downloads, cancellation, chat persistence and live memory/I/O figures. Complete sessions match the pinned CPU reference on a tiny untrained fixture; this does not validate the 56.1 GB weights. The initial app policy is 1,024 context tokens and a 4 GB process budget.
 
-New TestFlight delivery, full-model logit agreement, offline iPhone generation, measured phone memory/performance and 65K context remain unverified. Device Release compilation and automatic distribution export are under validation. The inherited model catalog is not evidence of REAM support.
+Full-model logit agreement, offline iPhone generation, measured phone memory/performance and 65K context remain unverified. The actual device Release app has passed automatic Apple distribution export, including its App Store signature/profile and both memory entitlements. Private TestFlight upload remains pending the App Store Connect app record. The inherited model catalog is not evidence of REAM support.
 
 See [implementation and validation](docs/REAM-IMPLEMENTATION.md) and the [draft implementation PR](https://github.com/Dhafen/flash-local/pull/1). GitHub Actions builds on Apple silicon with pinned Xcode 26.2. Actual model inference is not run in the cloud.
 
 ## Build
 
-The app uses the Flash Local identity and its own bundle identifier. Original internal schemes and module names are retained. Signing and TestFlight distribution remain pending. On an Apple-silicon Mac with Xcode 26.2 selected, run `python3 scripts/build_tokenizer_xcframework.py` before resolving Swift packages or running xcodebuild. This builds the pinned vocabulary-only C runtime locally for Mac, iPhone and Simulator; the generated library is not committed. CI runs that preparation automatically. Run the xcodebuild gates in [AGENTS.md](AGENTS.md) and [the implementation notes](docs/REAM-IMPLEMENTATION.md). A Windows host can drive the hosted build.
+The app uses the Flash Local identity and its own bundle identifier. Original internal schemes and module names are retained. On an Apple-silicon Mac with Xcode 26.2 selected, run `python3 scripts/build_tokenizer_xcframework.py` before resolving Swift packages or running xcodebuild. This builds the pinned C runtime for Mac, iPhone and Simulator: a vocabulary-only tokenizer path and a separate, bounded CPU numerical diagnostic. The generated library is not committed. CI runs that preparation automatically. Run the xcodebuild gates in [AGENTS.md](AGENTS.md) and [the implementation notes](docs/REAM-IMPLEMENTATION.md). See [private TestFlight delivery](docs/TESTFLIGHT.md) for signing, upload and availability checks. A Windows host can drive the hosted build.
 
 ## License and origin
 
