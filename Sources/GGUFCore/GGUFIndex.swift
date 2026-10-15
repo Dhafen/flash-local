@@ -1,11 +1,12 @@
 import Foundation
 import StorageCore
 
-public enum GGUFError: Error, Equatable, CustomStringConvertible {
+public enum GGUFError: Error, Equatable, CustomStringConvertible, LocalizedError {
     case invalid(String)
     case unsupported(String)
     case truncated
     case limit(String)
+    public var errorDescription: String? { description }
 
     public var description: String {
         switch self {

@@ -99,6 +99,7 @@ jobs:
           xcodebuild test -project Apps/Minirun/Minirun.xcodeproj $XCODEBUILD_FLAGS \
             -scheme Minirun-macOS -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO \
             -only-testing:MinirunTests/ForkBrandRenderTests -resultBundlePath mac-brand.xcresult \
+            -only-testing:MinirunTests/REAMChatRenderTests \
             2>&1 | tee mac-brand.log | tail -50
           grep -E 'ForkBrandRenderTests.*passed' mac-brand.log
           xcrun xcresulttool export attachments --path mac-brand.xcresult --output-path brand-macos
@@ -151,6 +152,7 @@ jobs:
           xcodebuild test -project Apps/Minirun/Minirun.xcodeproj $XCODEBUILD_FLAGS \
             -scheme Minirun-iOS -destination "platform=iOS Simulator,id=$SIMULATOR" CODE_SIGNING_ALLOWED=NO \
             -only-testing:MinirunIOSTests/ForkBrandRenderTests -resultBundlePath ios-brand.xcresult \
+            -only-testing:MinirunIOSTests/REAMChatRenderTests \
             2>&1 | tee ios-brand.log | tail -60
           grep -E 'ForkBrandRenderTests.*passed' ios-brand.log
           xcrun xcresulttool export attachments --path ios-brand.xcresult --output-path brand-ios

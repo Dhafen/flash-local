@@ -148,6 +148,21 @@ public struct GGUFModelTransfer: Sendable {
         }
         return UInt64(value.st_size)
     }
+
+    /// Explicit user action only. Installed model files are never removed.
+    public static func discardPartial(insideRoot root: URL, manifest: GGUFModelManifest = .primaryREAM) throws {
+        let directory = Darwin.open(root.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        guard directory >= 0 else { throw posix() }; defer { _ = Darwin.close(directory) }
+        let name = manifest.fileName + ".partial"
+        let fd = openat(directory, name, O_RDWR | O_NOFOLLOW | O_CLOEXEC)
+        if fd >= 0 {
+            defer { _ = Darwin.close(fd) }
+            _ = try size(fd)
+            guard flock(fd, LOCK_EX | LOCK_NB) == 0 else { throw GGUFError.invalid("download is still active") }
+            guard unlinkat(directory, name, 0) == 0 else { throw posix() }
+        } else if errno != ENOENT { throw posix() }
+        if unlinkat(directory, name + ".json", 0) != 0, errno != ENOENT { throw posix() }
+    }
     private static func read(fd: Int32, offset: UInt64, count: Int) throws -> Data {
         var data = Data(count: count)
         try data.withUnsafeMutableBytes { bytes in
