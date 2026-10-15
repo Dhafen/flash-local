@@ -33,6 +33,8 @@ def main():
             headers.mkdir(exist_ok=True)
             shutil.copyfile(root / "Sources/CLlamaTokenizer/include/FlashLlamaTokenizer.h",
                             headers / "FlashLlamaTokenizer.h")
+            shutil.copyfile(root / "Sources/CLlamaTokenizer/include/FlashLlamaReference.h",
+                            headers / "FlashLlamaReference.h")
             (headers / "module.modulemap").write_text(
                 'module LlamaTokenizerRuntime {\n  header "FlashLlamaTokenizer.h"\n  export *\n}\n', encoding="utf-8")
             libraries = []
@@ -86,6 +88,7 @@ def main():
         "llamaRevision": REVISION, "slices": records,
         "xcode": subprocess.check_output(["xcodebuild", "-version"], text=True).strip(),
         "vocabularyOnly": True, "inferenceContextCreated": False,
+        "separateCPUReferenceAPI": True,
     }, indent=2) + "\n", encoding="utf-8")
     print(f"Canonical vocabulary-only runtime built for {len(records)} Apple platforms at {REVISION}")
 

@@ -20,6 +20,7 @@ target_link_libraries(flash-local-reference PRIVATE llama)
 add_executable(flash-local-tokenizer-reference tokenizer.cpp)
 add_library(flash-local-tokenizer-runtime STATIC
   "${CMAKE_CURRENT_SOURCE_DIR}/../../Sources/CLlamaTokenizer/FlashLlamaTokenizer.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../Sources/CLlamaTokenizer/FlashLlamaReference.cpp"
   "${LLAMA_SOURCE}/common/json.cpp"
   "${LLAMA_SOURCE}/common/unicode.cpp"
   "${LLAMA_SOURCE}/common/jinja/lexer.cpp"
