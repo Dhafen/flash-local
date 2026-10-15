@@ -41,7 +41,9 @@ The original project and the existing Priv AI application are not modified.
   Constructor validates all required shapes before opening weight readers.
   Failed/cancelled steps require reset. Live footprint checks retain headroom
   and the process-wide MLX allocator cache is capped at 32 MiB. This graph is
-  not yet validated end-to-end against llama.cpp or enabled in the app.
+  validated against pinned llama.cpp with tiny random-weight graph/session
+  fixtures. The iPhone chat route now uses it through verified GGUF authority;
+  trained-model numerical parity remains unverified.
 
 On live iOS launches, the app registers its own Documents/Models root, creates
 it on resolution, excludes it from backup and uses first-unlock file protection.
@@ -50,11 +52,37 @@ to that explicit root; per-job bookmarks cannot escape it through a prefix
 sibling or symlink. External/user-picked locations retain the existing grant
 rules. Previews and injected storage do not gain implicit local authority.
 
-These components do **not** yet constitute a validated model runner. Tokenizer,
-complete attention integration/reference parity, complete PLE path,
-runner binding to verified artifacts, downloader,
-chat integration, app rebranding and signing still need implementation and
-verification. No model is advertised as executable by these additions.
+`GGUFModelTransfer` downloads exact HTTPS ranges through a body-bounded
+URLSession delegate, records fsynced chunk hashes and the strong ETag, checks
+committed chunks before resume, and publishes the final name only after full
+SHA-256/GGUF verification. It makes no second full-size model copy. Installed
+files are never overwritten. Core tests cover interruption, corrupt chunks,
+changed identity, short responses, invalid headers and local storage limits.
+A real URLSession test at `a294c6f` fetched only eight GGUF header bytes through
+the pinned origin/CDN, preserving the ETag across the second If-Range request.
+
+`REAMAppModel` and `REAMRootView` connect internal storage, verification,
+download/resume and canonical generation on the normal iPhone launch. Workers
+run hashing/I/O/MLX off the main actor; Stop keeps the UI busy until teardown.
+Ordered bounded text events feed the transcript, and chat is saved locally.
+Backgrounding stops the operation. The initial run policy is 1,024 context
+tokens, 128 output tokens and 4,000,000,000 process bytes; this is a cautious
+starting policy, not completion of the 65K goal. No fake output is substituted.
+
+The actual app-controller session test at `a294c6f` passed exact prompt IDs,
+eight generated IDs and decoded text against pinned CPU llama.cpp, persisted
+the transcript, recovered after Stop and disabled Send when the file vanished.
+That run failed separately because Git normalized the original model license's
+CRLF bytes. `.gitattributes` now preserves the exact upstream bytes. New builds
+are validating the fix. Earlier ImageRenderer chat captures omitted the native
+scroll/input controls and are not accepted as visual proof; hosted-window
+captures replace them and still require inspection.
+
+The app has its own Flash Local identity and original model license available
+offline. Device Release archives and a local automatic signing export are
+optional manual CI gates. The export checks the actual signature/profile for
+both memory entitlements and never uploads an IPA. Apple app-record setup and
+TestFlight delivery remain unfinished; no real-model/iPhone result is claimed.
 
 ## Reproducible checks
 
@@ -134,7 +162,8 @@ resolution. `CanonicalQwen35Tokenizer` binds the C API to verified GGUF
 capabilities; its tests compare all public strings/conversations and reject
 file mutation after vocabulary loading. The experimental Swift probe is not
 registered as a runner and lives under `Tests/ModelAdaptersTests/Support`,
-outside the product source targets. These additions remain under CI validation.
+outside the product source targets. Canonical tokenizer and complete synthetic
+generation gates passed in run `38709619293` at `6b44062`.
 
 `Qwen4ExpTextGeneration` connects canonical text prompts to the streamed
 decoder, with deterministic greedy sampling, EOG handling, byte-correct UTF-8
@@ -143,7 +172,8 @@ telemetry. It distinguishes sampled run footprint from process-lifetime peak.
 A separate 237 KB random-weight fixture adds a tiny byte vocabulary to the full
 test graph; the CPU reference and Swift engine must produce identical prompt
 and generated IDs, then repeat after cancellation. This is not trained-model
-quality or iPhone performance evidence. Product UI integration remains pending.
+quality or iPhone performance evidence. The product iPhone route is implemented;
+its complete current build and hosted visual review remain under validation.
 
 ## Important artifact discrepancy
 

@@ -8,7 +8,9 @@ Target: the 56.1 GB Qwen3.8-Flash-Next-REAM GGUF, a total process memory budget 
 
 Implemented foundations include bounded GGUF indexing, mixed GGML dequantization, row-streamed MLX projections, a bounded expert cache, PLE hashing, GDN/hyper-connection primitives, chunked FP16 text-attention KV storage, internal Documents/Models storage and descriptor-bound integrity verification.
 
-A complete model runner and new TestFlight release are still in development. Full-model logit agreement, offline generation, iPhone memory/performance and 65K context have not been verified. The inherited model catalog is not evidence of REAM support.
+The iPhone chat route now connects a fully verified local GGUF to the canonical llama.cpp tokenizer/Jinja bridge and streamed Qwen4Exp generation. It includes resumable bounded downloads, cancellation, chat persistence and live memory/I/O figures. Complete sessions match the pinned CPU reference on a tiny untrained fixture; this does not validate the 56.1 GB weights. The initial app policy is 1,024 context tokens and a 4 GB process budget.
+
+New TestFlight delivery, full-model logit agreement, offline iPhone generation, measured phone memory/performance and 65K context remain unverified. Device Release compilation and automatic distribution export are under validation. The inherited model catalog is not evidence of REAM support.
 
 See [implementation and validation](docs/REAM-IMPLEMENTATION.md) and the [draft implementation PR](https://github.com/Dhafen/flash-local/pull/1). GitHub Actions builds on Apple silicon with pinned Xcode 26.2. Actual model inference is not run in the cloud.
 
