@@ -105,7 +105,7 @@ relative L2 <= 1e-3, then tests reset/cancellation. CI runs this separately from
 suboperator tests and rejects skips. This is synthetic numerical testing, not
 actual-model cloud inference or evidence of quality on the REAM weights.
 
-The experimental Swift Qwen35 parity probe reads the GGUF's original byte vocabulary, token types
+The test-only Swift Qwen35 parity probe reads the GGUF's original byte vocabulary, token types
 and ranked merge table through an explicitly bounded metadata opt-in. Layout
 inspection still omits large arrays. Verified metadata reads are tied to
 the fully hashed file descriptor. Qwen35 has no whole-word merge shortcut.
@@ -133,7 +133,8 @@ Mac/device/Simulator slices from the same source pin before Swift package
 resolution. `CanonicalQwen35Tokenizer` binds the C API to verified GGUF
 capabilities; its tests compare all public strings/conversations and reject
 file mutation after vocabulary loading. The experimental Swift probe is not
-registered as a runner. These additions remain under CI validation.
+registered as a runner and lives under `Tests/ModelAdaptersTests/Support`,
+outside the product source targets. These additions remain under CI validation.
 
 `Qwen4ExpTextGeneration` connects canonical text prompts to the streamed
 decoder, with deterministic greedy sampling, EOG handling, byte-correct UTF-8

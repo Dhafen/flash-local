@@ -1,12 +1,6 @@
 import CryptoKit
 import Foundation
-
-public struct Qwen35ChatMessage: Equatable, Sendable, Codable {
-    public enum Role: String, Sendable, Codable { case system, user, assistant }
-    public let role: Role
-    public let content: String
-    public init(role: Role, content: String) { self.role = role; self.content = content }
-}
+import ModelAdapters
 
 /// Experimental parity probe; the product will render through canonical Jinja.
 /// Text-only, completed-turn chat with enable_thinking=false and
