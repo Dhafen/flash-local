@@ -20,6 +20,22 @@ def main():
     parser.add_argument('archive', type=pathlib.Path)
     args = parser.parse_args()
     root = pathlib.Path(os.environ['RUNNER_TEMP']) / 'flash-local-signing'
+    requested_path = pathlib.Path(__file__).resolve().parents[1] / 'Apps/Minirun/Minirun-iOS.entitlements'
+    requested = plistlib.loads(requested_path.read_bytes())
+    if set(requested) != set(MEMORY_KEYS) or not all(requested[key] is True for key in MEMORY_KEYS):
+        raise RuntimeError('Unexpected app capability request')
+    app_in_archive = args.archive / 'Products/Applications/FlashLocal.app'
+    # CODE_SIGNING_ALLOWED=NO leaves no entitlement blob for the exporter to
+    # discover. Stage an ad-hoc signature with only the app's requested flags;
+    # Xcode must still obtain an authorized Apple distribution profile and sign
+    # the exported IPA. An ad-hoc signature is never accepted as final proof.
+    subprocess.run(['codesign', '--force', '--sign', '-', '--generate-entitlement-der',
+                    '--entitlements', str(requested_path), str(app_in_archive)],
+                   check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    staged = plistlib.loads(subprocess.run(['codesign', '-d', '--entitlements', ':-', str(app_in_archive)],
+                           check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).stdout)
+    if not all(staged.get(key) is True for key in MEMORY_KEYS):
+        raise RuntimeError('Requested memory capabilities did not enter the staged archive')
     options = {'method': 'app-store-connect', 'destination': 'export',
                'teamID': os.environ['APPLE_TEAM_ID'], 'signingStyle': 'automatic',
                'signingCertificate': 'Apple Distribution', 'testFlightInternalTestingOnly': True,
@@ -80,9 +96,11 @@ def main():
             raise RuntimeError('Wrong exported application identity')
         if entitlements.get('get-task-allow', False):
             raise RuntimeError('Exported app permits debugging')
-        for key in MEMORY_KEYS:
-            if entitlements.get(key) is not True or profile['Entitlements'].get(key) is not True:
-                raise RuntimeError('Required memory entitlement absent from exported app or profile: ' + key)
+        observed = {key: {'signature': entitlements.get(key) is True,
+                         'profile': profile['Entitlements'].get(key) is True} for key in MEMORY_KEYS}
+        print('Exported memory capability admission: ' + json.dumps(observed, sort_keys=True))
+        if not all(all(status.values()) for status in observed.values()):
+            raise RuntimeError('Required memory entitlement absent from exported app or profile')
     pathlib.Path('ios-signing-probe.json').write_text(json.dumps({
         'bundleIdentifier': 'com.dhafen.flashlocal', 'signatureVerified': True,
         'memoryEntitlementsVerified': True, 'profileType': 'app-store',

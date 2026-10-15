@@ -17,6 +17,10 @@ on:
         description: 'After the unsigned archive, try a local automatic Apple distribution export; never upload'
         type: boolean
         default: false
+      provisioning_only:
+        description: 'Compile the real device Release app and probe signing; skip tests/simulator (no test coverage claim)'
+        type: boolean
+        default: false
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -38,11 +42,17 @@ env:
 
 jobs:
   build-and-test:
-    name: streaming tests · app tests · package tests · iOS build
+    name: ${{ inputs.provisioning_only && 'device archive · signing probe (no test coverage)' || 'streaming tests · app tests · package tests · iOS build' }}
     runs-on: macos-26
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
+
+      - name: Validate isolated provisioning probe inputs
+        if: github.event_name == 'workflow_dispatch' && inputs.provisioning_only
+        run: |
+          test '${{ inputs.release_archive }}' = true
+          test '${{ inputs.probe_automatic_signing }}' = true
 
       - name: Select pinned Xcode 26.2
         run: |
@@ -66,6 +76,7 @@ jobs:
         run: xcodebuild -resolvePackageDependencies -project Apps/Minirun/Minirun.xcodeproj -scheme Minirun-macOS $XCODEBUILD_FLAGS
 
       - name: GGUF parser, state and storage correctness
+        if: github.event_name != 'workflow_dispatch' || !inputs.provisioning_only
         run: |
           python3 scripts/fetch_ream_metadata.py
           python3 scripts/make_engram_test_fixture.py
@@ -91,6 +102,7 @@ jobs:
           grep 'REAM_URLSESSION_RANGE bytes=8 exact206=true sameETag=true closed=true noTensorPayload=true' streaming-tests.log
 
       - name: Synthetic full-graph logits against pinned CPU llama.cpp
+        if: github.event_name != 'workflow_dispatch' || !inputs.provisioning_only
         run: |
           python3 scripts/run_synthetic_reference.py
           export GGUF_HEADER_FIXTURE="$GITHUB_WORKSPACE/.test-fixtures/ream.header"
@@ -111,6 +123,7 @@ jobs:
           grep 'REAM_LOCAL_PARITY positions=5 cpuThenMLX=true allLogitsCompared=true passed=true syntheticOnly=true' parity-tests.log
 
       - name: App tests (macOS)
+        if: github.event_name != 'workflow_dispatch' || !inputs.provisioning_only
         run: |
           set -o pipefail
           export GGUF_HEADER_FIXTURE="$GITHUB_WORKSPACE/.test-fixtures/ream.header"
@@ -121,6 +134,7 @@ jobs:
           grep 'REAM_APP_SESSION_PARITY exactPromptIDs=true exactGeneratedIDs=true exactText=true saved=true stopRecovery=true' app-tests.log
 
       - name: macOS brand review in light and dark
+        if: github.event_name != 'workflow_dispatch' || !inputs.provisioning_only
         run: |
           xcodebuild test -project Apps/Minirun/Minirun.xcodeproj $XCODEBUILD_FLAGS \
             -scheme Minirun-macOS -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO \
@@ -131,6 +145,7 @@ jobs:
           xcrun xcresulttool export attachments --path mac-brand.xcresult --output-path brand-macos
 
       - name: Package tests (MinirunKit)
+        if: github.event_name != 'workflow_dispatch' || !inputs.provisioning_only
         run: |
           set -o pipefail
           xcodebuild test -scheme minirun-Package $XCODEBUILD_FLAGS -destination 'platform=macOS' \
@@ -167,12 +182,14 @@ jobs:
           retention-days: 14
 
       - name: Build the iOS app (Simulator)
+        if: github.event_name != 'workflow_dispatch' || !inputs.provisioning_only
         run: |
           xcodebuild build -project Apps/Minirun/Minirun.xcodeproj $XCODEBUILD_FLAGS \
             -scheme Minirun-iOS -destination 'generic/platform=iOS Simulator' \
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee ios-build.log | tail -30
 
       - name: iOS brand review in light and dark
+        if: github.event_name != 'workflow_dispatch' || !inputs.provisioning_only
         run: |
           SIMULATOR=$(xcrun simctl list devices available --json | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(x["udid"] for v in d["devices"].values() for x in v if x["name"] == "iPhone 17 Pro Max" and x.get("isAvailable")))')
           xcodebuild test -project Apps/Minirun/Minirun.xcodeproj $XCODEBUILD_FLAGS \
