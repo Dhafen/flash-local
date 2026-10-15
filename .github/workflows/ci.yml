@@ -56,6 +56,12 @@ jobs:
       - name: Generate fork project with pinned XcodeGen
         run: python3 scripts/generate_xcode_project.py
 
+      - name: Require committed project to match the pinned generator
+        run: |
+          git diff --exit-code -- Apps/Minirun/Minirun.xcodeproj/project.pbxproj \
+            Apps/Minirun/Minirun.xcodeproj/xcshareddata/xcschemes \
+            Apps/Minirun/Info-iOS.plist Apps/Minirun/Info-macOS.plist
+
       - name: Resolve Swift packages
         run: xcodebuild -resolvePackageDependencies -project Apps/Minirun/Minirun.xcodeproj -scheme Minirun-macOS $XCODEBUILD_FLAGS
 

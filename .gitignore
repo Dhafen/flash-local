@@ -19,3 +19,17 @@ xcuserdata/
 *.safetensors
 Tests/Fixtures/deepseek-v41/engram/
 __pycache__/
+# CI-only reports must not mark the embedded source revision as modified.
+/*.xcresult/
+/streaming-tests.log
+/parity-tests.log
+/app-tests.log
+/package-tests.log
+/mac-brand.log
+/ios-brand.log
+/ios-build.log
+/ios-archive.log
+/ios-archive-check.json
+/ios-signing-probe.json
+/brand-macos/
+/brand-ios/
