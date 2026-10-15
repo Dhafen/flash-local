@@ -4,6 +4,30 @@ import XCTest
 @testable import MinirunKit
 
 final class GGUFModelTransferTests: XCTestCase {
+    func testPinnedHTTPSOriginHonorsBoundedRangesAndIfRangeThroughURLSession() async throws {
+        let env = ProcessInfo.processInfo.environment
+        guard (env["FLASH_LOCAL_TEST_RANGE"] ?? env["TEST_RUNNER_FLASH_LOCAL_TEST_RANGE"]) == "1" else {
+            throw XCTSkip("Opt in to the eight-byte published-header HTTP test with FLASH_LOCAL_TEST_RANGE=1")
+        }
+        let source = PinnedGGUFDownload.primaryREAM
+        let transport = GGUFHTTPRangeTransport()
+        defer { transport.close() }
+        let first = try await transport.fetch(url: source.url, range: 0..<4,
+            totalBytes: source.manifest.fileByteCount, etag: nil)
+        XCTAssertEqual(first.bytes, Data("GGUF".utf8))
+        let second = try await transport.fetch(url: source.url, range: 4..<8,
+            totalBytes: source.manifest.fileByteCount, etag: first.etag)
+        XCTAssertEqual(second.bytes, Data([3, 0, 0, 0]))
+        XCTAssertEqual(second.etag, first.etag)
+        transport.close()
+        do {
+            _ = try await transport.fetch(url: source.url, range: 0..<4,
+                totalBytes: source.manifest.fileByteCount, etag: first.etag)
+            XCTFail("Closed transport must refuse another request")
+        } catch { XCTAssertTrue(error is CancellationError) }
+        print("REAM_URLSESSION_RANGE bytes=8 exact206=true sameETag=true closed=true noTensorPayload=true")
+    }
+
     private final class Flag: @unchecked Sendable {
         private let lock = NSLock(); private var value = false
         func set() { lock.lock(); value = true; lock.unlock() }

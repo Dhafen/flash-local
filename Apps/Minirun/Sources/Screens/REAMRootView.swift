@@ -20,8 +20,16 @@ struct REAMRootView: View {
                             .disabled(model.isBusy || model.messages.isEmpty)
                     }
                     ToolbarItem(placement: .automatic) {
-                        NavigationLink { AboutView() } label: { Image(systemName: "info.circle") }
-                            .accessibilityLabel("Om Flash Local")
+                        Menu {
+                            NavigationLink("Om Flash Local") { AboutView() }
+                            NavigationLink("Licenser på enheten") {
+                                ScrollView {
+                                    Text(REAMBundledNotices.text).font(.footnote).textSelection(.enabled).padding()
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }.navigationTitle("Licenser")
+                            }
+                        } label: { Image(systemName: "info.circle") }
+                        .accessibilityLabel("Information och licenser")
                     }
                 }
                 .confirmationDialog(confirmation == .clear ? "Rensa den här chatten?" : "Radera den påbörjade hämtningen?",
@@ -162,3 +170,17 @@ struct REAMChatPage: View {
 #if DEBUG
 #Preview("REAM chat") { REAMChatPage(model: .reviewPreview()).frame(width: 430, height: 900) }
 #endif
+
+enum REAMBundledNotices {
+    static let text: String = {
+        do {
+            let files = ["QwenModelLicense", "OpenSourceNotices"]
+            return try files.map { name in
+                guard let url = Bundle.main.url(forResource: name, withExtension: "txt") else {
+                    throw CocoaError(.fileNoSuchFile)
+                }
+                return try String(contentsOf: url, encoding: .utf8)
+            }.joined(separator: "\n\n---\n\n")
+        } catch { return "Licensfilerna kunde inte läsas. Rapportera detta byggfel innan modellen används." }
+    }()
+}

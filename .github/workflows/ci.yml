@@ -57,6 +57,8 @@ jobs:
           python3 scripts/make_qwen4exp_test_model.py
           export GGUF_HEADER_FIXTURE="$GITHUB_WORKSPACE/.test-fixtures/ream.header"
           export TEST_RUNNER_GGUF_HEADER_FIXTURE="$GGUF_HEADER_FIXTURE"
+          export FLASH_LOCAL_TEST_RANGE=1
+          export TEST_RUNNER_FLASH_LOCAL_TEST_RANGE=1
           xcodebuild test -scheme minirun-Package $XCODEBUILD_FLAGS -destination 'platform=macOS' \
             -only-testing:GGUFCoreTests -only-testing:ModelAdaptersTests -only-testing:MLXBridgeTests \
             -only-testing:StorageCoreTests -only-testing:iOSBenchTests \
@@ -70,6 +72,7 @@ jobs:
             -resultBundlePath streaming-tests.xcresult 2>&1 | tee streaming-tests.log | tail -60
           if grep -E 'PublishedGGUFTests.*skipped' streaming-tests.log; then exit 1; fi
           if grep -E 'PublishedQwen4ExpLayoutTests.*skipped' streaming-tests.log; then exit 1; fi
+          grep 'REAM_URLSESSION_RANGE bytes=8 exact206=true sameETag=true closed=true noTensorPayload=true' streaming-tests.log
 
       - name: Synthetic full-graph logits against pinned CPU llama.cpp
         run: |

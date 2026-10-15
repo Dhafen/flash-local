@@ -1,4 +1,5 @@
 import SwiftUI
+import CryptoKit
 import XCTest
 #if canImport(UIKit)
 import UIKit
@@ -15,6 +16,12 @@ final class ForkBrandRenderTests: XCTestCase {
         let text = try String(contentsOf: notices, encoding: .utf8)
         XCTAssertTrue(text.contains("Apache License"))
         XCTAssertTrue(text.contains("The ggml authors"))
+        let modelLicense = try XCTUnwrap(Bundle.main.url(forResource: "QwenModelLicense", withExtension: "txt"))
+        let licenseBytes = try Data(contentsOf: modelLicense)
+        XCTAssertEqual(SHA256.hash(data: licenseBytes).map { String(format: "%02x", $0) }.joined(),
+            "a0dc422560841fd68e06d974907f8b4c709bca44a67daad2b528437bdf676c08")
+        XCTAssertTrue(REAMBundledNotices.text.contains("Qwen Community License 1.0"))
+        XCTAssertTrue(REAMBundledNotices.text.contains("Apache License"))
         var rendered: [Data] = []
         for scheme in [ColorScheme.light, .dark] {
             let renderer = ImageRenderer(content: AboutPage().frame(width: 430)

@@ -211,25 +211,16 @@ enum MinirunProcessContext {
     }
 #endif
 
-/// Minirun: download a pre-converted artifact and run it on device with the
-/// weights streaming from disk.
-///
-/// The product is one idea rendered as a screen — a **stated** memory budget,
-/// with the tier split visible and live telemetry proving the run kept it. Four
-/// invariants of the codebase are load-bearing here and not engineering trivia:
-/// a budget is stated before a run and never emergent; invalid configuration is
-/// refused with a named error and never clamped; where files and metadata
-/// disagree, the files win; and every byte lands in exactly one bucket.
-///
-/// This target links the package's catalogue, storage and real K3 runtime. The
-/// product registers K3 only when the current HF snapshot, complete local
-/// verification and the artifact-published tokenizer identity agree; every
-/// other model fails closed. Preview stand-ins are injected only by SwiftUI
-/// previews and tests. See DESIGN.md.
+/// Flash Local's iPhone launch owns the verified local GGUF chat. The inherited
+/// Mac workspace and explicit review/refusal launches remain isolated. A hosted
+/// unit test must never start a model download or inspect the operator's files.
 @main
 struct MinirunApp: App {
 
     @State private var model: AppModel
+    #if os(iOS)
+        @State private var reamModel: REAMAppModel?
+    #endif
     #if os(macOS)
         /// The Mac ships outside the App Store, so the app is the only thing
         /// that can tell an operator their build is stale. Owned here, beside
@@ -252,7 +243,16 @@ struct MinirunApp: App {
             // operator's defaults domain.
             _ = MinirunWindowRestorationMigration.applyIfNeeded(for: launch)
         #endif
-        let initialModel = launch.makeModel(arguments: arguments)
+        #if os(iOS)
+            let ream = launch == .live ? REAMAppModel.live() : nil
+            _reamModel = State(initialValue: ream)
+            // The iPhone REAM route must not initialize the inherited live
+            // catalog, bookmark authority or download services as a side effect.
+            let initialModel = ream == nil ? launch.makeModel(arguments: arguments)
+                : AppModel.refusingUnsafeReviewLaunch()
+        #else
+            let initialModel = launch.makeModel(arguments: arguments)
+        #endif
         _model = State(initialValue: initialModel)
         #if os(macOS)
             _updater = State(initialValue: SoftwareUpdater.forLaunch(launch))
@@ -274,6 +274,16 @@ struct MinirunApp: App {
 
     var body: some Scene {
         WindowGroup {
+            #if os(iOS)
+            Group {
+                if let reamModel {
+                    REAMRootView(model: reamModel)
+                } else {
+                    RootView().environment(model)
+                }
+            }
+            .tint(MRColor.tierPinned)
+            #else
             RootView()
                 .environment(model)
                 .tint(MRColor.tierPinned)
@@ -286,6 +296,7 @@ struct MinirunApp: App {
                 .frame(
                     minWidth: ConversationWorkspaceLayout.minimumWindowWidth,
                     minHeight: ConversationWorkspaceLayout.minimumWindowHeight)
+            #endif
             #endif
         }
         #if os(macOS)
