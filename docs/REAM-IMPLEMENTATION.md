@@ -50,13 +50,18 @@ The original project and the existing Priv AI application are not modified.
   trained-model numerical parity remains unverified.
 
 The synthetic reference harness also generates a separate 256-wide graph
-with 113 random tensors (16.7 MB before quantization). Its test-only converter
+with 113 random tensors (23.5 MB before quantization). Two recurrent key heads
+and six value heads exercise the primary model's 1:3 modulo-head mapping.
+Its test-only converter
 uses the pinned `ggml_quantize_chunk` for Q4_K/Q5_0/Q6_K routed experts,
 Q8_0 embeddings/shared projection, Q4_0 PLE, F16 HC, BF16 routers and retained
 F32 operators. It requires all eight encodings in one file. A full five-position
 CPU/streamed-MLX logit comparison uses the existing absolute 0.01 and relative
 L2 0.001 limits; this newly added gate still requires a successful hosted run.
 It does not establish trained-model numerical agreement or phone performance.
+The standalone CPU reference explicitly disables native tuning, Accelerate,
+KleidiAI and llamafile, and selects the runtime's armv8-a target on Apple silicon;
+its settings do not depend on a prior tokenizer build's CMake cache.
 
 On live iOS launches, the app registers its own Documents/Models root, creates
 it on resolution, excludes it from backup and uses first-unlock file protection.

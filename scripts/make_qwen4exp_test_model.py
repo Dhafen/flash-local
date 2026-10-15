@@ -24,6 +24,9 @@ def main(chat=False, mixed=False):
     if 2 * ple != hidden:
         raise ValueError("Concatenated PLE heads must match hidden width")
     wide = hidden * 2
+    key_heads, value_heads = (2, 6) if mixed else (1, 1)
+    value_width = value_heads * 128
+    channels = (2 * key_heads + value_heads) * 128
     rng = random.Random(20261015)
     meta = {"general.architecture": (8, "qwen4exp"), "general.name": (8, "synthetic-graph-test"),
             "tokenizer.ggml.model": (8, "none")}
@@ -54,7 +57,7 @@ def main(chat=False, mixed=False):
         "attention.key_length": 8, "attention.value_length": 8, "rope.dimension_count": 2,
         "expert_count": 3, "expert_used_count": 2, "expert_feed_forward_length": width,
         "expert_shared_feed_forward_length": width, "ssm.conv_kernel": 2, "ssm.state_size": 128,
-        "ssm.group_count": 1, "ssm.time_step_rank": 1, "ssm.inner_size": 128,
+        "ssm.group_count": key_heads, "ssm.time_step_rank": value_heads, "ssm.inner_size": value_width,
         "full_attention_interval": 4, "hyper_connection.count": 2, "hyper_connection.low_rank": rank,
         "attention.indexer.head_count": 1, "attention.indexer.key_length": 8,
         "attention.indexer.top_k": 4, "ple.ngram_size": 3, "ple.heads_per_ngram": 1,
@@ -104,10 +107,10 @@ def main(chat=False, mixed=False):
             tensor(p + "indexer.q_proj.weight", [hidden, 8]); tensor(p + "indexer.k_proj.weight", [hidden, 8])
             tensor(p + "indexer.q_norm.weight", [8], 1.0); tensor(p + "indexer.k_norm.weight", [8], 1.0)
         else:
-            tensor(p + "attn_qkv.weight", [hidden, 384]); tensor(p + "attn_gate.weight", [hidden, 128])
-            tensor(p + "ssm_alpha.weight", [hidden, 1]); tensor(p + "ssm_beta.weight", [hidden, 1])
-            tensor(p + "ssm_conv1d.weight", [2, 384]); tensor(p + "ssm_out.weight", [128, hidden])
-            tensor(p + "ssm_a", [1], -0.25); tensor(p + "ssm_dt.bias", [1], -1.0)
+            tensor(p + "attn_qkv.weight", [hidden, channels]); tensor(p + "attn_gate.weight", [hidden, value_width])
+            tensor(p + "ssm_alpha.weight", [hidden, value_heads]); tensor(p + "ssm_beta.weight", [hidden, value_heads])
+            tensor(p + "ssm_conv1d.weight", [2, channels]); tensor(p + "ssm_out.weight", [value_width, hidden])
+            tensor(p + "ssm_a", [value_heads], -0.25); tensor(p + "ssm_dt.bias", [value_heads], -1.0)
             tensor(p + "ssm_norm.weight", [128], 1.0)
         if layer == 1:
             tensor(p + "ple_key.weight", [2 * ple, wide]); tensor(p + "ple_value.weight", [2 * ple, hidden])

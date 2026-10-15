@@ -5,6 +5,7 @@ Never accepts a user model/prompt. Actual REAM weights are not fetched or run.
 import pathlib
 import hashlib
 import json
+import platform
 import subprocess
 
 from llama_reference_source import REVISION, prepare
@@ -31,8 +32,13 @@ def main():
                 raise
         try:
             source = prepare(root, run)
-            run(["cmake", "-S", root / "Tests/ReferenceHarness", "-B", build,
-                 f"-DLLAMA_SOURCE={source}", "-DCMAKE_BUILD_TYPE=Release"])
+            configure = ["cmake", "-S", root / "Tests/ReferenceHarness", "-B", build,
+                 f"-DLLAMA_SOURCE={source}", "-DCMAKE_BUILD_TYPE=Release",
+                 "-DGGML_NATIVE=OFF", "-DGGML_ACCELERATE=OFF",
+                 "-DGGML_CPU_KLEIDIAI=OFF", "-DGGML_LLAMAFILE=OFF"]
+            if platform.system() == "Darwin" and platform.machine() == "arm64":
+                configure += ["-DCMAKE_OSX_ARCHITECTURES=arm64", "-DGGML_CPU_ARM_ARCH=armv8-a"]
+            run(configure)
             run(["cmake", "--build", build, "--target", "flash-local-reference",
                  "flash-local-tokenizer-reference", "flash-local-session-reference",
                  "flash-local-mixed-fixture", "--parallel", "3"])
