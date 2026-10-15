@@ -58,6 +58,7 @@ jobs:
         with:
           persist-credentials: false
       - run: |
+          test '${{ inputs.upload_private_testflight }}' = false
           test "$(uname -m)" = arm64
           sudo xcode-select -s /Applications/Xcode_26.2.app
           python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
