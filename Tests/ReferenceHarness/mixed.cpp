@@ -32,7 +32,12 @@ int main(int argc, char ** argv) {
                  name.find("hc_ffn_down.weight") != std::string::npos) type = GGML_TYPE_F16;
         else if (name.find("ffn_gate_inp.weight") != std::string::npos) type = GGML_TYPE_BF16;
         seen[type] = true;
-        if (type == GGML_TYPE_F32) continue;
+        if (type == GGML_TYPE_F32) {
+            // The reader binds payloads on the separate ggml tensors; the GGUF
+            // writer needs explicit pointers even for unchanged F32 tensors.
+            gguf_set_tensor_data(file, name.c_str(), tensor->data);
+            continue;
+        }
         if (tensor->ne[0] % ggml_blck_size(type)) return 6;
         const int64_t rows = ggml_nelements(tensor) / tensor->ne[0];
         const size_t bytes = ggml_row_size(type, tensor->ne[0]) * rows;
