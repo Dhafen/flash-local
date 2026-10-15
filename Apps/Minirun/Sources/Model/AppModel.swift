@@ -1193,7 +1193,7 @@ final class AppModel {
             try .applicationSupport()
         },
         downloadServicesFactory: ((any StorageManaging) throws -> AppDownloadServices)? = nil,
-        storageFactory: () -> any StorageManaging = { StorageManager() },
+        storageFactory: () -> any StorageManaging = { StorageManager.applicationDefault() },
         startDiscovery: Bool = true
     ) -> AppModel {
         let effectiveCatalogCache: (any CatalogCache)? =

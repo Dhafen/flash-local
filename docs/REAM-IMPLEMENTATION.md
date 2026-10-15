@@ -22,6 +22,13 @@ The original project and the existing Priv AI application are not modified.
 - `Qwen4ExpOperators`: V-first/modulo-head GDN step, causal/dilated convolution,
   sigmoid-gated norm, streamed-projection hyper-connections and top-k routing.
 
+On live iOS launches, the app registers its own Documents/Models root, creates
+it on resolution, excludes it from backup and uses first-unlock file protection.
+No picker grant is required for the app's own files. Scope bypass is restricted
+to that explicit root; per-job bookmarks cannot escape it through a prefix
+sibling or symlink. External/user-picked locations retain the existing grant
+rules. Previews and injected storage do not gain implicit local authority.
+
 These components do **not** constitute a complete model runner. Tokenizer,
 attention/RoPE, complete PLE path, verified artifact binding, downloader,
 chat integration, app rebranding and signing still need implementation and

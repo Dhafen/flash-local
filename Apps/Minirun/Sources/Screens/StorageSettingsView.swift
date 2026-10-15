@@ -206,13 +206,14 @@ struct StorageSettingsPage: View {
                     }
                 }
             } trailing: {
-                Button("Remove") {
+                if key != .appLocalModels { Button("Remove") {
                     pendingLocationRemoval = StorageLocationRemovalRequest(
                         key: key,
                         displayName: scan?.displayName ?? path ?? key.rawValue)
                 }
                 .mrTextLink(.quiet)
                 .help("Stop scanning this folder. No files are deleted.")
+                }
             }
 
             // Only when there is something to draw. An empty measurement block
