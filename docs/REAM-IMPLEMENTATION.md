@@ -50,7 +50,7 @@ The original project and the existing Priv AI application are not modified.
   trained-model numerical parity remains unverified.
 
 The synthetic reference harness also generates a separate 256-wide graph
-with 113 random tensors (16.1 MB before quantization). Its test-only converter
+with 113 random tensors (16.7 MB before quantization). Its test-only converter
 uses the pinned `ggml_quantize_chunk` for Q4_K/Q5_0/Q6_K routed experts,
 Q8_0 embeddings/shared projection, Q4_0 PLE, F16 HC, BF16 routers and retained
 F32 operators. It requires all eight encodings in one file. A full five-position

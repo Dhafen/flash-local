@@ -18,7 +18,11 @@ import argparse
 def main(chat=False, mixed=False):
     if chat and mixed:
         raise ValueError("Mixed fixture has a separate graph-only vocabulary")
-    hidden, width, rank, ple = (256, 256, 32, 32) if mixed else (16, 8, 4, 8)
+    hidden, width, rank, ple = (256, 256, 32, 128) if mixed else (16, 8, 4, 8)
+    # This graph has two PLE heads; their concatenation feeds a hidden-wide
+    # projection in canonical qwen4exp, rather than an arbitrary input width.
+    if 2 * ple != hidden:
+        raise ValueError("Concatenated PLE heads must match hidden width")
     wide = hidden * 2
     rng = random.Random(20261015)
     meta = {"general.architecture": (8, "qwen4exp"), "general.name": (8, "synthetic-graph-test"),
