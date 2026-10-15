@@ -1,0 +1,81 @@
+"""Inspect an unsigned device archive before any signing/upload is attempted."""
+import argparse
+import hashlib
+import json
+import pathlib
+import plistlib
+import struct
+
+
+def device_executable(path):
+    with path.open("rb") as stream:
+        header = stream.read(32)
+        if len(header) != 32:
+            raise ValueError("Missing Mach-O executable header")
+        magic, cpu, _, kind, commands, size, _, _ = struct.unpack("<8I", header)
+        if (magic, cpu, kind) != (0xFEEDFACF, 0x0100000C, 2):
+            raise ValueError("Expected a thin arm64 Mach-O executable")
+        if not 0 < commands <= 10000 or not 0 < size <= 16 << 20:
+            raise ValueError("Unbounded Mach-O load commands")
+        data = stream.read(size)
+    if len(data) != size:
+        raise ValueError("Truncated Mach-O load commands")
+    offset, platforms = 0, []
+    for _ in range(commands):
+        if offset + 8 > len(data):
+            raise ValueError("Truncated Mach-O command")
+        command, length = struct.unpack_from("<2I", data, offset)
+        if length < 8 or length % 8 or offset + length > len(data):
+            raise ValueError("Invalid Mach-O command length")
+        if command == 0x32:  # LC_BUILD_VERSION, device iOS is platform 2
+            if length < 24:
+                raise ValueError("Truncated LC_BUILD_VERSION")
+            platforms.append(struct.unpack_from("<I", data, offset + 8)[0])
+        offset += length
+    if offset != len(data) or platforms != [2]:
+        raise ValueError("Executable was not built for device iOS")
+
+
+def inspect(archive):
+    app = archive / "Products/Applications/FlashLocal.app"
+    info = plistlib.loads((app / "Info.plist").read_bytes())
+    expected = {"CFBundleIdentifier": "com.dhafen.flashlocal", "CFBundleExecutable": "FlashLocal",
+                "DTPlatformName": "iphoneos", "UIFileSharingEnabled": True,
+                "LSSupportsOpeningDocumentsInPlace": True, "UIDeviceFamily": [1]}
+    for key, value in expected.items():
+        if info.get(key) != value:
+            raise ValueError("Incorrect device archive metadata: " + key)
+    device_executable(app / "FlashLocal")
+    prohibited = {".gguf", ".safetensors", ".p8", ".p12", ".pem", ".key", ".dpapi", ".mobileprovision"}
+    total, count = 0, 0
+    for item in app.rglob("*"):
+        if not item.resolve().is_relative_to(app.resolve()):
+            raise ValueError("Archive symlink escapes its app bundle")
+        if item.is_file():
+            if item.suffix.lower() in prohibited:
+                raise ValueError("Model or signing material must not enter the unsigned app bundle")
+            total += item.stat().st_size
+            count += 1
+    if total > 500_000_000:
+        raise ValueError("Unexpected app size; model payload must remain external")
+    license_digest = hashlib.sha256((app / "QwenModelLicense.txt").read_bytes()).hexdigest()
+    if license_digest != "a0dc422560841fd68e06d974907f8b4c709bca44a67daad2b528437bdf676c08":
+        raise ValueError("Original model license is missing or altered")
+    return {"bundleIdentifier": info["CFBundleIdentifier"], "platform": "iphoneos", "architecture": "arm64",
+            "version": info.get("CFBundleShortVersionString"), "build": info.get("CFBundleVersion"),
+            "appBytes": total, "files": count, "modelPayloadBundled": False,
+            "signed": False, "installedOnIPhone": False, "uploadedToTestFlight": False}
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("archive", type=pathlib.Path)
+    parser.add_argument("--output", required=True, type=pathlib.Path)
+    args = parser.parse_args()
+    result = inspect(args.archive)
+    args.output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+    print(json.dumps(result))
+
+
+if __name__ == "__main__":
+    main()

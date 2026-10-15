@@ -8,6 +8,11 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      release_archive:
+        description: 'Also build and inspect an unsigned Release archive for device iOS; does not upload'
+        type: boolean
+        default: false
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -180,6 +185,16 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+      - name: Archive and inspect Release for device iOS
+        if: github.event_name == 'workflow_dispatch' && inputs.release_archive
+        run: |
+          python3 -m unittest discover -s scripts/tests -p 'test_check_ios_archive.py' -v
+          xcodebuild archive -project Apps/Minirun/Minirun.xcodeproj $XCODEBUILD_FLAGS \
+            -scheme Minirun-iOS -configuration Release -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/FlashLocal.xcarchive" CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee ios-archive.log | tail -60
+          python3 scripts/check_ios_archive.py "$RUNNER_TEMP/FlashLocal.xcarchive" --output ios-archive-check.json
+
       - name: Upload compact text diagnostics
         if: always()
         uses: actions/upload-artifact@v4
@@ -193,6 +208,8 @@ jobs:
             mac-brand.log
             ios-brand.log
             ios-build.log
+            ios-archive.log
+            ios-archive-check.json
             .work/reference-build.log
             .work/tokenizer-build.log
             .work/runtime/build-manifest.json
