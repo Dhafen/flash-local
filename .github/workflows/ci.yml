@@ -90,9 +90,12 @@ jobs:
       - name: App tests (macOS)
         run: |
           set -o pipefail
+          export GGUF_HEADER_FIXTURE="$GITHUB_WORKSPACE/.test-fixtures/ream.header"
+          export TEST_RUNNER_GGUF_HEADER_FIXTURE="$GGUF_HEADER_FIXTURE"
           xcodebuild test -project Apps/Minirun/Minirun.xcodeproj $XCODEBUILD_FLAGS \
             -scheme Minirun-macOS -destination 'platform=macOS' \
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee app-tests.log | tail -40
+          grep 'REAM_APP_SESSION_PARITY exactPromptIDs=true exactGeneratedIDs=true exactText=true saved=true stopRecovery=true' app-tests.log
 
       - name: macOS brand review in light and dark
         run: |

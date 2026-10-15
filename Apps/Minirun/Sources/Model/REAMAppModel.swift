@@ -24,6 +24,17 @@ private enum REAMPresentationError: Error, LocalizedError {
     var errorDescription: String? { "Gränssnittet hann inte ta emot texten. Genereringen stoppades." }
 }
 
+/// Immutable run policy, shared by preflight and execution. Test fixtures use
+/// the same engine with a shorter run; production always starts conservatively.
+struct REAMRunSettings: Sendable {
+    let contextTokens: Int
+    let budgetBytes: UInt64
+    let maximumNewTokens: Int
+    let rawCacheBytes: Int
+    static let initial = REAMRunSettings(contextTokens: 1024, budgetBytes: 4_000_000_000,
+        maximumNewTokens: 128, rawCacheBytes: 64 << 20)
+}
+
 /// Main-actor presentation state; hashing, transfer and MLX execution live on
 /// workers. A Stop waits for actual worker teardown before allowing another
 /// operation. A verified descriptor is the only authority that enables Send.
@@ -43,9 +54,10 @@ final class REAMAppModel {
     var draft = ""
     let root: URL
     let source: PinnedGGUFDownload
-    let contextTokens = 1024
-    let budgetBytes: UInt64 = 4_000_000_000
-    let maximumNewTokens = 128
+    let settings: REAMRunSettings
+    var contextTokens: Int { settings.contextTokens }
+    var budgetBytes: UInt64 { settings.budgetBytes }
+    var maximumNewTokens: Int { settings.maximumNewTokens }
     @ObservationIgnored private var artifact: VerifiedGGUFArtifact?
     @ObservationIgnored private var operation: Task<Void, Never>?
     @ObservationIgnored private var cancelWorker: (() -> Void)?
@@ -57,8 +69,9 @@ final class REAMAppModel {
     var canChat: Bool { artifact != nil && !isBusy && !isPreview }
     var modelSize: String { ByteCountFormatter.string(fromByteCount: Int64(source.manifest.fileByteCount), countStyle: .file) }
 
-    init(root: URL, source: PinnedGGUFDownload = .primaryREAM, chatFile: URL? = nil) {
-        self.root = root; self.source = source; self.chatFile = chatFile
+    init(root: URL, source: PinnedGGUFDownload = .primaryREAM, chatFile: URL? = nil,
+         settings: REAMRunSettings = .initial) {
+        self.root = root; self.source = source; self.chatFile = chatFile; self.settings = settings
     }
     static func live() -> REAMAppModel {
         let manager = FileManager.default
@@ -109,13 +122,13 @@ final class REAMAppModel {
         activity = .stopping; status = "Stoppar och frigör arbetsminnet…"
         cancellation?.cancel(); cancelWorker?()
     }
-    nonisolated private static func preflight(_ artifact: VerifiedGGUFArtifact) throws -> VerifiedGGUFArtifact {
+    nonisolated private static func preflight(_ artifact: VerifiedGGUFArtifact, settings: REAMRunSettings) throws -> VerifiedGGUFArtifact {
         try autoreleasepool {
             let layout = try Qwen4ExpDecoder.Layout(index: artifact.index)
             let tokenizer = try CanonicalQwen35Tokenizer(artifact: artifact)
             guard layout.vocabularySize == tokenizer.vocabularySize else { throw CocoaError(.fileReadCorruptFile) }
-            _ = try Qwen4ExpMemoryPlan(config: layout.config, contextTokens: 1024,
-                budgetBytes: 4_000_000_000, reservedWorkingBytes: 1_000_000_000)
+            _ = try Qwen4ExpMemoryPlan(config: layout.config, contextTokens: settings.contextTokens,
+                budgetBytes: settings.budgetBytes, reservedWorkingBytes: 1_000_000_000)
             try artifact.assertUnchanged(); return artifact
         }
     }
@@ -123,10 +136,10 @@ final class REAMAppModel {
         guard !isBusy, !isPreview else { return }
         artifact = nil
         let (id, flag) = begin(.verifying, status: "Verifierar hela modellfilens SHA-256…")
-        let root = root, manifest = source.manifest
+        let root = root, manifest = source.manifest, settings = settings
         let worker = Task.detached(priority: .utility) {
             try Self.preflight(VerifiedGGUFArtifact.verify(insideRoot: root, manifest: manifest,
-                cancellationRequested: { flag.requested() }))
+                cancellationRequested: { flag.requested() }), settings: settings)
         }
         cancelWorker = { worker.cancel() }
         operation = Task {
@@ -138,14 +151,14 @@ final class REAMAppModel {
     func download() {
         guard !isBusy, !isPreview else { return }
         let (id, flag) = begin(.downloading, status: "Hämtar modellen till intern lagring…")
-        let root = root, source = source
+        let root = root, source = source, settings = settings
         let channel = AsyncStream<GGUFModelTransfer.Progress>.makeStream(bufferingPolicy: .bufferingNewest(1))
         let worker = Task.detached(priority: .utility) { () -> Result<VerifiedGGUFArtifact, Error> in
             defer { channel.continuation.finish() }
             do {
                 let value = try await GGUFModelTransfer().download(insideRoot: root, source: source,
                     cancellationRequested: { flag.requested() }, onProgress: { _ = channel.continuation.yield($0) })
-                return .success(try Self.preflight(value))
+                return .success(try Self.preflight(value, settings: settings))
             } catch { return .failure(error) }
         }
         cancelWorker = { worker.cancel() }
@@ -190,13 +203,14 @@ final class REAMAppModel {
         let responseID = messages.last!.id
         let (id, flag) = begin(.generating, status: "Förbereder lokal generering…")
         generationProgress = nil; summary = nil; save()
-        let context = contextTokens, budget = budgetBytes, limit = maximumNewTokens
+        let context = contextTokens, budget = budgetBytes, limit = maximumNewTokens, cache = settings.rawCacheBytes
         let channel = AsyncThrowingStream<Qwen4ExpTextGeneration.Event, Error>.makeStream(bufferingPolicy: .bufferingOldest(32))
         channel.continuation.onTermination = { if case .cancelled = $0 { flag.cancel() } }
         let worker = Task.detached(priority: .userInitiated) { () -> Result<Qwen4ExpTextGeneration.Summary, Error> in
             let result = Result {
                 try autoreleasepool {
-                    let engine = try Qwen4ExpTextGeneration(artifact: artifact, contextTokens: context, budgetBytes: budget)
+                    let engine = try Qwen4ExpTextGeneration(artifact: artifact, contextTokens: context, budgetBytes: budget,
+                        rawCacheBytes: cache)
                     var lastProgress = 0.0
                     return try engine.generate(messages: prompt, maximumNewTokens: limit,
                         cancellationRequested: { flag.requested() || Task.isCancelled }) { event in
