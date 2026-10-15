@@ -2,12 +2,45 @@ import Darwin
 import Foundation
 import GGUFCore
 
+/// Declared source/license metadata for the separately verified artifact.
+/// This never authorizes I/O or downloads anything; the manifest's exact
+/// byte count and SHA-256 still establish the file verification authority.
+/// Upstream inspection pins do not attest the publisher's conversion lineage.
+public struct GGUFModelProvenance: Codable, Sendable, Equatable {
+    public struct Repository: Codable, Sendable, Equatable {
+        public let url: String
+        public let revision: String
+        public init(url: String, revision: String) {
+            self.url = url; self.revision = revision
+        }
+    }
+    public struct License: Codable, Sendable, Equatable {
+        public let name: String
+        public let sourceURL: String
+        public let sha256: String
+        public init(name: String, sourceURL: String, sha256: String) {
+            self.name = name; self.sourceURL = sourceURL; self.sha256 = sha256
+        }
+    }
+    public let artifact: Repository
+    public let inspectedSourceModel: Repository
+    public let inspectedBaseModel: Repository
+    /// Records the base-model notice, without relicensing derivatives.
+    public let license: License
+    public init(artifact: Repository, inspectedSourceModel: Repository, inspectedBaseModel: Repository, license: License) {
+        self.artifact = artifact; self.inspectedSourceModel = inspectedSourceModel
+        self.inspectedBaseModel = inspectedBaseModel; self.license = license
+    }
+}
+
 public struct GGUFModelManifest: Sendable, Equatable {
     public let fileName: String
     public let fileByteCount: UInt64
     public let sha256: String
+    public let provenance: GGUFModelProvenance?
 
-    public init(fileName: String, fileByteCount: UInt64, sha256: String) throws {
+    public init(fileName: String, fileByteCount: UInt64, sha256: String,
+                provenance: GGUFModelProvenance? = nil) throws {
         guard !fileName.isEmpty, fileName != ".", fileName != "..",
               !fileName.contains("/"), !fileName.contains("\\"), !fileName.contains("\0"),
               fileByteCount > 0, sha256.utf8.count == 64,
@@ -17,6 +50,7 @@ public struct GGUFModelManifest: Sendable, Equatable {
         self.fileName = fileName
         self.fileByteCount = fileByteCount
         self.sha256 = sha256
+        self.provenance = provenance
     }
 
     /// LFS SHA-256 from the pinned Hugging Face tree; not a locally invented
@@ -24,7 +58,17 @@ public struct GGUFModelManifest: Sendable, Equatable {
     public static let primaryREAM = try! GGUFModelManifest(
         fileName: "Qwen3.8-Flash-Next-REAM-60Pct-HQ-PLE4of16-56GiB.gguf",
         fileByteCount: 56_115_609_536,
-        sha256: "d18d0a0e017946aa54f063b2abd92ef96a0d7bd64948cefe9ac3b0ff535dc5fb")
+        sha256: "d18d0a0e017946aa54f063b2abd92ef96a0d7bd64948cefe9ac3b0ff535dc5fb",
+        provenance: .init(
+            artifact: .init(url: "https://huggingface.co/RemySkye/Qwen3.8-Flash-Next-REAM-60Pct-GGUF",
+                revision: "28a55fecdca51a498900aeb34a4e7e8338977cd3"),
+            inspectedSourceModel: .init(url: "https://huggingface.co/Akicou/Qwen3.8-Flash-Next-REAM-60Pct",
+                revision: "7c9b3f5eddac3de7975aa279d00b0859283b76d8"),
+            inspectedBaseModel: .init(url: "https://huggingface.co/Qwen/Qwen3.8-Flash-Next",
+                revision: "de4b8e4d43b917e7706784d8bb445c9af86a3540"),
+            license: .init(name: "Qwen Community License 1.0",
+                sourceURL: "https://huggingface.co/Qwen/Qwen3.8-Flash-Next/resolve/de4b8e4d43b917e7706784d8bb445c9af86a3540/LICENSE",
+                sha256: "a0dc422560841fd68e06d974907f8b4c709bca44a67daad2b528437bdf676c08")))
 }
 
 /// Capability for exactly the file that was hashed, not a path that can be

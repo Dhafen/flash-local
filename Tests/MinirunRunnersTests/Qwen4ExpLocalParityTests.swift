@@ -49,6 +49,7 @@ final class Qwen4ExpLocalParityTests: XCTestCase {
         XCTAssertTrue(restored.passedAtTestedPositions)
         XCTAssertEqual(restored.tokenIDs, fixture.tokens)
         XCTAssertEqual(restored.schemaVersion, 1)
+        XCTAssertNil(restored.modelProvenance, "Existing schema-1 reports without provenance remain readable")
         XCTAssertNotNil(ISO8601DateFormatter().date(from: restored.timestamp))
         XCTAssertEqual(restored.timestamp, report.timestamp)
         XCTAssertEqual(restored.environment.operatingSystem, ProcessInfo.processInfo.operatingSystemVersionString)

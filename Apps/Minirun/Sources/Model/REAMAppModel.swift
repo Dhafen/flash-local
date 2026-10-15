@@ -50,6 +50,7 @@ struct REAMRunReport: Codable, Sendable {
     let physicalMemoryBytes: UInt64
     let modelSourceURL: String
     let modelFileBytes: UInt64
+    let modelProvenance: GGUFModelProvenance?
     let contextTokens: Int
     let budgetBytes: UInt64
     let maximumNewTokens: Int
@@ -81,6 +82,7 @@ struct REAMRunReport: Codable, Sendable {
         operatingSystem = ProcessInfo.processInfo.operatingSystemVersionString
         physicalMemoryBytes = ProcessInfo.processInfo.physicalMemory
         modelSourceURL = source.url.absoluteString; modelFileBytes = source.manifest.fileByteCount
+        modelProvenance = source.manifest.provenance
         contextTokens = settings.contextTokens; budgetBytes = settings.budgetBytes
         maximumNewTokens = settings.maximumNewTokens
         decodeForwardTokensPerSecond = summary.decodeTokensPerSecond; generation = summary

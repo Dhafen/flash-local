@@ -5,6 +5,25 @@ import XCTest
 @testable import MinirunKit
 
 final class VerifiedGGUFArtifactTests: XCTestCase {
+    func testPrimaryProvenanceMatchesPinnedDownloadAndLicenseSource() throws {
+        let manifest = GGUFModelManifest.primaryREAM
+        let provenance = try XCTUnwrap(manifest.provenance)
+        let expectedURL = provenance.artifact.url + "/resolve/" + provenance.artifact.revision + "/" + manifest.fileName
+        XCTAssertEqual(PinnedGGUFDownload.primaryREAM.url.absoluteString, expectedURL)
+        XCTAssertEqual(provenance.license.sourceURL,
+            provenance.inspectedBaseModel.url + "/resolve/" + provenance.inspectedBaseModel.revision + "/LICENSE")
+        for source in [provenance.artifact, provenance.inspectedSourceModel, provenance.inspectedBaseModel] {
+            XCTAssertEqual(URL(string: source.url)?.host, "huggingface.co")
+            XCTAssertEqual(source.revision.count, 40)
+        }
+        let restored = try JSONDecoder().decode(GGUFModelProvenance.self,
+            from: JSONEncoder().encode(provenance))
+        XCTAssertEqual(restored, provenance)
+        let local = try GGUFModelManifest(fileName: "synthetic.gguf", fileByteCount: 32,
+            sha256: String(repeating: "0", count: 64))
+        XCTAssertNil(local.provenance, "A local fixture must not inherit a trained-model source/license")
+    }
+
     private func withModel(vocabularyCount: Int = 0, _ body: (URL, GGUFModelManifest) throws -> Void) throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

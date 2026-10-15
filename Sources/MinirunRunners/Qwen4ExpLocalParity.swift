@@ -52,6 +52,7 @@ public enum Qwen4ExpLocalParity {
         public let environment: Environment
         public let modelSHA256: String
         public let modelFileBytes: UInt64
+        public let modelProvenance: GGUFModelProvenance?
         public let sourceRevision: String
         public let referenceRevision: String
         public let tokenIDs: [Int]
@@ -151,6 +152,7 @@ public enum Qwen4ExpLocalParity {
             return Report(schemaVersion: 1, timestamp: ISO8601DateFormatter().string(from: Date()),
                 environment: Environment(),
                 modelSHA256: artifact.manifest.sha256, modelFileBytes: artifact.manifest.fileByteCount,
+                modelProvenance: artifact.manifest.provenance,
                 sourceRevision: BuildInfo.gitRevision, referenceRevision: Qwen4ExpCPUReference.sourceRevision,
                 tokenIDs: tokens, positions: positions, absoluteTolerance: absoluteTolerance,
                 relativeL2Tolerance: relativeTolerance,

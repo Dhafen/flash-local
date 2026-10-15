@@ -1,5 +1,6 @@
 import SwiftUI
 import CryptoKit
+import MinirunKit
 import XCTest
 #if canImport(UIKit)
 import UIKit
@@ -20,6 +21,9 @@ final class ForkBrandRenderTests: XCTestCase {
         let licenseBytes = try Data(contentsOf: modelLicense)
         XCTAssertEqual(SHA256.hash(data: licenseBytes).map { String(format: "%02x", $0) }.joined(),
             "a0dc422560841fd68e06d974907f8b4c709bca44a67daad2b528437bdf676c08")
+        let provenance = try XCTUnwrap(GGUFModelManifest.primaryREAM.provenance)
+        XCTAssertEqual(SHA256.hash(data: licenseBytes).map { String(format: "%02x", $0) }.joined(),
+            provenance.license.sha256, "The report manifest must identify the exact offline license bytes")
         XCTAssertTrue(REAMBundledNotices.text.contains("Qwen Community License 1.0"))
         XCTAssertTrue(REAMBundledNotices.text.contains("Apache License"))
         var rendered: [Data] = []

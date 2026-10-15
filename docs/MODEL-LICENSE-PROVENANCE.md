@@ -14,3 +14,14 @@ The bundle test checks these exact bytes. This records the base model's notice;
 it does not relicense the REAM derivative or declare commercial rights beyond
 the actual license. The downloaded artifact remains pinned to its separate
 manifest and SHA-256, with its published model name visible in the chat screen.
+
+`GGUFModelManifest.primaryREAM` now carries the artifact repository/revision,
+the inspected REAM source and base repository/revision references, plus
+this notice's name, pinned source URL and SHA-256. Measurement and numerical
+reports copy that declared provenance from the verified manifest. It is an
+optional additive field: old reports remain readable, and synthetic fixtures
+without a declaration do not inherit the primary model's identity. Metadata
+does not attest the publisher's exact upstream conversion lineage, authorize
+file access, replace full SHA verification, prove inference
+or change the artifact's license. Tests bind the declared artifact to its
+actual download URL and the license digest to the actual offline bundle bytes.
