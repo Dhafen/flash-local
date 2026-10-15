@@ -26,6 +26,11 @@ The original project and the existing Priv AI application are not modified.
   Runtime readers receive duplicates of the hashed object. File identity,
   size and timestamps must remain unchanged before/after streamed operations.
   Header-only validation does not substitute for this full verification.
+- `Qwen4ExpTextAttention`: one-token dense text attention, per-head Q/gate
+  interleaving, head RMSNorm, partial RoPE and chunked FP16 KV storage.
+  Online FP32 softmax avoids full-context KV expansion or a quadratic mask.
+  Context exhaustion refuses instead of evicting. QSA and chunked prefill
+  still require separate implementation and validation.
 
 On live iOS launches, the app registers its own Documents/Models root, creates
 it on resolution, excludes it from backup and uses first-unlock file protection.
@@ -35,7 +40,8 @@ sibling or symlink. External/user-picked locations retain the existing grant
 rules. Previews and injected storage do not gain implicit local authority.
 
 These components do **not** constitute a complete model runner. Tokenizer,
-attention/RoPE, complete PLE path, runner binding to verified artifacts, downloader,
+complete attention integration/reference parity, complete PLE path,
+runner binding to verified artifacts, downloader,
 chat integration, app rebranding and signing still need implementation and
 verification. No model is advertised as executable by these additions.
 

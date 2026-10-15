@@ -53,6 +53,8 @@ jobs:
           xcodebuild test -scheme minirun-Package $XCODEBUILD_FLAGS -destination 'platform=macOS' \
             -only-testing:GGUFCoreTests -only-testing:ModelAdaptersTests -only-testing:MLXBridgeTests \
             -only-testing:StorageCoreTests -only-testing:iOSBenchTests \
+            -only-testing:MinirunKitTests/LocalModelStorageTests \
+            -only-testing:MinirunKitTests/VerifiedGGUFArtifactTests \
             -resultBundlePath streaming-tests.xcresult 2>&1 | tee streaming-tests.log | tail -60
           if grep -E 'PublishedGGUFTests.*skipped' streaming-tests.log; then exit 1; fi
 
