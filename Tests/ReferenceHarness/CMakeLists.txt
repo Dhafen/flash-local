@@ -14,6 +14,16 @@ set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
 if(NOT LLAMA_SOURCE)
   message(FATAL_ERROR "LLAMA_SOURCE must point to the pinned reference checkout")
 endif()
+execute_process(COMMAND git -C "${LLAMA_SOURCE}" rev-parse HEAD
+  OUTPUT_VARIABLE FLASH_LLAMA_REVISION OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
+if(NOT FLASH_LLAMA_REVISION STREQUAL "e467e5b5e5ba43071d6151b3d881deb9300d000e")
+  message(FATAL_ERROR "Reference source is not the reviewed llama.cpp revision")
+endif()
+execute_process(COMMAND git -C "${LLAMA_SOURCE}" diff --quiet HEAD --
+  RESULT_VARIABLE FLASH_LLAMA_DIRTY)
+if(NOT FLASH_LLAMA_DIRTY EQUAL 0)
+  message(FATAL_ERROR "Reference source has tracked modifications")
+endif()
 add_subdirectory("${LLAMA_SOURCE}" llama)
 add_executable(flash-local-reference main.cpp)
 target_link_libraries(flash-local-reference PRIVATE llama)
@@ -33,6 +43,7 @@ target_include_directories(flash-local-tokenizer-runtime PUBLIC
 target_include_directories(flash-local-tokenizer-runtime PRIVATE
   "${LLAMA_SOURCE}/common" "${LLAMA_SOURCE}/src" "${LLAMA_SOURCE}/vendor")
 target_link_libraries(flash-local-tokenizer-runtime PUBLIC llama)
+target_compile_definitions(flash-local-tokenizer-runtime PRIVATE FLASH_LLAMA_REVISION="${FLASH_LLAMA_REVISION}")
 target_link_libraries(flash-local-tokenizer-reference PRIVATE flash-local-tokenizer-runtime)
 target_include_directories(flash-local-tokenizer-reference PRIVATE
   "${LLAMA_SOURCE}/common" "${LLAMA_SOURCE}/src" "${LLAMA_SOURCE}/vendor")

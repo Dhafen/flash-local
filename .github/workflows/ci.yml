@@ -95,12 +95,14 @@ jobs:
             -only-testing:ModelAdaptersTests/CanonicalQwen35TokenizerParityTests \
             -only-testing:MinirunRunnersTests/Qwen4ExpTextGenerationParityTests \
             -only-testing:ModelAdaptersTests/Qwen4ExpCPUReferenceTests \
+            -only-testing:MinirunRunnersTests/Qwen4ExpLocalParityTests \
             -resultBundlePath parity-tests.xcresult 2>&1 | tee parity-tests.log | tail -80
           if grep -E 'Qwen4ExpDecoderParityTests.*skipped' parity-tests.log; then exit 1; fi
           if grep -E 'PublishedQwen35TokenizerParityTests.*skipped' parity-tests.log; then exit 1; fi
           if grep -E 'CanonicalQwen35TokenizerParityTests.*skipped' parity-tests.log; then exit 1; fi
           if grep -E 'Qwen4ExpTextGenerationParityTests.*skipped' parity-tests.log; then exit 1; fi
           grep 'REAM_CPU_REFERENCE_BRIDGE positions=5 samePinnedKernels=true lazyMode=on mmap=true noGPU=true' parity-tests.log
+          grep 'REAM_LOCAL_PARITY positions=5 cpuThenMLX=true allLogitsCompared=true passed=true syntheticOnly=true' parity-tests.log
 
       - name: App tests (macOS)
         run: |

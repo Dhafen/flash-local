@@ -33,6 +33,7 @@ final class Qwen4ExpCPUReferenceTests: XCTestCase {
             manifest: GGUFModelManifest(fileName: fixture.fileName, fileByteCount: fixture.fileByteCount, sha256: fixture.sha256))
         let golden = try JSONDecoder().decode(Golden.self, from: Data(contentsOf: reference))
         let flag = Flag()
+        XCTAssertEqual(Qwen4ExpCPUReference.sourceRevision, "e467e5b5e5ba43071d6151b3d881deb9300d000e")
         let cpu = try Qwen4ExpCPUReference(artifact: artifact, contextTokens: 32,
             budgetBytes: 5_500_000_000, cancellationRequested: { flag.requested() })
         XCTAssertEqual(cpu.vocabularySize, golden.logits.first?.count)

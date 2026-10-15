@@ -30,6 +30,7 @@ static bool aborted(flr_context * value) { return value->should_abort(value->use
 static bool loading(float, void * user) { return !aborted(static_cast<flr_context *>(user)); }
 static bool decoding(void * user) { return aborted(static_cast<flr_context *>(user)); }
 const char * flr_last_error() { return reference_error.c_str(); }
+const char * flr_source_revision() { return FLASH_LLAMA_REVISION; }
 
 flr_context * flr_create(int descriptor, int32_t context_tokens, flr_abort_callback callback, void * user) {
     try {

@@ -11,6 +11,7 @@ import StorageCore
 /// Run serially, release it before constructing the MLX decoder, and admit only
 /// short reference sequences. A failure leaves full-model parity unproven.
 public final class Qwen4ExpCPUReference {
+    public static var sourceRevision: String { String(cString: flr_source_revision()) }
     private final class Governor: @unchecked Sendable {
         enum Stop { case cancelled, memory, unavailable }
         let budget: UInt64
