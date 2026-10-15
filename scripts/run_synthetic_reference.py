@@ -5,8 +5,7 @@ Never accepts a user model/prompt. Actual REAM weights are not fetched or run.
 import pathlib
 import subprocess
 
-REVISION = "e467e5b5e5ba43071d6151b3d881deb9300d000e"
-REPOSITORY = "https://github.com/ggml-org/llama.cpp.git"
+from llama_reference_source import REVISION, prepare
 
 
 def main():
@@ -20,18 +19,7 @@ def main():
             subprocess.run([str(a) for a in args], cwd=root, stdout=output,
                            stderr=subprocess.STDOUT, check=True)
         try:
-            if not source.exists():
-                run(["git", "clone", "--depth", "1", "--filter=blob:none", "--sparse",
-                     "--no-checkout", REPOSITORY, source])
-            if not (source / ".git").is_dir():
-                raise RuntimeError("Reference cache is not a Git checkout")
-            run(["git", "-C", source, "diff", "--exit-code"])
-            run(["git", "-C", source, "sparse-checkout", "set", "src", "include", "ggml", "cmake", "vendor", "common"])
-            run(["git", "-C", source, "fetch", "--depth", "1", "origin", REVISION])
-            run(["git", "-C", source, "checkout", "--detach", REVISION])
-            actual = subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip()
-            if actual != REVISION:
-                raise RuntimeError("Reference revision mismatch")
+            source = prepare(root, run)
             run(["cmake", "-S", root / "Tests/ReferenceHarness", "-B", build,
                  f"-DLLAMA_SOURCE={source}", "-DCMAKE_BUILD_TYPE=Release"])
             run(["cmake", "--build", build, "--target", "flash-local-reference",

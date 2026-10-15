@@ -87,7 +87,8 @@ def main():
     for text in cases[20:36]:
         chats.append([{"role": "user", "content": text}])
     manifest = {"headerSHA256": HEADER_SHA256,
-                "vocabularySHA256": hashlib.sha256(vocabulary).hexdigest(), "cases": cases,
+                "vocabularySHA256": hashlib.sha256(vocabulary).hexdigest(),
+                "vocabularyByteCount": len(vocabulary), "cases": cases,
                 "chats": [{"messages": messages, "enable_thinking": False,
                            "preserve_thinking": False, "add_generation_prompt": True} for messages in chats]}
     (folder / "qwen35-tokenizer-corpus.json").write_text(

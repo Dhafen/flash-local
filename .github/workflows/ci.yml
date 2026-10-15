@@ -41,6 +41,9 @@ jobs:
           sudo xcode-select -s /Applications/Xcode_26.2.app
           xcodebuild -version
 
+      - name: Build pinned tokenizer XCFramework (Mac, iPhone, Simulator)
+        run: python3 scripts/build_tokenizer_xcframework.py
+
       - name: Generate fork project with pinned XcodeGen
         run: python3 scripts/generate_xcode_project.py
 
@@ -61,6 +64,7 @@ jobs:
             -only-testing:MinirunKitTests/VerifiedGGUFArtifactTests \
             -skip-testing:ModelAdaptersTests/Qwen4ExpDecoderParityTests \
             -skip-testing:ModelAdaptersTests/PublishedQwen35TokenizerParityTests \
+            -skip-testing:ModelAdaptersTests/CanonicalQwen35TokenizerParityTests \
             -resultBundlePath streaming-tests.xcresult 2>&1 | tee streaming-tests.log | tail -60
           if grep -E 'PublishedGGUFTests.*skipped' streaming-tests.log; then exit 1; fi
           if grep -E 'PublishedQwen4ExpLayoutTests.*skipped' streaming-tests.log; then exit 1; fi
@@ -73,9 +77,11 @@ jobs:
           xcodebuild test -scheme minirun-Package $XCODEBUILD_FLAGS -destination 'platform=macOS' \
             -only-testing:ModelAdaptersTests/Qwen4ExpDecoderParityTests \
             -only-testing:ModelAdaptersTests/PublishedQwen35TokenizerParityTests \
+            -only-testing:ModelAdaptersTests/CanonicalQwen35TokenizerParityTests \
             -resultBundlePath parity-tests.xcresult 2>&1 | tee parity-tests.log | tail -80
           if grep -E 'Qwen4ExpDecoderParityTests.*skipped' parity-tests.log; then exit 1; fi
           if grep -E 'PublishedQwen35TokenizerParityTests.*skipped' parity-tests.log; then exit 1; fi
+          if grep -E 'CanonicalQwen35TokenizerParityTests.*skipped' parity-tests.log; then exit 1; fi
 
       - name: App tests (macOS)
         run: |
@@ -117,6 +123,8 @@ jobs:
             parity-tests.log
             parity-tests.xcresult
             .work/reference-build.log
+            .work/tokenizer-build.log
+            .work/runtime/build-manifest.json
             .test-fixtures/llama-reference-logits.json
             .test-fixtures/synthetic-qwen4exp.json
             .test-fixtures/qwen35-tokenizer-reference.json

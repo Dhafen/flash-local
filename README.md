@@ -14,7 +14,7 @@ See [implementation and validation](docs/REAM-IMPLEMENTATION.md) and the [draft 
 
 ## Build
 
-The app uses the Flash Local identity and its own bundle identifier. Original internal schemes and module names are retained. Signing and TestFlight distribution remain pending. Run the xcodebuild gates in [AGENTS.md](AGENTS.md) and [the implementation notes](docs/REAM-IMPLEMENTATION.md). Xcode/macOS is required; a Windows host can drive the hosted build.
+The app uses the Flash Local identity and its own bundle identifier. Original internal schemes and module names are retained. Signing and TestFlight distribution remain pending. On an Apple-silicon Mac with Xcode 26.2 selected, run `python3 scripts/build_tokenizer_xcframework.py` before resolving Swift packages or running xcodebuild. This builds the pinned vocabulary-only C runtime locally for Mac, iPhone and Simulator; the generated library is not committed. CI runs that preparation automatically. Run the xcodebuild gates in [AGENTS.md](AGENTS.md) and [the implementation notes](docs/REAM-IMPLEMENTATION.md). A Windows host can drive the hosted build.
 
 ## License and origin
 

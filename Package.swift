@@ -5,7 +5,7 @@ let package = Package(
     name: "minirun",
     platforms: [
         .macOS(.v14),
-        .iOS(.v17),
+        .iOS("18.0"),
     ],
     products: [
         .library(name: "StorageCore", targets: ["StorageCore"]),
@@ -21,6 +21,10 @@ let package = Package(
         .package(url: "https://github.com/ml-explore/mlx-swift.git", exact: "0.31.4"),
     ],
     targets: [
+        // Generated reproducibly from the pinned source, before package
+        // resolution. See scripts/build_tokenizer_xcframework.py.
+        .binaryTarget(name: "LlamaTokenizerRuntime",
+                      path: ".work/runtime/LlamaTokenizerRuntime.xcframework"),
         .target(name: "StorageCore", plugins: ["EmbedGitRevision"]),
         .testTarget(name: "StorageCoreTests", dependencies: ["StorageCore"]),
         .target(name: "CGGUFQuants", exclude: ["LICENSE.llama.cpp", "provenance.json"],
@@ -56,7 +60,8 @@ let package = Package(
         ),
         .target(
             name: "ModelAdapters",
-            dependencies: ["MLXBridge", "MinirunKit", "StorageCore", "GGUFCore"]
+            dependencies: ["MLXBridge", "MinirunKit", "StorageCore", "GGUFCore", "LlamaTokenizerRuntime"],
+            linkerSettings: [.linkedLibrary("c++")]
         ),
         .target(
             name: "BenchScenarios",
