@@ -36,6 +36,12 @@ The original project and the existing Priv AI application are not modified.
   PLE reads. Per-tensor/expert/tile identities are stable across tokens. Full
   file integrity is checked before construction, and mutation stamps before
   and after each operation. Integration tests use synthetic verified files.
+- `Qwen4ExpDecoder`: initial complete single-token numerical graph wiring
+  embedding/PLE, HC, GDN/dense text attention, routed/shared FFN and LM head.
+  Constructor validates all required shapes before opening weight readers.
+  Failed/cancelled steps require reset. Live footprint checks retain headroom
+  and the process-wide MLX allocator cache is capped at 32 MiB. This graph is
+  not yet validated end-to-end against llama.cpp or enabled in the app.
 
 On live iOS launches, the app registers its own Documents/Models root, creates
 it on resolution, excludes it from backup and uses first-unlock file protection.
@@ -44,7 +50,7 @@ to that explicit root; per-job bookmarks cannot escape it through a prefix
 sibling or symlink. External/user-picked locations retain the existing grant
 rules. Previews and injected storage do not gain implicit local authority.
 
-These components do **not** constitute a complete model runner. Tokenizer,
+These components do **not** yet constitute a validated model runner. Tokenizer,
 complete attention integration/reference parity, complete PLE path,
 runner binding to verified artifacts, downloader,
 chat integration, app rebranding and signing still need implementation and

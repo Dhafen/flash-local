@@ -57,6 +57,7 @@ jobs:
             -only-testing:MinirunKitTests/VerifiedGGUFArtifactTests \
             -resultBundlePath streaming-tests.xcresult 2>&1 | tee streaming-tests.log | tail -60
           if grep -E 'PublishedGGUFTests.*skipped' streaming-tests.log; then exit 1; fi
+          if grep -E 'PublishedQwen4ExpLayoutTests.*skipped' streaming-tests.log; then exit 1; fi
 
       - name: App tests (macOS)
         run: |
