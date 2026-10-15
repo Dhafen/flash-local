@@ -5,6 +5,49 @@ import MLXBridge
 import MinirunKit
 import StorageCore
 
+/// Projection-only cumulative work on the weight source's serial executor.
+/// Logical weight bytes include cache hits. I/O wait includes cache lookup and
+/// lease acquisition; these figures do not claim physical flash-controller I/O.
+public struct GGUFProjectionStatistics: Codable, Equatable, Sendable {
+    public private(set) var calls: UInt64 = 0
+    public private(set) var tiles: UInt64 = 0
+    public private(set) var logicalWeightBytes: UInt64 = 0
+    public private(set) var wallSeconds = 0.0
+    public private(set) var waitOnIOSeconds = 0.0
+    public private(set) var dequantizeAndCopySeconds = 0.0
+    public private(set) var computeSeconds = 0.0
+
+    mutating func record(_ report: GGUFLinearReport) throws {
+        func add(_ a: UInt64, _ b: UInt64) throws -> UInt64 {
+            let value = a.addingReportingOverflow(b)
+            guard !value.overflow else { throw GGUFError.limit("projection counter overflow") }
+            return value.partialValue
+        }
+        calls = try add(calls, 1); tiles = try add(tiles, UInt64(report.tiles))
+        logicalWeightBytes = try add(logicalWeightBytes, report.logicalWeightBytes)
+        wallSeconds += report.wallSeconds; waitOnIOSeconds += report.waitOnIOSeconds
+        dequantizeAndCopySeconds += report.dequantizeAndCopySeconds; computeSeconds += report.computeSeconds
+        guard [wallSeconds, waitOnIOSeconds, dequantizeAndCopySeconds, computeSeconds].allSatisfy({ $0.isFinite && $0 >= 0 }) else {
+            throw GGUFError.limit("projection timing overflow")
+        }
+    }
+
+    public func subtracting(_ earlier: Self) throws -> Self {
+        guard calls >= earlier.calls, tiles >= earlier.tiles, logicalWeightBytes >= earlier.logicalWeightBytes,
+              wallSeconds >= earlier.wallSeconds, waitOnIOSeconds >= earlier.waitOnIOSeconds,
+              dequantizeAndCopySeconds >= earlier.dequantizeAndCopySeconds, computeSeconds >= earlier.computeSeconds else {
+            throw GGUFError.invalid("projection counters went backwards")
+        }
+        var value = Self()
+        value.calls = calls - earlier.calls; value.tiles = tiles - earlier.tiles
+        value.logicalWeightBytes = logicalWeightBytes - earlier.logicalWeightBytes
+        value.wallSeconds = wallSeconds - earlier.wallSeconds; value.waitOnIOSeconds = waitOnIOSeconds - earlier.waitOnIOSeconds
+        value.dequantizeAndCopySeconds = dequantizeAndCopySeconds - earlier.dequantizeAndCopySeconds
+        value.computeSeconds = computeSeconds - earlier.computeSeconds
+        return value
+    }
+}
+
 /// A bounded weight source for a fully verified GGUF. The only file opener is
 /// the verification capability; no model pathname is reopened by this class.
 /// Keep this instance confined to the runner's serial inference executor.
@@ -12,6 +55,7 @@ public final class GGUFWeightSource {
     public let artifact: VerifiedGGUFArtifact
     public let rawCacheBytes: Int
     public let dequantizationScratchBytes: Int
+    public private(set) var projectionStatistics = GGUFProjectionStatistics()
     private let pool: BufferPool
     private let reader: TileReader
     private let scratch: GGUFLinearScratch
@@ -70,6 +114,7 @@ public final class GGUFWeightSource {
             payloadOffset: artifact.index.payloadOffset, sourceID: sourceIDs[name]!,
             firstRegionID: firstRegion, tileRows: rows, reader: reader, scratch: scratch)
         try artifact.assertUnchanged()
+        try projectionStatistics.record(result.report)
         return result.output
     }
 

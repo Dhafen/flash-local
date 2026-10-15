@@ -61,6 +61,14 @@ final class Qwen4ExpTextGenerationParityTests: XCTestCase {
         XCTAssertGreaterThan(summary.maximumObservedFootprintBytes, 0)
         XCTAssertGreaterThan(summary.decodeForwardPasses, 0)
         XCTAssertNotNil(summary.decodeTokensPerSecond)
+        XCTAssertGreaterThan(summary.projections.calls, 0)
+        XCTAssertGreaterThan(summary.projections.logicalWeightBytes, 0)
+        XCTAssertGreaterThan(summary.projections.computeSeconds, 0)
+        XCTAssertGreaterThan(summary.rawCacheMisses, 0)
+        XCTAssertLessThanOrEqual(summary.rawCacheLifetimePeakBytes, summary.rawCacheCapacityBytes)
+        let report = try JSONDecoder().decode(Qwen4ExpTextGeneration.Summary.self, from: JSONEncoder().encode(summary))
+        XCTAssertEqual(report.projections, summary.projections)
+        XCTAssertEqual(report.generatedTokenIDs, summary.generatedTokenIDs)
         var cancelled = false
         XCTAssertThrowsError(try engine.generate(messages: manifest.messages, maximumNewTokens: manifest.maximumNewTokens,
             cancellationRequested: { cancelled }) { event in
@@ -68,6 +76,9 @@ final class Qwen4ExpTextGenerationParityTests: XCTestCase {
             }) { XCTAssertTrue($0 is CancellationError) }
         let again = try engine.generate(messages: manifest.messages, maximumNewTokens: manifest.maximumNewTokens) { _ in }
         XCTAssertEqual(again.generatedTokenIDs, summary.generatedTokenIDs)
+        XCTAssertEqual(again.projections.calls, summary.projections.calls,
+            "Reset sessions report their own work, excluding the cancelled partial run")
+        XCTAssertEqual(again.projections.logicalWeightBytes, summary.projections.logicalWeightBytes)
         XCTAssertThrowsError(try engine.generate(messages: manifest.messages, maximumNewTokens: 0) { _ in })
         print("QWEN4EXP_TEXT_SESSION_PARITY prompt=\(summary.promptTokenIDs.count) generated=\(ids.count) winnerMargin=\(reference.minimumWinnerMargin) exactTokenIDs=true")
     }

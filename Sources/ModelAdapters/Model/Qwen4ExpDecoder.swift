@@ -158,6 +158,8 @@ public final class Qwen4ExpDecoder {
     }
 
     public var readStatistics: TileReaderStatistics { weights.readStatistics }
+    public var rawCacheStatistics: BufferPoolStatistics { weights.poolStatistics }
+    public var projectionStatistics: GGUFProjectionStatistics { weights.projectionStatistics }
 
     public func reset() {
         for cache in attentionCaches.values { cache.reset() }

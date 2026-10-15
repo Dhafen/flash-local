@@ -56,7 +56,7 @@ struct Qwen4ExpTokenText {
 /// no network calls, mock responses, hidden context truncation or model-sized
 /// arrays. The app owns the worker/cancellation lifecycle around this object.
 public final class Qwen4ExpTextGeneration {
-    public enum StopReason: String, Sendable { case endOfGeneration, tokenLimit }
+    public enum StopReason: String, Codable, Sendable { case endOfGeneration, tokenLimit }
     public struct Progress: Sendable {
         public let promptTokensCompleted: Int
         public let promptTokensTotal: Int
@@ -70,7 +70,7 @@ public final class Qwen4ExpTextGeneration {
         case token(id: Int, textDelta: String, progress: Progress)
         case trailingText(String)
     }
-    public struct Summary: Sendable {
+    public struct Summary: Codable, Sendable {
         public let modelSHA256: String
         public let promptTokenIDs: [Int]
         public let generatedTokenIDs: [Int]
@@ -79,7 +79,16 @@ public final class Qwen4ExpTextGeneration {
         public let decodeForwardSeconds: Double
         public let decodeForwardPasses: Int
         public let elapsedSeconds: Double
+        /// Returned reader bytes, including any read-ahead. Physical flash I/O
+        /// amplification and filesystem/controller caching are not measured here.
         public let ioBytesRead: UInt64
+        public let projections: GGUFProjectionStatistics
+        public let rawCacheHits: Int
+        public let rawCacheMisses: Int
+        public let rawCacheEvictions: Int
+        public let rawCacheCapacityBytes: Int
+        /// Lifetime of this engine's weight source, which can span reset runs.
+        public let rawCacheLifetimePeakBytes: Int
         public let maximumObservedFootprintBytes: UInt64
         /// Explicitly process-lifetime, since a previous run may own this peak.
         public let processLifetimePeakFootprintBytes: UInt64
@@ -118,6 +127,8 @@ public final class Qwen4ExpTextGeneration {
         defer { decoder.onFootprintObservation = nil; decoder.reset(); running = false }
         let started = ProcessInfo.processInfo.systemUptime
         let baselineIO = decoder.readStatistics.bytesRead
+        let baselineProjections = decoder.projectionStatistics
+        let baselineCache = decoder.rawCacheStatistics
         var peak: UInt64 = 0, lifetimePeak: UInt64 = 0
         decoder.onFootprintObservation = {
             peak = max(peak, $0.footprintBytes); lifetimePeak = max(lifetimePeak, $0.peakFootprintBytes)
@@ -166,10 +177,22 @@ public final class Qwen4ExpTextGeneration {
         try check()
         let trailing = text.finish()
         if !trailing.isEmpty { try onEvent(.trailingText(trailing)) }
+        let cache = decoder.rawCacheStatistics
+        guard cache.faults.isEmpty, cache.isBudgetRespected,
+              cache.cacheHitCount >= baselineCache.cacheHitCount,
+              cache.cacheMissCount >= baselineCache.cacheMissCount,
+              cache.cacheEvictionCount >= baselineCache.cacheEvictionCount else {
+            throw GGUFError.invalid("raw cache accounting or lease fault")
+        }
         return Summary(modelSHA256: artifact.manifest.sha256, promptTokenIDs: prompt.tokenIDs,
             generatedTokenIDs: generated, stopReason: reason, prefillSeconds: prefillSeconds,
             decodeForwardSeconds: decodeSeconds, decodeForwardPasses: decodePasses,
             elapsedSeconds: ProcessInfo.processInfo.systemUptime - started, ioBytesRead: try ioBytes(),
+            projections: try decoder.projectionStatistics.subtracting(baselineProjections),
+            rawCacheHits: cache.cacheHitCount - baselineCache.cacheHitCount,
+            rawCacheMisses: cache.cacheMissCount - baselineCache.cacheMissCount,
+            rawCacheEvictions: cache.cacheEvictionCount - baselineCache.cacheEvictionCount,
+            rawCacheCapacityBytes: cache.budgetBytes, rawCacheLifetimePeakBytes: cache.peakInUseBytes,
             maximumObservedFootprintBytes: peak, processLifetimePeakFootprintBytes: lifetimePeak)
     }
 }

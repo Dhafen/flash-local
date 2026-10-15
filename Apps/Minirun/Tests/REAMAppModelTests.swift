@@ -71,6 +71,22 @@ final class REAMAppModelTests: XCTestCase {
         XCTAssertEqual(model.messages.last?.interrupted, false)
         let saved = try JSONDecoder().decode([REAMMessage].self, from: Data(contentsOf: file))
         XCTAssertEqual(saved.map(\.text), model.messages.map(\.text))
+        model.saveMeasurement(); await model.waitUntilIdle()
+        XCTAssertNil(model.error)
+        let measurement = try XCTUnwrap(model.lastMeasurementURL)
+        XCTAssertEqual(measurement.deletingLastPathComponent().lastPathComponent, "Diagnostics")
+        let report = try JSONDecoder().decode(REAMRunReport.self, from: Data(contentsOf: measurement))
+        XCTAssertEqual(report.generation.generatedTokenIDs, reference.generatedTokenIDs)
+        XCTAssertEqual(report.generation.promptTokenIDs, reference.promptTokenIDs)
+        XCTAssertEqual(report.generation.modelSHA256, fixture.sha256)
+        XCTAssertEqual(report.contextTokens, fixture.contextTokens)
+        XCTAssertEqual(report.budgetBytes, 4_000_000_000)
+        XCTAssertEqual(report.modelFileBytes, fixture.fileByteCount)
+        XCTAssertFalse(report.airplaneModeVerified)
+        XCTAssertFalse(report.fullModelNumericsVerified)
+        #if os(macOS)
+        XCTAssertEqual(report.platform, "macOS", "A hosted Mac test must not label itself an iPhone measurement")
+        #endif
         try FileManager.default.removeItem(at: localFile)
         model.refreshStorage()
         XCTAssertFalse(model.canChat)
@@ -85,9 +101,11 @@ final class REAMAppModelTests: XCTestCase {
         XCTAssertFalse(model.hasFile); XCTAssertFalse(model.canChat)
         model.draft = "Do not invent an answer"
         model.send()
+        model.saveMeasurement()
         XCTAssertTrue(model.messages.isEmpty)
         XCTAssertEqual(model.draft, "Do not invent an answer")
         XCTAssertFalse(model.isBusy)
+        XCTAssertNil(model.lastMeasurementURL)
     }
 
     func testWrongModelSizeNeverEnablesSendAndWorkerTearsDown() async throws {

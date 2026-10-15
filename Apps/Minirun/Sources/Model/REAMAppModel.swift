@@ -3,6 +3,7 @@ import MinirunKit
 import MinirunRunners
 import ModelAdapters
 import Observation
+import StorageCore
 
 struct REAMMessage: Codable, Identifiable, Sendable {
     let id: UUID
@@ -35,6 +36,57 @@ struct REAMRunSettings: Sendable {
         maximumNewTokens: 128, rawCacheBytes: 64 << 20)
 }
 
+/// Saved only by an explicit action. No report is uploaded. Token IDs preserve
+/// the exact test input/output for later local reference comparisons.
+struct REAMRunReport: Codable, Sendable {
+    let schemaVersion: Int
+    let timestamp: String
+    let sourceRevision: String
+    let appVersion: String
+    let appBuild: String
+    let platform: String
+    let deviceIdentifier: String?
+    let operatingSystem: String
+    let physicalMemoryBytes: UInt64
+    let modelSourceURL: String
+    let modelFileBytes: UInt64
+    let contextTokens: Int
+    let budgetBytes: UInt64
+    let maximumNewTokens: Int
+    let sampling: String
+    let airplaneModeVerified: Bool
+    let fullModelNumericsVerified: Bool
+    let decodeForwardTokensPerSecond: Double?
+    let generation: Qwen4ExpTextGeneration.Summary
+
+    @MainActor init(summary: Qwen4ExpTextGeneration.Summary, settings: REAMRunSettings, source: PinnedGGUFDownload) {
+        schemaVersion = 1; sampling = "greedy"
+        airplaneModeVerified = false; fullModelNumericsVerified = false
+        timestamp = ISO8601DateFormatter().string(from: Date())
+        sourceRevision = BuildInfo.gitRevision
+        appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
+        appBuild = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
+        #if targetEnvironment(simulator)
+        platform = "iOSSimulator"
+        #elseif os(iOS)
+        platform = "iOSDevice"
+        #else
+        platform = "macOS"
+        #endif
+        #if os(iOS)
+        deviceIdentifier = Sysctl.string("hw.machine")
+        #else
+        deviceIdentifier = Sysctl.string("hw.model")
+        #endif
+        operatingSystem = ProcessInfo.processInfo.operatingSystemVersionString
+        physicalMemoryBytes = ProcessInfo.processInfo.physicalMemory
+        modelSourceURL = source.url.absoluteString; modelFileBytes = source.manifest.fileByteCount
+        contextTokens = settings.contextTokens; budgetBytes = settings.budgetBytes
+        maximumNewTokens = settings.maximumNewTokens
+        decodeForwardTokensPerSecond = summary.decodeTokensPerSecond; generation = summary
+    }
+}
+
 /// Main-actor presentation state; hashing, transfer and MLX execution live on
 /// workers. A Stop waits for actual worker teardown before allowing another
 /// operation. A verified descriptor is the only authority that enables Send.
@@ -50,6 +102,7 @@ final class REAMAppModel {
     private(set) var progress: GGUFModelTransfer.Progress?
     private(set) var generationProgress: Qwen4ExpTextGeneration.Progress?
     private(set) var summary: Qwen4ExpTextGeneration.Summary?
+    private(set) var lastMeasurementURL: URL?
     private(set) var isPreview = false
     var draft = ""
     let root: URL
@@ -202,7 +255,7 @@ final class REAMAppModel {
         messages.append(.init(role: .assistant, text: "", interrupted: true))
         let responseID = messages.last!.id
         let (id, flag) = begin(.generating, status: "Förbereder lokal generering…")
-        generationProgress = nil; summary = nil; save()
+        generationProgress = nil; summary = nil; lastMeasurementURL = nil; save()
         let context = contextTokens, budget = budgetBytes, limit = maximumNewTokens, cache = settings.rawCacheBytes
         let channel = AsyncThrowingStream<Qwen4ExpTextGeneration.Event, Error>.makeStream(bufferingPolicy: .bufferingOldest(32))
         channel.continuation.onTermination = { if case .cancelled = $0 { flag.cancel() } }
@@ -258,7 +311,29 @@ final class REAMAppModel {
         }
     }
     func clearMessages() {
-        guard !isBusy else { return }; messages.removeAll(); summary = nil; generationProgress = nil; save()
+        guard !isBusy else { return }; messages.removeAll(); summary = nil; generationProgress = nil; lastMeasurementURL = nil; save()
+    }
+    func saveMeasurement() {
+        guard !isBusy, !isPreview, let summary else { return }
+        let report = REAMRunReport(summary: summary, settings: settings, source: source)
+        let directory = root.deletingLastPathComponent().appendingPathComponent("Diagnostics", isDirectory: true)
+        let (id, _) = begin(.resetting, status: "Sparar mätningen lokalt…")
+        let worker = Task.detached(priority: .utility) {
+            try LocalModelStorage.prepare(root: directory)
+            let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let data = try encoder.encode(report)
+            guard data.count <= 4 << 20 else { throw CocoaError(.fileWriteOutOfSpace) }
+            let file = directory.appendingPathComponent("run-\(UUID().uuidString).json")
+            try data.write(to: file, options: .atomic)
+            return file
+        }
+        operation = Task {
+            do {
+                lastMeasurementURL = try await worker.value
+                status = "Mätningen sparades i Flash Local › Diagnostics i Filer."
+            } catch { self.error = "Mätningen kunde inte sparas: " + error.localizedDescription }
+            finish(id)
+        }
     }
     private func save() {
         guard let chatFile else { return }

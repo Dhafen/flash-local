@@ -147,6 +147,12 @@ struct REAMChatPage: View {
                     ram(summary.maximumObservedFootprintBytes)))
                     .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             }
+            if model.summary != nil {
+                Button("Spara mätning i Filer", systemImage: "chart.bar.doc.horizontal") { model.saveMeasurement() }
+                    .disabled(model.isBusy)
+                Text("Sparar mätvärden och promptens/svarets token-ID:n lokalt. Inget skickas iväg.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
             Text("Utvecklingsversion · 1 024 token kontext. Den stora modellens numerik och 65K kontext är ännu inte verifierade på iPhone.")
                 .font(.caption2).foregroundStyle(.secondary)
         }.padding(16)
