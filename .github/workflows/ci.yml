@@ -104,6 +104,7 @@ jobs:
             .work/reference-build.log
             .test-fixtures/llama-reference-logits.json
           if-no-files-found: ignore
+          include-hidden-files: true
           retention-days: 14
 
       - name: Build the iOS app (Simulator)
