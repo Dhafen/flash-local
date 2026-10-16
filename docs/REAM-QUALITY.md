@@ -20,10 +20,22 @@ retain the original expert/head counts, and the authors publish quality
 measurements. This does not establish parity with Qwen3.8-27B under our task
 conditions. The allocation manifest contains thirteen formats despite the
 Q2_0 filename. Five are unsupported by this app: Q2_0, Q3_K, Q5_K, IQ4_NL and
-IQ4_XS. Supporting it also requires shard-aware verified storage and checks
-of its actual architecture, tokenizer and template. Only metadata, its card
-and allocation manifest have been inspected; no weight payload was fetched.
-It cannot currently replace the installed model in the app.
+IQ4_XS. Exact bounded reads of both shard headers confirm `qwen4exp`, 512
+experts/top-10, sixteen distinct PLE heads and compression ratio 4 at every
+fourth layer. The current decoder explicitly refuses this QSA attention path.
+Supporting it requires that implementation, shard-aware verified storage,
+the five formats and validated tokenizer/template behavior. No weight payload
+was fetched. It cannot currently replace the installed model in the app.
+
+The two headers total 11,024,864 bytes (11,024,672 plus 192). Their SHA-256s
+are `bf118cd5acbabeae0459b52a6b8cb94cc00acbf89b39fb72b337975331abefb9`
+and `60a762da9127f76c0a895de009e7245566708ee638c2ae57f0c12b20ae948e4d`.
+All 1,224 tensor names are unique across the shards and their calculated
+packed extents fit without overlap. Expert bytes for ten selected experts
+in each layer total 663,552,000 per token before reuse; the installed REAM
+artifact's corresponding total is 1,425,408,000. These are weight-layout
+arithmetic, not actual reader traffic, physical flash speed, memory usage or
+quality measurements. QSA and dense/PLE work still have to be executed.
 
 The [official baseline](https://huggingface.co/Qwen/Qwen3.8-27B/tree/1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0)
 uses a different dense architecture. Its source revision is pinned, but an
