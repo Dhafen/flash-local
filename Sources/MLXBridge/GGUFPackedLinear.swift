@@ -152,7 +152,8 @@ public enum GGUFPackedLinear {
         let matrixBytes = rows.multipliedReportingOverflow(by: rowBytes)
         let count = matrixBytes.partialValue.multipliedReportingOverflow(by: stackedWeights ? x.shape[0] : 1)
         let outputCount = rows.multipliedReportingOverflow(by: x.shape[0])
-        guard !matrixBytes.overflow, !count.overflow, packed.size == count.partialValue, packed.size <= 4 << 20,
+        guard !matrixBytes.overflow, !count.overflow, packed.size == count.partialValue,
+              packed.size <= (stackedWeights ? 16 << 20 : 4 << 20),
               !outputCount.overflow, outputCount.partialValue <= 16 << 20 else {
             throw GGUFError.limit("packed Metal tile/output")
         }

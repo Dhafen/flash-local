@@ -195,7 +195,7 @@ public final class GGUFWeightSource {
                 try linear(x[x.shape[0] == 1 ? 0..<1 : slot..<(slot+1)], tensor: name, expert: expert)
             }, axis: 0)
         }
-        let rows = min(4096, (4 << 20) / experts.count / Int(tensor.rowBytes), tileBytes / Int(tensor.rowBytes))
+        let rows = min(4096, (16 << 20) / experts.count / Int(tensor.rowBytes), tileBytes / Int(tensor.rowBytes))
         guard rows > 0 else { throw GGUFError.limit("grouped expert row") }
         let roundingStart = MonotonicClock.now()
         let activations = try canonicalActivations(x, type: tensor.quantization, columns: columns)

@@ -46,6 +46,14 @@ Changes now under validation, preserving the same weights and RAM policy:
   coexist with its inputs: the conservative copied-payload bound is 32 MiB.
   The previous per-tile evaluation remains a benchmark control. Weights and
   canonical arithmetic are unchanged; no full matrix/model fallback exists.
+  Grouped experts can now use that same 16 MiB payload allowance for a
+  dispatch, with each individual read still bounded by a raw slot. The primary
+  artifact's selected expert matrices fit whole, avoiding fragmentation into
+  several small reads per expert. A 12.5 MiB synthetic selected stack verifies
+  forty fragmented versus ten whole-expert reads, identical independently
+  expected outputs and the same 32 MiB copied-payload ceiling. Its host timing
+  samples include file I/O with filesystem caching enabled; they are not phone
+  bandwidth or speedup evidence.
 - Empty interrupted assistant placeholders stay out of model prompts.
   Reports distinguish reused/evaluated prompt positions, evaluation batches
   and prefill/decode projection work. A prefix speedup does not establish

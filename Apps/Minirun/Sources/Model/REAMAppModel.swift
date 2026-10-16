@@ -368,8 +368,9 @@ final class REAMAppModel {
         }
     }
     func clearMessages() {
-        guard !isBusy else { return }; messages.removeAll(); summary = nil; generationProgress = nil; lastMeasurementURL = nil; save()
+        guard !isBusy else { return }
         let (id, _) = begin(.resetting, status: "Rensar samtalets modellminne…")
+        messages.removeAll(); summary = nil; generationProgress = nil; lastMeasurementURL = nil; save()
         let session = inferenceSession
         operation = Task { await session.clearConversation(); finish(id) }
     }

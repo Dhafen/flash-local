@@ -42,7 +42,7 @@ public struct GGUFLinearReport: Sendable, Codable {
 
 public enum GGUFStreamedLinear {
     /// Selected experts share a dispatch, not weights or activations. A packed
-    /// tile contains only the router's choices; at most 4 MiB is copied and
+    /// tile contains only the router's choices; at most 16 MiB is copied and
     /// evaluated together, irrespective of model size or expert count.
     public static func runExperts(
         _ x: MLXArray, tensor: GGUFTensor, experts: [UInt64], payloadOffset: UInt64,
@@ -56,7 +56,7 @@ public enum GGUFStreamedLinear {
               tileRows > 0, tileRows <= 4096, columns > 0, rows > 0,
               rows <= (16 << 20) / 4 / experts.count,
               experts.allSatisfy({ $0 < tensor.dimensions[2] && $0 <= UInt64(UInt32.max) }),
-              tensor.rowBytes <= UInt64((4 << 20) / experts.count / min(rows, tileRows)) else {
+              tensor.rowBytes <= UInt64((16 << 20) / experts.count / min(rows, tileRows)) else {
             throw GGUFError.limit("grouped expert tile/shape")
         }
         let started = MonotonicClock.now(), count = (rows - 1) / tileRows + 1

@@ -126,6 +126,17 @@ final class REAMAppModelTests: XCTestCase {
         XCTAssertNil(model.lastMeasurementURL)
     }
 
+    func testClearDoesNotHideChatPersistenceFailures() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let model = REAMAppModel(root: folder.appendingPathComponent("Models"), chatFile: folder)
+        model.prepare(); await model.waitUntilIdle()
+        model.clearMessages(); await model.waitUntilIdle()
+        XCTAssertNotNil(model.error, "Writing JSON onto a directory must leave a visible persistence error")
+        XCTAssertFalse(model.isBusy)
+    }
+
     func testWrongModelSizeNeverEnablesSendAndWorkerTearsDown() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

@@ -78,6 +78,62 @@ final class GGUFStreamedLinearTests: XCTestCase {
         }
     }
 
+    func testWholeSelectedExpertsUseFewerReadsWithinTheSamePackedStagingBound() throws {
+        let rows = 128, columns = 2560, count = 10
+        var header = Data("GGUF".utf8)
+        func integer(_ value: UInt64, _ bytes: Int) {
+            for i in 0..<bytes { header.append(UInt8(truncatingIfNeeded: value >> (i * 8))) }
+        }
+        integer(3, 4); integer(1, 8); integer(0, 8)
+        let name = Data("selected".utf8); integer(UInt64(name.count), 8); header.append(name)
+        integer(3, 4); integer(UInt64(columns), 8); integer(UInt64(rows), 8); integer(UInt64(count), 8)
+        integer(0, 4); integer(0, 8)
+        let payloadOffset = (header.count + 31) / 32 * 32
+        let payloadBytes = rows * columns * count * 4
+        let index = try GGUFIndex.parse(header: header, fileByteCount: UInt64(payloadOffset + payloadBytes))
+        header.append(Data(repeating: 0, count: payloadOffset - header.count))
+        var payload = Data(count: payloadBytes)
+        payload.withUnsafeMutableBytes { raw in
+            let pointer = raw.bindMemory(to: Float.self).baseAddress!
+            for expert in 0..<count {
+                pointer.advanced(by: expert * rows * columns).update(repeating: Float(expert + 1), count: rows * columns)
+            }
+        }
+        header.append(payload)
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try header.write(to: file); defer { try? FileManager.default.removeItem(at: file) }
+        let pool = try BufferPool(configuration: .init(slotCount: 4, slotBytes: 4 << 20, poisonOnRelease: true))
+        let reader = try TileReader(path: file.path, pool: pool,
+            configuration: .init(queueDepth: 3, readAhead: 3, slotAcquireTimeout: 5))
+        defer { reader.shutdown() }
+        let tensor = try XCTUnwrap(index.tensors["selected"])
+        let experts: [UInt64] = [9, 1, 7, 0, 8, 2, 6, 3, 5, 4]
+        let x = MLXArray.ones([count, columns], dtype: .float32)
+        let expected = experts.flatMap { Array(repeating: Float(columns * Int($0 + 1)), count: rows) }
+        var samples: [String: [Double]] = [:]
+        for tileRows in [32, 128] {
+            for sample in 0..<4 {
+                let before = reader.statistics
+                let value = try GGUFStreamedLinear.runExperts(x, tensor: tensor, experts: experts,
+                    payloadOffset: index.payloadOffset, sourceID: UInt64(tileRows), tileRows: tileRows, reader: reader)
+                XCTAssertEqual(value.output.asArray(Float.self), expected)
+                XCTAssertEqual(reader.statistics.readCount - before.readCount, tileRows == 32 ? 40 : 10)
+                XCTAssertEqual(reader.statistics.bytesRead - before.bytesRead, UInt64(payloadBytes))
+                XCTAssertLessThanOrEqual(value.report.peakCopiedWeightBytes, 32 << 20)
+                XCTAssertEqual(value.report.evaluationBatches, 1)
+                if sample > 0 { samples[tileRows == 32 ? "fragmentedSeconds" : "wholeExpertSeconds", default: []].append(value.report.wallSeconds) }
+            }
+        }
+        XCTAssertEqual(pool.census.inUse, 0)
+        let record: [String: Any] = ["kind": "synthetic-selected-expert-read-geometry", "physicalPhone": false,
+            "shape": [count, rows, columns], "packedBytes": payloadBytes, "fragmentedReadCount": 40,
+            "wholeExpertReadCount": 10, "maximumCopiedPayloadBytes": 32 << 20,
+            "includesFileIO": true, "noCache": false, "warmup": 1, "samples": samples,
+            "sourceRevision": BuildInfo.gitRevision, "os": ProcessInfo.processInfo.operatingSystemVersionString,
+            "physicalMemoryBytes": ProcessInfo.processInfo.physicalMemory]
+        print("GGUF_EXPERT_READ_GEOMETRY_BENCH " + String(decoding: try JSONSerialization.data(withJSONObject: record, options: .sortedKeys), as: UTF8.self))
+    }
+
     func testDifferentTileSizesMatchIndependentDotProducts() throws {
         for rows in [1, 2, 3] {
             try withExpertMatrix { index, reader, _ in
