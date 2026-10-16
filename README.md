@@ -2,9 +2,11 @@
 
 An independent fork of [Minirun](https://github.com/nanguoyu/minirun-app), developing local REAM/MoE inference from an iPhone's internal flash.
 
-Target: the 56.1 GB Qwen3.8-Flash-Next-REAM GGUF, a total process memory budget of approximately 5.5 GB, and installation through a private internal TestFlight build. Model weights are downloaded separately and never bundled with the app.
+Current target: the official 21.7 GB Ornith 1.5 35B-A3B Q4_K_M GGUF, a total process memory budget of approximately 5.5 GB, and installation through private internal TestFlight. The user selected this pivot after the 56.1 GB REAM trial. Model weights download separately and never enter the app bundle; installed REAM weights remain available as a separate model choice.
 
 ## Development status
+
+The [Ornith adapter and model switch](docs/ORNITH-IMPLEMENTATION.md) are under validation. They implement the actual `qwen35moe` trunk, including SiLU GDN gating, ordinary residual/norm blocks, shared/routed experts, pinned tokenization and correct exclusion of the stored MTP block. Build 68 remains the latest delivered REAM app; an Ornith TestFlight version and phone results are not confirmed yet.
 
 Implemented foundations include bounded GGUF indexing, mixed GGML dequantization, row-streamed MLX projections, a bounded expert cache, PLE hashing, GDN/hyper-connection primitives, chunked FP16 text-attention KV storage, internal Documents/Models storage and descriptor-bound integrity verification.
 

@@ -8,11 +8,12 @@ final class VerifiedGGUFArtifactTests: XCTestCase {
     func testPrimaryProvenanceMatchesPinnedDownloadAndLicenseSource() throws {
         let manifest = GGUFModelManifest.primaryREAM
         let provenance = try XCTUnwrap(manifest.provenance)
+        let base = try XCTUnwrap(provenance.inspectedBaseModel)
         let expectedURL = provenance.artifact.url + "/resolve/" + provenance.artifact.revision + "/" + manifest.fileName
         XCTAssertEqual(PinnedGGUFDownload.primaryREAM.url.absoluteString, expectedURL)
         XCTAssertEqual(provenance.license.sourceURL,
-            provenance.inspectedBaseModel.url + "/resolve/" + provenance.inspectedBaseModel.revision + "/LICENSE")
-        for source in [provenance.artifact, provenance.inspectedSourceModel, provenance.inspectedBaseModel] {
+            base.url + "/resolve/" + base.revision + "/LICENSE")
+        for source in [provenance.artifact, provenance.inspectedSourceModel, base] {
             XCTAssertEqual(URL(string: source.url)?.host, "huggingface.co")
             XCTAssertEqual(source.revision.count, 40)
         }
@@ -22,6 +23,21 @@ final class VerifiedGGUFArtifactTests: XCTestCase {
         let local = try GGUFModelManifest(fileName: "synthetic.gguf", fileByteCount: 32,
             sha256: String(repeating: "0", count: 64))
         XCTAssertNil(local.provenance, "A local fixture must not inherit a trained-model source/license")
+    }
+
+    func testOfficialOrnithPinHasIndependentIdentityAndNoInventedBaseModel() throws {
+        let manifest = GGUFModelManifest.primaryOrnith
+        let provenance = try XCTUnwrap(manifest.provenance)
+        XCTAssertEqual(manifest.fileByteCount, 21_713_463_040)
+        XCTAssertEqual(manifest.sha256, "42739874cc2ccfdb8523b23fbe52e29b2a7555c8176737ca9ca0b5d59859d41f")
+        XCTAssertNotEqual(manifest.fileName, GGUFModelManifest.primaryREAM.fileName)
+        XCTAssertEqual(PinnedGGUFDownload.primaryOrnith.url.absoluteString,
+            provenance.artifact.url + "/resolve/" + provenance.artifact.revision + "/" + manifest.fileName)
+        XCTAssertNil(provenance.inspectedBaseModel)
+        XCTAssertEqual(URL(string: provenance.license.sourceURL)?.host, "github.com")
+        XCTAssertEqual(provenance.license.sha256, "ba0b4cc44cd824e63b2aa20691ab8707ed7407a91b3772d8ed47896d8c4d9629")
+        XCTAssertEqual(try JSONDecoder().decode(GGUFModelProvenance.self,
+            from: JSONEncoder().encode(provenance)), provenance)
     }
 
     private func withModel(vocabularyCount: Int = 0, _ body: (URL, GGUFModelManifest) throws -> Void) throws {

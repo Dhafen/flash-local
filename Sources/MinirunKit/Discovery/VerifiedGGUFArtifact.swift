@@ -24,10 +24,10 @@ public struct GGUFModelProvenance: Codable, Sendable, Equatable {
     }
     public let artifact: Repository
     public let inspectedSourceModel: Repository
-    public let inspectedBaseModel: Repository
-    /// Records the base-model notice, without relicensing derivatives.
+    public let inspectedBaseModel: Repository?
+    /// Records the publisher/base-model notice, without relicensing derivatives.
     public let license: License
-    public init(artifact: Repository, inspectedSourceModel: Repository, inspectedBaseModel: Repository, license: License) {
+    public init(artifact: Repository, inspectedSourceModel: Repository, inspectedBaseModel: Repository? = nil, license: License) {
         self.artifact = artifact; self.inspectedSourceModel = inspectedSourceModel
         self.inspectedBaseModel = inspectedBaseModel; self.license = license
     }
@@ -69,6 +69,21 @@ public struct GGUFModelManifest: Sendable, Equatable {
             license: .init(name: "Qwen Community License 1.0",
                 sourceURL: "https://huggingface.co/Qwen/Qwen3.8-Flash-Next/resolve/de4b8e4d43b917e7706784d8bb445c9af86a3540/LICENSE",
                 sha256: "a0dc422560841fd68e06d974907f8b4c709bca44a67daad2b528437bdf676c08")))
+
+    /// Official publisher Q4_K_M. The MTP block is stored in the file but the
+    /// registered text decoder executes only the forty-layer main trunk.
+    public static let primaryOrnith = try! GGUFModelManifest(
+        fileName: "Ornith-1.5-35B-Q4_K_M.gguf",
+        fileByteCount: 21_713_463_040,
+        sha256: "42739874cc2ccfdb8523b23fbe52e29b2a7555c8176737ca9ca0b5d59859d41f",
+        provenance: .init(
+            artifact: .init(url: "https://huggingface.co/ornith-ai/Ornith-1.5-35B-A3B-GGUF",
+                revision: "12393612fd4f730ff5aadc23e9b8f9648aa49ceb"),
+            inspectedSourceModel: .init(url: "https://huggingface.co/ornith-ai/Ornith-1.5-35B-A3B",
+                revision: "10fbf86fed7ecee4a061f8b499a618f46001cac1"),
+            license: .init(name: "MIT (publisher declaration and notice)",
+                sourceURL: "https://github.com/ornith-ai/Ornith-1/blob/9c800446621ebad1172f517a1d0f9b683fb8615e/LICENSE",
+                sha256: "ba0b4cc44cd824e63b2aa20691ab8707ed7407a91b3772d8ed47896d8c4d9629")))
 }
 
 /// Capability for exactly the file that was hashed, not a path that can be

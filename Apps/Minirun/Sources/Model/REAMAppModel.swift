@@ -59,6 +59,19 @@ struct REAMRunSettings: Sendable {
     }
     static let initial = REAMRunSettings(contextTokens: 1024, budgetBytes: 5_500_000_000,
         maximumNewTokens: 128, rawCacheBytes: 64 << 20, residentCacheBytes: 4_250_000_000)
+    static let ornith = REAMRunSettings(contextTokens: 4096, budgetBytes: 5_500_000_000,
+        maximumNewTokens: 512, rawCacheBytes: 64 << 20, residentCacheBytes: 3_500_000_000)
+}
+
+enum LocalChatModel: String, CaseIterable, Identifiable {
+    case ornith, ream
+    var id: String { rawValue }
+    var title: String {
+        switch self { case .ornith: "Ornith 1.5 · 35B-A3B"; case .ream: "Qwen3.8 Flash Next · REAM" }
+    }
+    var source: PinnedGGUFDownload { self == .ornith ? .primaryOrnith : .primaryREAM }
+    var settings: REAMRunSettings { self == .ornith ? .ornith : .initial }
+    var chatName: String { self == .ornith ? "ornith-chat.json" : "chat.json" }
 }
 
 /// One off-main owner for the tokenizer, weights and recurrent/KV prefix. An
@@ -180,8 +193,8 @@ final class REAMAppModel {
     private(set) var isPreview = false
     var draft = ""
     let root: URL
-    let source: PinnedGGUFDownload
-    let settings: REAMRunSettings
+    private(set) var source: PinnedGGUFDownload
+    private(set) var settings: REAMRunSettings
     var contextTokens: Int { settings.contextTokens }
     var budgetBytes: UInt64 { settings.budgetBytes }
     var maximumNewTokens: Int { settings.maximumNewTokens }
@@ -192,22 +205,54 @@ final class REAMAppModel {
     @ObservationIgnored private var cancellation: REAMCancellation?
     @ObservationIgnored private var activeID: UUID?
     @ObservationIgnored private var prepared = false
-    @ObservationIgnored private let chatFile: URL?
+    @ObservationIgnored private var chatFile: URL?
+    @ObservationIgnored private let modelSelectionDirectory: URL?
     var isBusy: Bool { activity != .idle }
     var canRunNumerics: Bool { artifact != nil && !isBusy && !isPreview }
     var canChat: Bool { canRunNumerics && lastNumericsReport?.passedAtTestedPositions != false }
     var modelSize: String { ByteCountFormatter.string(fromByteCount: Int64(source.manifest.fileByteCount), countStyle: .file) }
+    var selectedModel: LocalChatModel {
+        source.manifest.sha256 == GGUFModelManifest.primaryREAM.sha256 ? .ream : .ornith
+    }
+    var modelTitle: String {
+        if source.manifest.sha256 == GGUFModelManifest.primaryOrnith.sha256 { return LocalChatModel.ornith.title }
+        if source.manifest.sha256 == GGUFModelManifest.primaryREAM.sha256 { return LocalChatModel.ream.title }
+        return "Lokal modell"
+    }
+    var canSelectModel: Bool { modelSelectionDirectory != nil && !isPreview && !isBusy }
 
-    init(root: URL, source: PinnedGGUFDownload = .primaryREAM, chatFile: URL? = nil,
-         settings: REAMRunSettings = .initial) {
+    init(root: URL, source: PinnedGGUFDownload = .primaryOrnith, chatFile: URL? = nil,
+         settings: REAMRunSettings = .ornith, modelSelectionDirectory: URL? = nil) {
         self.root = root; self.source = source; self.chatFile = chatFile; self.settings = settings
+        self.modelSelectionDirectory = modelSelectionDirectory
     }
     static func live() -> REAMAppModel {
         let manager = FileManager.default
         let documents = manager.urls(for: .documentDirectory, in: .userDomainMask)[0]
         let support = manager.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return REAMAppModel(root: documents.appendingPathComponent("Models", isDirectory: true),
-            chatFile: support.appendingPathComponent("FlashLocal", isDirectory: true).appendingPathComponent("chat.json"))
+        let directory = support.appendingPathComponent("FlashLocal", isDirectory: true)
+        let selected = UserDefaults.standard.string(forKey: "FlashLocal.selectedChatModel")
+            .flatMap(LocalChatModel.init(rawValue:)) ?? .ornith
+        return REAMAppModel(root: documents.appendingPathComponent("Models", isDirectory: true), source: selected.source,
+            chatFile: directory.appendingPathComponent(selected.chatName), settings: selected.settings,
+            modelSelectionDirectory: directory)
+    }
+    func selectModel(_ target: LocalChatModel) {
+        guard canSelectModel, target != selectedModel, let directory = modelSelectionDirectory else { return }
+        let (id, flag) = begin(.resetting, status: "Byter modell…")
+        let session = inferenceSession
+        operation = Task {
+            await session.release()
+            guard activeID == id else { return }
+            if flag.requested() { status = "Modellbytet avbröts."; finish(id); return }
+            artifact = nil; source = target.source; settings = target.settings
+            chatFile = directory.appendingPathComponent(target.chatName)
+            messages.removeAll(); draft = ""; summary = nil; generationProgress = nil
+            lastMeasurementURL = nil; lastNumericsURL = nil; lastNumericsReport = nil
+            UserDefaults.standard.set(target.rawValue, forKey: "FlashLocal.selectedChatModel")
+            prepared = false; status = "Modellen är inte hämtad."
+            finish(id); prepare()
+        }
     }
     func prepare() {
         guard !prepared, !isPreview else { return }; prepared = true
@@ -259,11 +304,11 @@ final class REAMAppModel {
     }
     nonisolated private static func preflight(_ artifact: VerifiedGGUFArtifact, settings: REAMRunSettings) throws -> VerifiedGGUFArtifact {
         try autoreleasepool {
-            let layout = try Qwen4ExpDecoder.Layout(index: artifact.index)
+            let vocabularySize = try GGUFStreamedDecoder.vocabularySize(index: artifact.index)
             let tokenizer = try CanonicalQwen35Tokenizer(artifact: artifact)
-            guard layout.vocabularySize == tokenizer.vocabularySize else { throw CocoaError(.fileReadCorruptFile) }
-            _ = try Qwen4ExpMemoryPlan(config: layout.config, contextTokens: settings.contextTokens,
-                budgetBytes: settings.budgetBytes, reservedWorkingBytes: 1_000_000_000)
+            guard vocabularySize == tokenizer.vocabularySize else { throw CocoaError(.fileReadCorruptFile) }
+            _ = try GGUFStreamedDecoder.memoryPlan(index: artifact.index, contextTokens: settings.contextTokens,
+                budgetBytes: settings.budgetBytes)
             try artifact.assertUnchanged(); return artifact
         }
     }

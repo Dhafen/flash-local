@@ -4,6 +4,13 @@ The user's minimum is Qwen3.8-27B-class coding, reasoning and agent capability.
 A faster small model alone does not satisfy that target. No trained-model
 quality comparison has been completed by this project.
 
+The user has since selected Ornith 1.5 35B-A3B as the primary candidate.
+See [the pinned artifact and implementation status](ORNITH-IMPLEMENTATION.md).
+Its official Q4_K_M is 21.7 GB and retains the complete main trunk rather
+than the installed REAM artifact's expert/PLE pruning. That does not itself
+establish 27B-class quality or an iPhone speed improvement. Publisher agent
+scores use thinking and much longer contexts than the initial phone policy.
+
 ## Current artifact and alternatives
 
 The [original REAM release](https://huggingface.co/Akicou/Qwen3.8-Flash-Next-REAM-60Pct/blob/7c9b3f5eddac3de7975aa279d00b0859283b76d8/README.md)

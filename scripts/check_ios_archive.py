@@ -98,6 +98,12 @@ def inspect(archive):
     license_digest = hashlib.sha256((app / "QwenModelLicense.txt").read_bytes()).hexdigest()
     if license_digest != "a0dc422560841fd68e06d974907f8b4c709bca44a67daad2b528437bdf676c08":
         raise ValueError("Original model license is missing or altered")
+    notices = app / "OpenSourceNotices.txt"
+    marker = "Ornith 1.5 publisher license (verbatim)\n\n"
+    text = notices.read_text(encoding="utf-8") if notices.is_file() else ""
+    if text.count(marker) != 1 or hashlib.sha256(text.split(marker)[-1].encode("utf-8")).hexdigest() != \
+            "ba0b4cc44cd824e63b2aa20691ab8707ed7407a91b3772d8ed47896d8c4d9629":
+        raise ValueError("Ornith publisher license is missing or altered")
     return {"bundleIdentifier": info["CFBundleIdentifier"], "platform": "iphoneos", "architecture": "arm64",
             "version": info.get("CFBundleShortVersionString"), "build": info.get("CFBundleVersion"),
             "appBytes": total, "files": count, "modelPayloadBundled": False,

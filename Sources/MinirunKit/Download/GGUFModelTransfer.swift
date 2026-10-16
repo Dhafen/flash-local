@@ -13,6 +13,9 @@ public struct PinnedGGUFDownload: Sendable {
     public static let primaryREAM = try! PinnedGGUFDownload(
         url: URL(string: "https://huggingface.co/RemySkye/Qwen3.8-Flash-Next-REAM-60Pct-GGUF/resolve/28a55fecdca51a498900aeb34a4e7e8338977cd3/Qwen3.8-Flash-Next-REAM-60Pct-HQ-PLE4of16-56GiB.gguf")!,
         manifest: .primaryREAM)
+    public static let primaryOrnith = try! PinnedGGUFDownload(
+        url: URL(string: "https://huggingface.co/ornith-ai/Ornith-1.5-35B-A3B-GGUF/resolve/12393612fd4f730ff5aadc23e9b8f9648aa49ceb/Ornith-1.5-35B-Q4_K_M.gguf")!,
+        manifest: .primaryOrnith)
 }
 
 /// Resumable bounded ranges written directly to the final local volume. Only

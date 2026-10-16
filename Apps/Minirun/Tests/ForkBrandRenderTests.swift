@@ -17,6 +17,13 @@ final class ForkBrandRenderTests: XCTestCase {
         let text = try String(contentsOf: notices, encoding: .utf8)
         XCTAssertTrue(text.contains("Apache License"))
         XCTAssertTrue(text.contains("The ggml authors"))
+        let marker = "Ornith 1.5 publisher license (verbatim)\n\n"
+        let pieces = text.components(separatedBy: marker)
+        XCTAssertEqual(pieces.count, 2)
+        let ornithNotice = try XCTUnwrap(pieces.last).data(using: .utf8)!
+        let ornithProvenance = try XCTUnwrap(GGUFModelManifest.primaryOrnith.provenance)
+        XCTAssertEqual(SHA256.hash(data: ornithNotice).map { String(format: "%02x", $0) }.joined(),
+            ornithProvenance.license.sha256)
         let modelLicense = try XCTUnwrap(Bundle.main.url(forResource: "QwenModelLicense", withExtension: "txt"))
         let licenseBytes = try Data(contentsOf: modelLicense)
         XCTAssertEqual(SHA256.hash(data: licenseBytes).map { String(format: "%02x", $0) }.joined(),

@@ -100,15 +100,22 @@ final class REAMAppModelTests: XCTestCase {
     }
 
     func testVerifiedLocalModelGeneratesReferenceTextPersistsAndRecoversAfterStop() async throws {
+        try await checkVerifiedLocalModel(family: "qwen4exp")
+    }
+    func testOrnithAppRouteGeneratesAndRunsTheLocalCPUComparison() async throws {
+        try await checkVerifiedLocalModel(family: "ornith")
+        print("ORNITH_APP_SESSION exactPromptIDs=true exactGeneratedIDs=true localCPUComparison=true syntheticOnly=true")
+    }
+    private func checkVerifiedLocalModel(family: String) async throws {
         let env = ProcessInfo.processInfo.environment
         guard let path = env["GGUF_HEADER_FIXTURE"] ?? env["TEST_RUNNER_GGUF_HEADER_FIXTURE"] else {
             throw XCTSkip("Set GGUF_HEADER_FIXTURE and run the synthetic text-session reference")
         }
         let fixtures = URL(fileURLWithPath: path).deletingLastPathComponent()
         let fixture = try JSONDecoder().decode(Fixture.self,
-            from: Data(contentsOf: fixtures.appendingPathComponent("synthetic-qwen4exp-chat.json")))
+            from: Data(contentsOf: fixtures.appendingPathComponent("synthetic-\(family)-chat.json")))
         let reference = try JSONDecoder().decode(Reference.self,
-            from: Data(contentsOf: fixtures.appendingPathComponent("qwen4exp-session-reference.json")))
+            from: Data(contentsOf: fixtures.appendingPathComponent("\(family)-session-reference.json")))
         XCTAssertLessThan(fixture.fileByteCount, 1 << 20, "Only the untrained tiny fixture belongs in CI")
         XCTAssertEqual(fixture.messages.count, 1)
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -187,6 +194,35 @@ final class REAMAppModelTests: XCTestCase {
         model.refreshStorage()
         XCTAssertFalse(model.canChat)
         print("REAM_APP_SESSION_PARITY exactPromptIDs=true exactGeneratedIDs=true exactText=true saved=true stopRecovery=true")
+    }
+
+    func testModelSwitchKeepsSeparateConversationsAndRestoresTheExistingREAMChat() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let chats = folder.appendingPathComponent("Chats"), root = folder.appendingPathComponent("Models")
+        try FileManager.default.createDirectory(at: chats, withIntermediateDirectories: true)
+        let ream = [REAMMessage(role: .user, text: "Saved REAM question"), REAMMessage(role: .assistant, text: "Saved REAM answer")]
+        let ornith = [REAMMessage(role: .user, text: "Saved Ornith question"), REAMMessage(role: .assistant, text: "Saved Ornith answer")]
+        let oldFile = chats.appendingPathComponent("chat.json"), newFile = chats.appendingPathComponent("ornith-chat.json")
+        try JSONEncoder().encode(ream).write(to: oldFile)
+        try JSONEncoder().encode(ornith).write(to: newFile)
+        let preference = UserDefaults.standard.string(forKey: "FlashLocal.selectedChatModel")
+        defer {
+            if let preference { UserDefaults.standard.set(preference, forKey: "FlashLocal.selectedChatModel") }
+            else { UserDefaults.standard.removeObject(forKey: "FlashLocal.selectedChatModel") }
+        }
+        let model = REAMAppModel(root: root, chatFile: newFile, modelSelectionDirectory: chats)
+        model.prepare(); await model.waitUntilIdle()
+        XCTAssertEqual(model.selectedModel, .ornith); XCTAssertEqual(model.contextTokens, 4096)
+        XCTAssertEqual(model.messages.map(\.text), ornith.map(\.text))
+        model.selectModel(.ream); await model.waitUntilIdle()
+        XCTAssertEqual(model.selectedModel, .ream); XCTAssertEqual(model.contextTokens, 1024)
+        XCTAssertEqual(model.messages.map(\.text), ream.map(\.text))
+        XCTAssertEqual(model.source.manifest, .primaryREAM)
+        model.selectModel(.ornith); await model.waitUntilIdle()
+        XCTAssertEqual(model.messages.map(\.text), ornith.map(\.text))
+        XCTAssertEqual(try JSONDecoder().decode([REAMMessage].self, from: Data(contentsOf: oldFile)).map(\.id), ream.map(\.id))
+        XCTAssertEqual(try JSONDecoder().decode([REAMMessage].self, from: Data(contentsOf: newFile)).map(\.id), ornith.map(\.id))
     }
 
     func testMissingModelCannotCreateOrInventChatOutput() {

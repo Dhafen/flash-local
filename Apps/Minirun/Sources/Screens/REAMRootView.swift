@@ -21,6 +21,9 @@ struct REAMRootView: View {
                     }
                     ToolbarItem(placement: .automatic) {
                         Menu {
+                            Picker("Modell", selection: Binding(get: { model.selectedModel }, set: { model.selectModel($0) })) {
+                                ForEach(LocalChatModel.allCases) { target in Text(target.title).tag(target) }
+                            }.disabled(!model.canSelectModel)
                             NavigationLink("Om Flash Local") { AboutView() }
                             Button("Kontrollera numerik (kort test)") { model.checkNumerics() }
                                 .disabled(!model.canRunNumerics)
@@ -109,7 +112,7 @@ struct REAMChatPage: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Qwen3.8 Flash Next · REAM").font(.subheadline.bold())
+                    Text(model.modelTitle).font(.subheadline.bold())
                     Text("\(model.modelSize) · intern lagring · \(String(format: "%.1f", Double(model.budgetBytes) / 1_000_000_000)) GB RAM-gräns")
                         .font(.caption).foregroundStyle(.secondary)
                 }
@@ -158,7 +161,7 @@ struct REAMChatPage: View {
                 Text("Sparar mätvärden och promptens/svarets token-ID:n lokalt. Inget skickas iväg.")
                     .font(.caption2).foregroundStyle(.secondary)
             }
-            Text("Utvecklingsversion · 1 024 token kontext. Den stora modellens numerik och 65K kontext är ännu inte verifierade på iPhone.")
+            Text("Utvecklingsversion · \(model.contextTokens.formatted()) token kontextgräns. Modellens fullständiga numerik och 65K kontext är ännu inte verifierade på iPhone.")
                 .font(.caption2).foregroundStyle(.secondary)
         }.padding(16)
     }

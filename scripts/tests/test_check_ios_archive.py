@@ -25,11 +25,23 @@ class ArchiveChecks(unittest.TestCase):
         self.write_binary(2)
         (self.app / "QwenModelLicense.txt").write_bytes(
             (ROOT / "Apps/Minirun/Resources/QwenModelLicense.txt").read_bytes())
+        (self.app / "OpenSourceNotices.txt").write_bytes(
+            (ROOT / "Apps/Minirun/Resources/OpenSourceNotices.txt").read_bytes())
         (self.app / "PrivacyInfo.xcprivacy").write_bytes(
             (ROOT / "Apps/Minirun/Resources/PrivacyInfo.xcprivacy").read_bytes())
 
     def write_info(self):
         (self.app / "Info.plist").write_bytes(plistlib.dumps(self.info))
+
+    def test_missing_or_altered_ornith_license_refuses_archive(self):
+        path = self.app / "OpenSourceNotices.txt"
+        original = path.read_text(encoding="utf-8")
+        path.write_text(original.replace("deepreinforce.ai", "altered-publisher"), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "Ornith publisher license"):
+            check.inspect(self.archive)
+        path.unlink()
+        with self.assertRaisesRegex(ValueError, "Ornith publisher license"):
+            check.inspect(self.archive)
 
     def write_binary(self, platform):
         header = struct.pack("<8I", 0xFEEDFACF, 0x0100000C, 0, 2, 1, 24, 0, 0)

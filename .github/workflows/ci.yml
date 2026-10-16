@@ -220,6 +220,7 @@ jobs:
             -scheme Minirun-macOS -destination 'platform=macOS' \
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee app-tests.log | tail -40
           grep 'REAM_APP_SESSION_PARITY exactPromptIDs=true exactGeneratedIDs=true exactText=true saved=true stopRecovery=true' app-tests.log
+          grep 'ORNITH_APP_SESSION exactPromptIDs=true exactGeneratedIDs=true localCPUComparison=true syntheticOnly=true' app-tests.log
 
       - name: macOS brand review in light and dark
         if: github.event_name != 'workflow_dispatch' || !inputs.provisioning_only

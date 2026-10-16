@@ -154,6 +154,16 @@ The bundled publisher SVGs are supplied by Lobe Icons. Publisher names and
 logos remain trademarks of their respective owners and are used only for
 identification; see [TRADEMARKS.md](TRADEMARKS.md).
 
+## Ornith 1.5 model family
+
+Ornith's publisher declares the family MIT licensed. The pinned publisher
+notice is Copyright (c) 2026 deepreinforce.ai, from
+[Ornith-1 LICENSE](https://github.com/ornith-ai/Ornith-1/blob/9c800446621ebad1172f517a1d0f9b683fb8615e/LICENSE).
+Its exact 1,073-byte text (SHA-256
+`ba0b4cc44cd824e63b2aa20691ab8707ed7407a91b3772d8ed47896d8c4d9629`)
+is included in `Apps/Minirun/Resources/OpenSourceNotices.txt` for offline display.
+Model weights are downloaded separately; the code license does not relicense them.
+
 ## Apple platform frameworks
 
 Minirun links system frameworks supplied by Apple, including SwiftUI,
