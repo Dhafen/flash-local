@@ -1,6 +1,6 @@
 # REAM performance work
 
-## Physical build 63 baseline and the next revision
+## Physical build 63 baseline and delivered build 68
 
 The user supplied a complete local measurement from an iPhone18,2 with
 12,263,424,000 physical memory bytes, iOS 27.2 build 24B5089g, app 0.1.0 (63),
@@ -27,7 +27,7 @@ whole-run wait/compute figures must not be described as decode-only. Reader
 bytes are returned `pread` bytes, not physical NAND counters. Offline mode,
 trained-model numerical agreement, quality and longer context remain unproven.
 
-Changes now under validation, preserving the same weights and RAM policy:
+Changes in app source `2db039f`, preserving the same weights and RAM policy:
 
 - One serialized foreground engine retains hot dense weights and compares
   exact new prompt token IDs with its evaluated state. A single immutable
@@ -67,6 +67,39 @@ products with independent expected dots and poisoned released buffers.
 5x4 F32 selected-expert control, including file I/O, source and host metadata.
 It measures synchronization overhead; it is not phone throughput evidence.
 
+### Build 68 validation and delivery
+
+[Run 38888291457](https://github.com/Dhafen/flash-local/actions/runs/38888291457)
+at `2db039fd6068fd994142c87fc9392b1a4f1c4e8d` passed the separate storage/kernel
+and complete-graph gates, 564 app tests and 473 package tests (nine explicit
+environment-specific skips). All twelve actual Mac/iOS light/dark captures
+were inspected. The full run also passed the device Release archive, actual
+Apple signing/export, privacy/memory-entitlement checks and upload. A separate
+read-only Apple audit confirms version 0.1.0 (68) `VALID`, `INTERNAL_ONLY` and
+`IN_BETA_TESTING` for exactly the existing private group, with unchanged sole
+owner membership. See the [delivery record](TESTFLIGHT.md).
+
+All vocabulary logits over five mixed-quant synthetic positions matched the
+pinned CPU reference with maximum absolute error `5.9604645e-8` and relative
+L2 `3.287112445836717e-7`, with unchanged limits `0.01` / `0.001`. Follow-up
+generation matched fresh execution exactly after prefix reuse, cancellation
+and divergent-prompt reset. That tiny host session reused ten positions and
+evaluated 51 instead of 61; its observed prefill times were 7.437 and 12.059 s.
+Those are synthetic Debug timings, not the phone's trained-model latency.
+
+The same macOS 26.6.2 (25G83), 7,516,192,768-byte host recorded these medians
+after one warmup and three samples, including file I/O with filesystem caching:
+
+| Synthetic control | Previous geometry/evaluation | New geometry/evaluation |
+| --- | ---: | ---: |
+| 5 x 4 F32, one selected expert, five vs one evaluation batches | 5.366 ms | 3.012 ms |
+| 10 x 128 x 2,560 F32 selected stack, forty vs ten reads | 18.444 ms | 9.381 ms |
+
+The larger stack is 13,107,200 bytes and keeps the same 33,554,432-byte copied
+payload bound. These controls verify read/dispatch behavior and tradeoffs;
+their cached small-file host timings cannot predict iPhone flash bandwidth
+or end-to-end tokens/s. No physical build 68 result exists yet.
+
 Build 56 is a functional first path, not a performance-complete runtime. The
 user reports extremely slow text generation on a physical iPhone. Their screen
 shows 97.12 GB returned reader bytes, four generated tokens and 0.32 GB current
@@ -79,8 +112,8 @@ prompt processing. No captured conversation is stored in this repository.
 App source `ddfa752` passed the complete delivery pipeline in
 [run 38877522212](https://github.com/Dhafen/flash-local/actions/runs/38877522212).
 Apple confirms availability to the configured private internal tester.
-Phone performance remains to be measured; the implementation below is not
-an observed speedup on the user's iPhone.
+The later user-supplied measurement above establishes unusable phone speed;
+the implementation below must not be described as a successful speedup.
 
 - Fused Metal GGUF dequantization/dot products preserve F32, F16, BF16, Q4_0,
   Q5_0, Q8_0, Q4_K and Q6_K layouts. The original CPU-dequantize/FP32-matmul

@@ -1,8 +1,8 @@
 # Private internal TestFlight delivery
 
-Version **0.1.0 (63)** from app source
-`ddfa7526d8291f7a4b705b985a36da025240626f` is available to the configured own
-internal tester. [Full run 38877522212](https://github.com/Dhafen/flash-local/actions/runs/38877522212)
+Version **0.1.0 (68)** from app source
+`2db039fd6068fd994142c87fc9392b1a4f1c4e8d` is available to the configured own
+internal tester. [Full run 38888291457](https://github.com/Dhafen/flash-local/actions/runs/38888291457)
 concluded **success**, including the test gates, Simulator review, device
 Release archive, actual Apple distribution export and upload/availability
 confirmation. A subsequent read-only Apple audit reconfirmed `VALID`,
@@ -10,20 +10,40 @@ confirmation. A subsequent read-only Apple audit reconfirmed `VALID`,
 unchanged sole account-holder membership. No public link, additional tester
 or automatic access to all builds was enabled.
 
-The unsigned arm64 device app was 28,234,349 bytes without model payload.
+The unsigned arm64 device app was 28,270,277 bytes without model payload.
 Both memory entitlements and the privacy manifest were verified in the
 Apple-signed export. The final IPA SHA-256 is
-`925affddeb1645bbb549fe34c257c76ef99ea10593621259e325b2ba9d954b1e`.
+`ca70651ba64e79a64f776beb8ade6996ef888e7880e505e47f865e63abb6b464`.
 The archive report intentionally describes the unsigned intermediate; the
 export seal confirms signing, and the separate delivery report confirms
 upload and availability. Those stages must not be conflated.
 
-This update contains the [first performance revision](REAM-PERFORMANCE.md)
+This update contains [foreground prefix retention, bounded parallel reads,
+whole selected experts and batched GPU evaluation](REAM-PERFORMANCE.md)
 and keeps the same model filename/hash. Update through TestFlight without
-uninstalling the app or downloading another model copy. The user reports
-very slow text generation on physical iPhone with the previous build 56.
-Build 63 phone speed/peak RAM and trained-model numerical/offline/long-context
-proof remain outstanding; TestFlight availability does not establish them.
+uninstalling the app or downloading another model copy. The user's build 63
+report measures 0.211 decode forwards/s and a
+4.633 GB sampled peak footprint. Speed is unusable despite the short run
+fitting the RAM budget. Trained-model numerical/offline/long-context proof
+remains outstanding, as does build 68 phone speed. TestFlight availability
+does not establish those results. To measure prefix retention, send two short
+messages in succession without leaving the app and save the second report.
+
+## Previous delivery: build 63
+
+Version **0.1.0 (63)** from app source
+`ddfa7526d8291f7a4b705b985a36da025240626f` passed the full
+[run 38877522212](https://github.com/Dhafen/flash-local/actions/runs/38877522212),
+including actual signing and verified private TestFlight availability. Its
+unsigned device app was 28,234,349 bytes, and the IPA SHA-256 was
+`925affddeb1645bbb549fe34c257c76ef99ea10593621259e325b2ba9d954b1e`.
+It introduced the packed Metal kernels and separate dense cache, but the
+subsequent physical measurement established unusable speed. Build 68 changes
+scheduling/session reuse while retaining exactly the same model file.
+
+Candidate build 66 at `229773b` passed core, reference, app and package tests
+in run `38885484439` before intentional cancellation ahead of upload to include
+whole-expert reads. It was superseded by build 68 and was never delivered.
 
 ## Previous delivery: build 56
 
