@@ -2,7 +2,7 @@ import CryptoKit
 import Foundation
 import SwiftletCore
 
-public enum OrnithPerformanceError: Error, Equatable {
+public enum OrnithPerformanceError: Error, Equatable, LocalizedError {
     case invalidSource(String)
     case unsupportedTensor(String)
     case arithmeticOverflow
@@ -10,6 +10,19 @@ public enum OrnithPerformanceError: Error, Equatable {
     case integrity(String)
     case io(String)
     case cancelled
+
+    public var errorDescription: String? {
+        switch self {
+        case .invalidSource(let detail): return "Model configuration: \(detail)"
+        case .unsupportedTensor(let name): return "Unsupported model tensor: \(name)"
+        case .arithmeticOverflow: return "The model size exceeds the supported bounds."
+        case .insufficientMemory(let required, let available):
+            return "Not enough memory: requires \(required) bytes; allowance \(available) bytes."
+        case .integrity(let detail): return "Model verification failed: \(detail)"
+        case .io(let detail): return "Model storage: \(detail)"
+        case .cancelled: return "Cancelled."
+        }
+    }
 }
 
 func digest(_ data: Data) -> String {

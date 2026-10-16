@@ -159,6 +159,13 @@ jobs:
       - name: Resolve Swift packages
         run: xcodebuild -resolvePackageDependencies -project Apps/Minirun/Minirun.xcodeproj -scheme Minirun-macOS $XCODEBUILD_FLAGS
 
+      - name: Compile integrated app before numerical gates
+        if: github.event_name != 'workflow_dispatch' || !inputs.provisioning_only
+        run: |
+          xcodebuild build -project Apps/Minirun/Minirun.xcodeproj $XCODEBUILD_FLAGS \
+            -scheme Minirun-macOS -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee app-compile.log | tail -60
+
       - name: GGUF parser, state and storage correctness
         if: github.event_name != 'workflow_dispatch' || !inputs.provisioning_only
         run: |
@@ -260,6 +267,7 @@ jobs:
           name: xcodebuild-logs
           path: |
             app-tests.log
+            app-compile.log
             package-tests.log
             streaming-tests.log
             streaming-tests.xcresult

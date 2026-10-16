@@ -83,6 +83,7 @@ final class OrnithPerformanceAppModel {
     let documents: URL
     @ObservationIgnored private let runner = PerformanceAppRunner()
     @ObservationIgnored private var plan: QPackInstallPlan?
+    @ObservationIgnored private var reportMemoryPlan: PerformanceMemoryPlan?
     @ObservationIgnored private var operation: Task<Void, Never>?
     @ObservationIgnored private var shutdownOperation: Task<Void, Never>?
     @ObservationIgnored private var cancellation: PerformanceCancellation?
@@ -163,6 +164,7 @@ final class OrnithPerformanceAppModel {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard canSend, !text.isEmpty else { return }
         let id = UUID(), control = PerformanceCancellation()
+        let runMemoryPlan = memoryPlan
         activeID = id; cancellation = control; activity = .generating
         draft = ""; error = nil; report = nil; lastMeasurementURL = nil
         messages.append(REAMMessage(role: .user, text: text))
@@ -183,6 +185,7 @@ final class OrnithPerformanceAppModel {
                     messages[index].interrupted = result.report.finishReason == .cancelled
                 }
                 report = result.report
+                reportMemoryPlan = runMemoryPlan
                 status = result.report.finishReason == .cancelled ? "Genereringen avbröts." : "Klar · \(result.report.generatedTokens) genererade token."
             } catch {
                 self.error = error.localizedDescription
@@ -217,13 +220,13 @@ final class OrnithPerformanceAppModel {
     }
     func clearMessages() {
         guard !isBusy, !isPreview else { return }
-        messages = []; report = nil; lastMeasurementURL = nil
+        messages = []; report = nil; reportMemoryPlan = nil; lastMeasurementURL = nil
         saveHistory()
         activity = .opening
         operation = Task { await runner.reset(); activity = .idle; operation = nil }
     }
     func saveMeasurement() {
-        guard !isBusy, let report, let plan, let memoryPlan else { return }
+        guard !isBusy, let report, let plan, let memoryPlan = reportMemoryPlan else { return }
         do {
             let diagnostics = documents.appendingPathComponent("Diagnostics", isDirectory: true)
             try FileManager.default.createDirectory(at: diagnostics, withIntermediateDirectories: true)

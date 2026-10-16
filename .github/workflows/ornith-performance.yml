@@ -79,7 +79,7 @@ jobs:
           .work/tokenizer-oracle/bin/python scripts/prepare_ornith_mlx_tokenizer.py --output .test-fixtures/ornith-mlx-tokenizer
       - name: Ornith metadata, placement and memory admission
         id: experiment
-        if: always() && steps.core.outcome != 'skipped'
+        if: ${{ !cancelled() && steps.core.outcome != 'skipped' }}
         continue-on-error: true
         env:
           TEST_RUNNER_ORNITH_MLX_TOKENIZER_FIXTURE: ${{ github.workspace }}/.test-fixtures/ornith-mlx-tokenizer
@@ -91,7 +91,7 @@ jobs:
           grep 'ORNITH_QPACK_SOURCE layers=40 experts=256 topK=8 tensors=1757' experiment-tests.log
           grep 'ORNITH_MLX_TOKENIZER_PARITY cases=12 exactTokenIDs=true exactDecodedText=true' experiment-tests.log
       - name: Compile experiment for iOS Simulator
-        if: always() && steps.core.outcome != 'skipped'
+        if: ${{ !cancelled() && steps.core.outcome != 'skipped' }}
         working-directory: Experiments/OrnithPerformance
         run: |
           xcodebuild build -scheme OrnithPerformance -destination 'generic/platform=iOS Simulator' \
