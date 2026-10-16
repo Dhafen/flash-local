@@ -1,5 +1,10 @@
 # REAM performance work
 
+This record covers the REAM trials and updates through build 68. The user
+subsequently selected [Ornith 1.5 35B-A3B](ORNITH-IMPLEMENTATION.md) as the primary
+candidate. The REAM measurements below remain the physical baseline; they do
+not measure Ornith or establish a speed or quality comparison between models.
+
 ## Physical build 63 baseline and delivered build 68
 
 The user supplied a complete local measurement from an iPhone18,2 with

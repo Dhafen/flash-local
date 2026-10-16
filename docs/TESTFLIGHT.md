@@ -1,5 +1,44 @@
 # Private internal TestFlight delivery
 
+Version **0.1.0 (80)** from app source
+`c17b9cdc6aefd6c5471b69c1c321e7bbe00807a4` is available to the configured
+own internal tester. [Full run 38926302018](https://github.com/Dhafen/flash-local/actions/runs/38926302018)
+concluded **success**, including all test/build gates, Simulator/layout review,
+device Release archive, actual Apple signing and private upload. Upload exited
+zero. A fresh read-only Apple audit confirms `VALID`, `INTERNAL_ONLY`,
+`IN_BETA_TESTING`, not expired, exactly the existing private group and unchanged
+sole-owner membership. No public link, additional tester or automatic access
+to all builds was enabled.
+
+This is the first delivered [Ornith implementation](ORNITH-IMPLEMENTATION.md):
+the official pinned 21.7 GB Q4_K_M model is primary, with a separate chat and
+model choice retaining REAM. It includes the strict role-history recovery,
+protected dense/expert cache and bounded canonical K/V kernels. The initial
+context policy is 4,096 tokens inside the configured 5.5 GB process ceiling.
+The unsigned arm64 app was 28,376,940 bytes without weights. Actual Apple
+signature/profile, both memory entitlements, privacy manifest and model notices
+were verified. The final IPA SHA-256 is
+`936e4c2ef6ffd57779bfc9d596896ac0fd06dacb27ecfb5fb08d90805aceaf13`.
+
+Update the existing app without uninstalling and download Ornith separately
+through its download button. The trained model was not downloaded on the
+development host or run in hosted CI. Physical Ornith throughput/RAM, offline
+execution, full-model numerical agreement, long context and comparative
+capability still require actual phone evidence; availability alone proves none
+of those. The first follow-up is two short foreground messages and saved timing
+measurements, then the local numerical diagnostic and offline run.
+
+Earlier candidate 77 at `63a07a043f39759116f6bd74b68e7a765616620f` passed its
+test/build/signing gates in
+[run 38905646842](https://github.com/Dhafen/flash-local/actions/runs/38905646842),
+but an Apple private-group GET timed out before upload. It was not delivered;
+a subsequent read-only check confirmed no build 77 record. Source `c17b9cd`
+adds bounded retries for socket failures on GET only, without repeating
+uncertain writes; all 32 local Python tests pass. The successful full run 80
+then rebuilt, signed, uploaded and confirmed its own source-bound artifact.
+
+## Previous delivery: build 68
+
 Version **0.1.0 (68)** from app source
 `2db039fd6068fd994142c87fc9392b1a4f1c4e8d` is available to the configured own
 internal tester. [Full run 38888291457](https://github.com/Dhafen/flash-local/actions/runs/38888291457)
@@ -144,7 +183,7 @@ not retried automatically.
 Only small JSON reports become CI artifacts. The IPA, credentials and private
 upload logs are always removed. `testflight-delivery.json` distinguishes upload,
 processing and confirmed availability; none of these proves installation,
-56.1 GB offline inference, phone RAM/throughput, long context or model quality.
+trained-model offline inference, phone RAM/throughput, long context or model quality.
 
 Apple's upload and group-association documentation:
 https://developer.apple.com/help/app-store-connect/manage-builds/upload-builds/

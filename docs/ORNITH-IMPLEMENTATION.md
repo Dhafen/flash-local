@@ -86,13 +86,31 @@ user-role failure while keeping visible failed attempts.
 
 ## Verification status
 
-Implementation and test fixtures are committed in stages. CI is validating
-the new graph before a new TestFlight delivery; build 68 still contains REAM.
-Five-position FP32 and mixed F32/Q4_K/Q6_K synthetic graphs, complete canonical
+TestFlight **0.1.0 (80)** at `c17b9cdc6aefd6c5471b69c1c321e7bbe00807a4`
+passed the full delivery in
+[run 38926302018](https://github.com/Dhafen/flash-local/actions/runs/38926302018).
+The numerical gates cover
+five-position FP32 and mixed F32/Q4_K/Q6_K synthetic graphs, complete canonical
 chat sessions, all-state rewind/cancellation, app integration and local CPU
-comparison are required gates. The synthetic fixtures include an unused MTP
-block and non-uniform norm scales. Thresholds remain 0.01 maximum logit error
-and 0.001 relative L2. No trained-model inference runs on hosted hardware.
+comparison. The synthetic fixtures include an unused MTP block and non-uniform
+norm scales. The mixed comparison's worst maximum absolute error was
+`5.9604645e-8` and worst relative L2 was `1.6299255456418377e-7`; all compared
+FP16 value-cache entries matched. Thresholds remain 0.01 and 0.001, respectively.
+Reference logits and fixtures were not relaxed. No trained-model inference
+runs on hosted hardware.
+
+The same run passed 569 app tests and 474 package tests (nine explicit
+environment skips), both iOS compilation stages, all twelve light/dark Mac/iOS
+layout captures and actual Apple signing with both memory entitlements.
+The captures were also inspected visually. Upload exited zero; Apple confirmed
+`VALID`, `INTERNAL_ONLY` and `IN_BETA_TESTING`. A separate read-only audit
+confirmed the exact existing private group and unchanged sole-owner membership.
+The device app contains no model weights. See the [delivery record](TESTFLIGHT.md).
+
+Earlier candidate 77 passed its test/build/signing gates but failed on an
+Apple GET timeout before upload; it was never delivered. The client now
+retries bounded read failures, including a timeout during TLS response reading,
+while uncertain writes never repeat. Thirty-two local Python tests pass.
 
 No Ornith phone speed, peak RAM, offline proof, full trained-model numerical
 agreement or quality against Qwen3.8-27B is established yet. Publisher coding
@@ -100,3 +118,31 @@ and agent benchmarks use different harnesses, thinking and context policies
 from this initial greedy non-thinking app; those scores cannot be assigned to
 the phone app. Structured tools/thinking history and the authenticated LAN
 server remain future work after the text runtime passes physical validation.
+
+## First physical measurement
+
+Update the existing app through TestFlight without uninstalling. Select Ornith
+in the information menu if it is not already selected. Its pinned 21.7 GB file
+downloads separately over Wi-Fi into the app's internal Models directory;
+existing REAM files and conversations remain separate. File verification must
+finish before generation is enabled.
+
+Start with a new Ornith conversation and two short questions, keeping the app
+in the foreground between them. Save each completed run through the explicit
+measurement action. If speed is unusable, Stop after a few output tokens and
+save that partial measurement instead of waiting for the 512-token limit.
+Compare `prefillSeconds`, `reusedPromptTokens`, `evaluatedPromptTokens`,
+`decodeForwardPasses`, `decodeForwardSeconds`, `decodeIOBytesRead`,
+`maximumObservedFootprintBytes` and the separate prefill/decode projection
+statistics. The cache report includes protected/expert residency and eviction
+counts; `canonicalCPUKVCalls` separates the bounded CPU projection work. Reader
+bytes are returned application reads, not a physical flash/controller counter.
+
+After a normal short run succeeds, repeat with airplane mode and Wi-Fi disabled
+to establish offline execution. The JSON's default `airplaneModeVerified=false`
+is not automatically changed by that manual test; record the actual phone
+conditions separately. The information menu's short numerical diagnostic
+compares local CPU and streamed logits for the same verified artifact, prompt
+IDs and positions. Passing those positions does not certify every context or
+task. Longer-context and paired capability tests follow only after this basic
+run is usable; there are no phone results to publish yet.
