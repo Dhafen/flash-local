@@ -29,8 +29,8 @@ jobs:
           sudo xcode-select -s /Applications/Xcode_26.2.app
           xcodebuild -version
           git clone --quiet https://github.com/Dhafen/flash-local-swiftlet.git .work/swiftlet-validation
-          git -C .work/swiftlet-validation checkout --detach 4a0510ecf678b3a5d4a5715abcd0bbb2aa839845
-          test "$(git -C .work/swiftlet-validation rev-parse HEAD)" = 4a0510ecf678b3a5d4a5715abcd0bbb2aa839845
+          git -C .work/swiftlet-validation checkout --detach 1388b08883d3d469addb5fdb88916ac7c5a19cd6
+          test "$(git -C .work/swiftlet-validation rev-parse HEAD)" = 1388b08883d3d469addb5fdb88916ac7c5a19cd6
           cp Experiments/OrnithPerformance/ValidationPackage.swift .work/swiftlet-validation/Package.swift
       - name: Bounded metadata inspection logic
         run: python3 -m unittest discover -s scripts/tests -p 'test_ornith_mlx_metadata.py' -v
@@ -39,10 +39,14 @@ jobs:
         continue-on-error: true
         working-directory: .work/swiftlet-validation
         run: |
-          xcodebuild test -scheme SwiftletCore -destination 'platform=macOS' \
+          xcodebuild -list -json > schemes.json
+          scheme=$(python3 -c 'import json; d=json.load(open("schemes.json")); s=(d.get("workspace") or d.get("project"))["schemes"]; c=[x for x in s if x.lower().replace("-", "").startswith("swiftlet")]; p=[x for x in c if x.endswith("-Package")]; c=p or c; assert len(c)==1, s; print(c[0])')
+          printf '%s\n' "$scheme" > scheme-used.txt
+          xcodebuild test -scheme "$scheme" -destination 'platform=macOS' \
             -skipPackagePluginValidation -skipMacroValidation \
             -resultBundlePath swiftlet-tests.xcresult 2>&1 | tee swiftlet-tests.log | tail -70
           test "$(grep -c 'ORNITH_KV_PLACEMENT model=' swiftlet-tests.log)" -eq 3
+          grep 'ORNITH_EXPERT_IO returnedBytesCounted=true hotHitsReadZero=true' swiftlet-tests.log
       - name: Ornith metadata, placement and memory admission
         id: experiment
         if: always() && steps.core.outcome != 'skipped'
@@ -66,6 +70,8 @@ jobs:
           name: ornith-performance-text
           path: |
             .work/swiftlet-validation/swiftlet-tests.log
+            .work/swiftlet-validation/schemes.json
+            .work/swiftlet-validation/scheme-used.txt
             Experiments/OrnithPerformance/experiment-tests.log
             Experiments/OrnithPerformance/experiment-ios.log
             Experiments/OrnithPerformance/Package.resolved
