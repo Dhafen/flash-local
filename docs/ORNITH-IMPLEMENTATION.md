@@ -165,9 +165,15 @@ before cold admission, and existing source/region identities remain compatible.
 Tests require independent expected products, original versus paired logit bits,
 cache/poisoned-slot correctness and bounds before I/O. A primary-shape synthetic
 Q4_K benchmark includes reader and assembly costs with warmup and three samples
-for streamed and resident cases. Those pending host results cannot establish a
-phone speed gain. The initial phone baseline is build 80; this optimization is
-not part of that already delivered build.
+for streamed and resident cases. In delivery run 38946605484, streamed median
+projection time was 10.655 ms separate / 8.214 ms paired; resident median was
+4.907 / 4.023 ms. These are three host samples per case with the OS file cache
+permitted, on synthetic weights, not phone measurements. An earlier host run
+had mixed results (slower streamed, faster resident), so these samples do not
+establish a sustainable phone speed gain. All logits in both tiny full-graph
+controls have identical bits between the separate and paired paths. The
+optimization is delivered in build 84; the measured phone baseline remains
+build 80 until a new device report arrives. Existing model bytes are retained.
 
 ## First physical measurement
 

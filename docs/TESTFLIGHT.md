@@ -1,5 +1,21 @@
 # Private internal TestFlight delivery
 
+Latest version **0.1.0 (84)**, source
+`b093bec6b3d4061b6693e07fdb3e4a6ab9a95606`, is available to the configured
+own internal tester. [Full run 38946605484](https://github.com/Dhafen/flash-local/actions/runs/38946605484)
+passed all gates, including 569 app tests, the package suite (474 tests, nine
+environment-gated skips), synthetic reference/pairing checks, twelve reviewed
+light/dark Mac/iOS captures, actual device archive/signing and private upload.
+A fresh read-only Apple audit confirms `VALID`, `INTERNAL_ONLY`,
+`IN_BETA_TESTING`, not expired, the exact private group and unchanged sole-owner
+membership. The sealed IPA SHA-256 is
+`9e45fb5ccb73d93380eade985c935821b60823bfa6df4b3d939b3b044bb26755`.
+The paired gate/up path preserves all logit bits in both tiny graph controls.
+It needs no model redownload; its actual phone gain has not been measured.
+The isolated Swiftlet/QPack experiment is not included in build 84.
+
+## Build 80 baseline and previous delivery
+
 Version **0.1.0 (80)** from app source
 `c17b9cdc6aefd6c5471b69c1c321e7bbe00807a4` is available to the configured
 own internal tester. [Full run 38926302018](https://github.com/Dhafen/flash-local/actions/runs/38926302018)
@@ -22,11 +38,12 @@ were verified. The final IPA SHA-256 is
 
 Update the existing app without uninstalling and download Ornith separately
 through its download button. The trained model was not downloaded on the
-development host or run in hosted CI. Physical Ornith throughput/RAM, offline
-execution, full-model numerical agreement, long context and comparative
-capability still require actual phone evidence; availability alone proves none
-of those. The first follow-up is two short foreground messages and saved timing
-measurements, then the local numerical diagnostic and offline run.
+development host or run in hosted CI. The first user-provided build 80 phone
+report measures 1.493 decode forwards/s, 16.105 seconds for 14 prompt tokens,
+zero prompt reuse and 3.872 GB sampled peak. It does not verify sustained speed,
+offline execution, full-model numerical agreement, long context or comparative
+capability. The next follow-up is a matched build 84 foreground conversation,
+then the local numerical diagnostic and offline run.
 
 Earlier candidate 77 at `63a07a043f39759116f6bd74b68e7a765616620f` passed its
 test/build/signing gates in
