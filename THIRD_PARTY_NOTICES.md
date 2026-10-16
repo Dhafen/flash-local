@@ -2,7 +2,7 @@
 
 ## Optional Ornith Performance Engine
 
-- SwiftletCore, Leon Ickson and contributors, Apache-2.0:
+- SwiftletCore, Leo Nickson and contributors, Apache-2.0:
   <https://github.com/leonickson1/Swiftlet>, upstream
   `de1a942241f65ac43290cecffc85d69ea5b52310`; local fork runtime
   `1388b08883d3d469addb5fdb88916ac7c5a19cd6`.

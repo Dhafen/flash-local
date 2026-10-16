@@ -1,6 +1,6 @@
 Ornith Performance Engine / Swiftlet acknowledgements
 
-SwiftletCore: Leon Ickson and contributors, Apache-2.0.
+SwiftletCore: Leo Nickson and contributors, Apache-2.0.
 Upstream source: https://github.com/leonickson1/Swiftlet
 Upstream revision: de1a942241f65ac43290cecffc85d69ea5b52310
 Fork changes: optional CPU KV placement and expert I/O counters; no routing changes.
