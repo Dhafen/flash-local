@@ -32,6 +32,19 @@ jobs:
           git -C .work/swiftlet-validation checkout --detach 1388b08883d3d469addb5fdb88916ac7c5a19cd6
           test "$(git -C .work/swiftlet-validation rev-parse HEAD)" = 1388b08883d3d469addb5fdb88916ac7c5a19cd6
           cp Experiments/OrnithPerformance/ValidationPackage.swift .work/swiftlet-validation/Package.swift
+          # Test scheduling only: keep the original assertions, deadlines and
+          # runtime sources intact. Blocking probe suites run in isolation.
+          python3 - <<'PY'
+          from pathlib import Path
+          root = Path('.work/swiftlet-validation/Tests/SwiftletCoreTests')
+          for name in ('SwiftletSessionTests', 'TextGeneratorTests'):
+              path = root / f'{name}.swift'
+              text = path.read_text()
+              original = f'@Suite struct {name} '
+              assert text.count(original) == 1, name
+              path.write_text(text.replace(original, f'@Suite(.serialized) struct {name} '))
+          PY
+          git -C .work/swiftlet-validation diff -- Tests > .work/swiftlet-validation/test-scheduling.patch
       - name: Bounded metadata inspection logic
         run: python3 -m unittest discover -s scripts/tests -p 'test_ornith_mlx_metadata.py' -v
       - name: Swiftlet correctness and KV placement controls (synthetic only)
@@ -45,15 +58,19 @@ jobs:
           xcodebuild test -scheme "$scheme" -destination 'platform=macOS' \
             -skipPackagePluginValidation -skipMacroValidation \
             -skip-testing:SwiftletCoreTests/SwiftletSessionTests \
+            -skip-testing:SwiftletCoreTests/TextGeneratorTests \
             -resultBundlePath swiftlet-tests.xcresult 2>&1 | tee swiftlet-tests.log | tail -70
           test "$(grep -c 'ORNITH_KV_PLACEMENT model=' swiftlet-tests.log)" -eq 3
           grep 'ORNITH_EXPERT_IO returnedBytesCounted=true hotHitsReadZero=true' swiftlet-tests.log
           # Run the semaphore/deadline lifecycle probes without concurrent
           # Metal compilation. They still execute and remain required gates.
-          xcodebuild test -scheme "$scheme" -destination 'platform=macOS' \
-            -skipPackagePluginValidation -skipMacroValidation -parallel-testing-enabled NO \
-            -only-testing:SwiftletCoreTests/SwiftletSessionTests \
-            -resultBundlePath swiftlet-session-tests.xcresult 2>&1 | tee swiftlet-session-tests.log | tail -70
+          for suite in SwiftletSessionTests TextGeneratorTests; do
+            xcodebuild test -scheme "$scheme" -destination 'platform=macOS' \
+              -skipPackagePluginValidation -skipMacroValidation -parallel-testing-enabled NO \
+              -only-testing:"SwiftletCoreTests/$suite" \
+              -resultBundlePath "$suite.xcresult" 2>&1 | tee "$suite.log" | tail -70
+            grep -E 'Test run with [1-9][0-9]* tests?.*passed' "$suite.log"
+          done
       - name: Pinned Python tokenizer oracle (metadata only)
         run: |
           python3 -m venv .work/tokenizer-oracle
@@ -64,7 +81,7 @@ jobs:
         if: always() && steps.core.outcome != 'skipped'
         continue-on-error: true
         env:
-          ORNITH_MLX_TOKENIZER_FIXTURE: ${{ github.workspace }}/.test-fixtures/ornith-mlx-tokenizer
+          TEST_RUNNER_ORNITH_MLX_TOKENIZER_FIXTURE: ${{ github.workspace }}/.test-fixtures/ornith-mlx-tokenizer
         working-directory: Experiments/OrnithPerformance
         run: |
           xcodebuild test -scheme OrnithPerformance -destination 'platform=macOS' \
@@ -85,7 +102,9 @@ jobs:
           name: ornith-performance-text
           path: |
             .work/swiftlet-validation/swiftlet-tests.log
-            .work/swiftlet-validation/swiftlet-session-tests.log
+            .work/swiftlet-validation/SwiftletSessionTests.log
+            .work/swiftlet-validation/TextGeneratorTests.log
+            .work/swiftlet-validation/test-scheduling.patch
             .work/swiftlet-validation/schemes.json
             .work/swiftlet-validation/scheme-used.txt
             Experiments/OrnithPerformance/experiment-tests.log
