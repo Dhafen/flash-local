@@ -198,7 +198,7 @@ enum SoftwareUpdatePresentation {
     static let menuItemTitle = "Check for Updates…"
 
     static let runningExplanation =
-        "Minirun asks downloads.minirun.dev once a day whether a newer signed build exists. "
+        "Flash Local checks github.com for newer signed builds. "
         + "Nothing about this Mac or your conversations is sent."
     static let unsignedBuildExplanation =
         "This build carries no update-signing key, so it cannot verify a downloaded update. "

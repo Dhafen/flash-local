@@ -1,233 +1,31 @@
-<p align="center">
-  <img src="docs/media/logo.png" width="96" height="96" alt="Minirun">
-</p>
+# Flash Local
 
-<h1 align="center">Minirun</h1>
+An independent fork of [Minirun](https://github.com/nanguoyu/minirun-app), developing local MoE inference from an iPhone's internal flash.
 
-<p align="center"><strong>Run models larger than memory.</strong><br>
-Weights stream from your SSD through a memory budget you set. Free, local, on Mac and iPhone.</p>
+Current target: the official 21.7 GB Ornith 1.5 35B-A3B Q4_K_M GGUF, a total process memory budget of approximately 5.5 GB, and installation through private internal TestFlight. The user selected this pivot after the 56.1 GB REAM trial. Model weights download separately and never enter the app bundle; installed REAM weights remain available as a separate model choice.
 
-<p align="center">English | <a href="README.zh-CN.md">简体中文</a></p>
+## Development status
 
-<p align="center">
-  <a href="https://downloads.minirun.dev/Minirun.dmg"><img alt="Download for Mac" src="https://img.shields.io/badge/Download-Mac%20DMG-111111?logo=apple&logoColor=white"></a>
-  <a href="https://testflight.apple.com/join/QuYTybjV"><img alt="iPhone on TestFlight" src="https://img.shields.io/badge/iPhone-TestFlight-0d84ff?logo=apple&logoColor=white"></a>
-  <a href="https://github.com/nanguoyu/minirun-app/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/nanguoyu/minirun-app/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="CHANGELOG.md"><img alt="Version 0.5" src="https://img.shields.io/badge/version-0.5-3b8cf5"></a>
-  <img alt="macOS 15+ · iOS 18+" src="https://img.shields.io/badge/platform-macOS%2015%2B%20%C2%B7%20iOS%2018%2B-555555?logo=apple&logoColor=white">
-  <img alt="Apple silicon" src="https://img.shields.io/badge/silicon-M1%20and%20later-555555">
-  <img alt="Swift" src="https://img.shields.io/badge/Swift-SwiftUI%20%C2%B7%20MLX-F05138?logo=swift&logoColor=white">
-  <a href="LICENSE"><img alt="License Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-2f8f5b"></a>
-  <a href="https://minirun.dev"><img alt="Website" src="https://img.shields.io/badge/minirun.dev-website-e0452f"></a>
-</p>
+The [Ornith adapter and model switch](docs/ORNITH-IMPLEMENTATION.md) are delivered in **TestFlight 0.1.0 (84)**. They implement the actual `qwen35moe` trunk, including SiLU GDN gating, ordinary residual/norm blocks, shared/routed experts, pinned tokenization and correct exclusion of the stored MTP block. Small K/V projections use bounded pinned CPU kernels to preserve reference rounding; other projections and experts stay on Metal. Ornith is the default, with separate persisted chats and a model picker retaining REAM. Build 84 pairs eligible gate/up projections without changing their per-row arithmetic; phone performance for that optimization is pending.
 
-<p align="center">
-  <img src="docs/media/hero.png" width="920" alt="Minirun on a Mac and an iPhone, both chatting with DeepSeek V4 Flash">
-</p>
+Implemented foundations include bounded GGUF indexing, mixed GGML dequantization, row-streamed MLX projections, a bounded expert cache, PLE hashing, GDN/hyper-connection primitives, chunked FP16 text-attention KV storage, internal Documents/Models storage and descriptor-bound integrity verification.
 
-Minirun is a native macOS and iOS app that runs open models whose weights are
-far larger than the device's memory. Instead of loading a model, it reads each
-layer — and only the experts the router picks — from an external NVMe SSD into a
-small, fixed set of buffers, hands them to [MLX](https://github.com/ml-explore/mlx)
-without copying, and releases them. The amount of memory in use is a number you
-choose before the run, and the runtime refuses a budget it cannot honor rather
-than exceeding it later.
+The iPhone chat route connects a fully verified local GGUF to the canonical llama.cpp tokenizer/Jinja bridge and explicit Qwen35MoE or Qwen4Exp streamed decoding. It includes resumable bounded downloads, cancellation, separate persisted chats and live memory/I/O figures. Complete sessions match the pinned CPU reference on tiny untrained fixtures; this does not validate either trained model. The initial context policies are 4,096 tokens for Ornith and 1,024 for REAM, within the 5.5 GB configured process ceiling.
 
-- **Bigger than memory.** Kimi K3 (2.8 T parameters, 1.56 TB on disk) runs on
-  an iPhone 16 Pro. DeepSeek V4 Flash (167 GB) holds a conversation on a Mac and
-  on that phone.
-- **A memory budget you set.** Floor, Balanced, Generous, or a number of your
-  own. Minirun keeps resident what the budget pays for and streams the rest;
-  the answer is byte-identical at every budget.
-- **Runs from your SSD.** Add a folder on an external drive; Minirun finds the
-  Minirun containers in it and streams their weights straight off it. Nothing
-  is copied to the internal disk.
-- **Verified before it runs.** Every file is digested against the published
-  Hugging Face tree once; the runtime opens files only through descriptors
-  from that verified set. Prompts, answers and telemetry never leave the device.
-- **Instruments.** Decode rate, bytes read per token, footprint against the
-  budget and the flow from storage, live while the model answers.
+Private TestFlight version **0.1.0 (84)**, app source `b093bec6b3d4061b6693e07fdb3e4a6ab9a95606`, is uploaded and Apple confirms `VALID`, `INTERNAL_ONLY` and `IN_BETA_TESTING` for the configured own-tester group. [Full delivery run 38946605484](https://github.com/Dhafen/flash-local/actions/runs/38946605484) succeeded, including reference/app/package gates, all twelve reviewed Mac/iOS light/dark captures, the device archive, actual Apple signature/profile, both memory entitlements and privacy-manifest checks. A fresh read-only audit confirms the exact private group and unchanged sole-owner membership. See the [delivery record](docs/TESTFLIGHT.md).
 
-## Models
+The first user-provided Ornith phone report from build 80 measures **1.493 decode forwards/s** over 16 forwards, **16.105 s for 14 prompt tokens** and **3.872 GB sampled peak footprint**. It is a short first-turn measurement with no prompt reuse; it does not verify longer context, offline execution or numerical/quality agreement. The previous REAM build 63 measured 0.211 decode forwards/s and 4.633 GB peak; different models and prompt histories prevent isolating a runtime-only improvement. See [Ornith measurement and current optimization](docs/ORNITH-IMPLEMENTATION.md#phone-performance-and-paired-projections) and the historical [REAM performance](docs/REAM-PERFORMANCE.md).
 
-Containers are byte-preserving repacks of the published checkpoints (no
-requantization), published at [huggingface.co/nanguoyu](https://huggingface.co/nanguoyu)
-and listed at [minirun.dev/models](https://minirun.dev/models). Speeds below
-are what the app shows on the reference devices — a MacBook Pro (M1 Pro, 32 GB)
-over a USB4 (40 Gb/s) enclosure, and an iPhone 16 Pro over its USB 3 port with a
-powered dock — and change with the drive, cable and budget. A model is listed
-as chat ready on a device only where a run on that device has been timed.
+Ornith uses bounded parallel reads, whole selected-expert transfers, packed GPU evaluation, foreground prefix retention and an expert LRU inside its 3.5 GB packed-weight allowance. Update without uninstalling; the installed model file is retained. Trained-model logit agreement, offline proof, 65K context and comparative quality remain unverified. Structured tool calling and the optional LAN model server are not yet implemented. The inherited catalog is not evidence that another architecture executes.
 
-| Model | On disk | Mac (M1 Pro, 32 GB) | iPhone 16 Pro | Status |
-| --- | ---: | --- | --- | --- |
-| [DeepSeek V4 Flash](https://minirun.dev/models/deepseek-v4-flash-0731) — 284 B MoE | 167 GB | ≈ 1.7 s / token, 10.7 GB budget; runs at 2 GB | ≈ 15 s / token, 3.8 GB budget; runs at 2 GB | Chat ready |
-| [Kimi K3](https://minirun.dev/models/kimi-k3) — 2.8 T MoE | 1.56 TB | ≈ 70 s / token, 8 GB budget | ≈ 220 s / token, 5.8 GB budget, 2-token replies | Chat ready |
-| [DeepSeek V4.1 Flash](https://minirun.dev/models/deepseek-v4.1-flash) — 552 B multimodal MoE | 517 GB | ≈ 5 s / token, 14.9 GB budget; runs at 3.4 GB | ≈ 21 s / token, 1.9 GB budget | Chat ready |
-| [MiniMax H3](https://minirun.dev/models/minimax-h3) — audio & video generation | 64 GB | download, verify and store | download, verify and store | Container ready |
-| Qwen3.8-27B | — | — | — | Coming soon |
+The quality target remains Qwen3.8-27B-class capability. See [model candidates and the paired local evaluation contract](docs/REAM-QUALITY.md), [implementation and validation](docs/REAM-IMPLEMENTATION.md) and the [draft implementation PR](https://github.com/Dhafen/flash-local/pull/1). GitHub Actions builds on Apple silicon with pinned Xcode 26.2. Actual model inference is not run in the cloud.
 
-<p align="center">
-  <img src="docs/media/mac-memory-budget.png" width="300" alt="Chat settings: the memory budget with Floor, Balanced and Generous presets">
-  &nbsp;&nbsp;
-  <img src="docs/media/mac-instruments.png" width="300" alt="Instruments: decode rate, bytes per token, footprint and storage flow">
-  &nbsp;&nbsp;
-  <img src="docs/media/iphone-v4-instruments.png" width="230" alt="DeepSeek V4 Flash on an iPhone 16 Pro: 15 s per token, and where the time went">
-  &nbsp;&nbsp;
-  <img src="docs/media/iphone-k3-instruments.png" width="230" alt="Kimi K3 decoding on an iPhone 16 Pro">
-</p>
+## Build
 
-## What you need
+The app uses the Flash Local identity and its own bundle identifier. Original internal schemes and module names are retained. On an Apple-silicon Mac with Xcode 26.2 selected, run `python3 scripts/build_tokenizer_xcframework.py` before resolving Swift packages or running xcodebuild. This builds the pinned C runtime for Mac, iPhone and Simulator: a vocabulary-only tokenizer path and a separate, bounded CPU numerical diagnostic. The generated library is not committed. CI runs that preparation automatically. Run the xcodebuild gates in [AGENTS.md](AGENTS.md) and [the implementation notes](docs/REAM-IMPLEMENTATION.md). See [private TestFlight delivery](docs/TESTFLIGHT.md) for signing, upload and availability checks. A Windows host can drive the hosted build.
 
-- **Mac:** Apple silicon, macOS 15 or later.
-- **iPhone:** iPhone 15 Pro or later (a USB 3 port), iOS 18 or later.
-- **An external NVMe SSD** with room for the model — 2 TB for Kimi K3, 256 GB
-  for DeepSeek V4 Flash. The enclosure and cable decide your speed more than
-  the SSD does: use a USB4/Thunderbolt-rated cable, plug straight into the Mac,
-  and on the iPhone hang the enclosure off a powered dock (the phone's port
-  cannot power an NVMe enclosure by itself).
+## License and origin
 
-<p align="center">
-  <img src="docs/media/desk-iphone-nvme.jpg" width="720" alt="The setup: an iPhone 16 Pro and a USB4 NVMe enclosure, both on a powered dock"><br>
-  <sub>The whole setup: the phone, a USB4 NVMe enclosure and a powered dock. Kimi K3 lives on that drive.</sub>
-</p>
+Upstream source: Copyright (c) 2026 Dong Wang, Apache-2.0. Keep [LICENSE](LICENSE), [NOTICE](NOTICE) and [third-party notices](THIRD_PARTY_NOTICES.md). Minirun's name/logo are governed by [TRADEMARKS.md](TRADEMARKS.md). Vendored GGML code carries its full MIT notice. Model weights have their own license, including the original Qwen Community License; they are not covered by this repository's code license.
 
-## Get Minirun
-
-**Mac.** Download [Minirun.dmg](https://downloads.minirun.dev/Minirun.dmg),
-drag Minirun to Applications, open it. The app is signed and notarized, and
-checks for updates itself (Sparkle).
-
-**iPhone.** Install [TestFlight](https://apps.apple.com/app/testflight/id899247664)
-from the App Store, then open the public link on the phone:
-[testflight.apple.com/join/QuYTybjV](https://testflight.apple.com/join/QuYTybjV).
-iPhone 15 Pro or later, iOS 18 or later. Builds expire after 90 days;
-TestFlight updates them.
-
-<details>
-<summary>Or build the iPhone app yourself with Xcode</summary>
-
-1. Open `Apps/Minirun/Minirun.xcodeproj`, select the `Minirun-iOS` scheme and
-   your iPhone.
-2. In *Signing & Capabilities* pick your Apple Developer team and change the
-   bundle identifier to one of your own (a free personal team works; the app
-   then re-signs every seven days).
-3. On the phone, enable *Settings → Privacy & Security → Developer Mode*, then
-   press Run. Or from a terminal:
-
-   ```sh
-   xcodebuild build -project Apps/Minirun/Minirun.xcodeproj \
-     -scheme Minirun-iOS -destination 'generic/platform=iOS' \
-     DEVELOPMENT_TEAM=YOUR_TEAM_ID \
-     PRODUCT_BUNDLE_IDENTIFIER=com.example.minirun \
-     -allowProvisioningUpdates
-   ```
-
-</details>
-
-## Quick start
-
-1. **Add storage.** *Settings → Storage → Add a folder…* and pick a folder on
-   the external drive (on iPhone, through the Files app). Minirun assesses the
-   drive and lists the containers it finds.
-2. **Get a model.** *Settings → Models → Find Models* shows the published
-   containers; download one, or point at a copy you already have. Pick the
-   folder — or the whole drive — you want it kept in: Minirun creates a folder
-   named after the model inside it and shows you that path before it starts.
-3. **Verify.** *Verify all files* digests the container against its published
-   tree. On iPhone this continues in the background and finishes with a
-   notification.
-4. **Chat.** New chat, pick the model, pick a budget, send.
-
-The full guide is at [minirun.dev/docs](https://minirun.dev/docs).
-
-## Build and test from source
-
-Requirements: an Apple-silicon Mac, macOS 15 or later, Xcode 26 or newer.
-
-```sh
-# Mac app, no signing team needed
-xcodebuild build -project Apps/Minirun/Minirun.xcodeproj \
-  -scheme Minirun-macOS -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO
-
-# iOS app for the Simulator (needs an iOS platform installed in Xcode)
-xcodebuild build -project Apps/Minirun/Minirun.xcodeproj \
-  -scheme Minirun-iOS -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO
-
-# Tests: the app suite, then the package suites (use xcodebuild, not swift test)
-xcodebuild test -project Apps/Minirun/Minirun.xcodeproj \
-  -scheme Minirun-macOS -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO
-xcodebuild test -scheme minirun-Package -destination 'platform=macOS' \
-  -only-testing:MinirunKitTests -only-testing:MinirunRunnersTests
-```
-
-The Xcode project is generated from `Apps/Minirun/project.yml`; after editing
-it, run `xcodegen generate` in `Apps/Minirun`
-([XcodeGen](https://github.com/yonaskolb/XcodeGen)).
-
-## Repository layout
-
-| Path | What it is |
-| --- | --- |
-| `Apps/Minirun/` | The SwiftUI app — one source tree for macOS and iOS |
-| `Sources/MinirunKit/` | Catalog, download, verification, storage lifecycle, memory planning, the runner protocol (no MLX) |
-| `Sources/MinirunRunners/` | Binds verified containers to the K3 and V4 runtimes |
-| `Sources/ModelAdapters/` | Model layouts, streaming caches and operators on MLX |
-| `Sources/MLXBridge/` | The thin boundary between storage and MLX |
-| `Sources/StorageCore/` | Bounded reads, containers, scheduling — Foundation and Darwin only |
-| `Sources/BenchScenarios/` | Reproducible decode scenarios used by the tests |
-| `Tests/` | Package tests; `Apps/Minirun/Tests/` holds the app suite |
-| `docs/ARCHITECTURE.md` | Dependency direction and the rules behind it |
-
-Model weights are external artifacts governed by their own licenses; this
-repository grants no rights to any weights.
-
-## More from the author
-
-Two other Mac apps by the same author, made the same way: on-device, private,
-yours.
-
-<table>
-<tr>
-<td width="50%" valign="top">
-
-<a href="https://otterpix.app/"><img src="https://minirun.dev/more/otterpix.png" width="56" height="56" alt="OtterPix"></a>
-
-**[OtterPix](https://otterpix.app/)**
-
-On-device image AI toolkit for Mac. Convert, compress, crop, and watermark —
-plus AI generate, upscale, cut out, erase, anonymize, and face-restore, all
-running locally with no cloud uploads.
-
-`macOS 14+ · Apple silicon`
-
-</td>
-<td width="50%" valign="top">
-
-<a href="https://dudureminder.app/"><img src="https://minirun.dev/more/dudu_dance.svg" width="56" height="56" alt="DuDuReminder"></a>
-
-**[DuDuReminder](https://dudureminder.app/)**
-
-An elegant menu-bar reminder app for macOS with iCloud sync, quick actions,
-and a privacy-first design — your reminders stay in your own Apple account.
-
-`macOS 13+`
-
-</td>
-</tr>
-</table>
-
-## Contributing
-
-Contributions are welcome under Apache-2.0. Every commit is signed off under
-the [Developer Certificate of Origin 1.1](DCO); see
-[CONTRIBUTING.md](CONTRIBUTING.md). Report security issues privately as
-described in [SECURITY.md](SECURITY.md).
-
-## License and marks
-
-Copyright (c) 2026 Dong Wang. Source code is licensed under the
-[Apache License 2.0](LICENSE); see [NOTICE](NOTICE) and
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The license does not grant
-rights to the Minirun name and logo; see [TRADEMARKS.md](TRADEMARKS.md).
-
-Website: [minirun.dev](https://minirun.dev) · Docs: [minirun.dev/docs](https://minirun.dev/docs) · Contact: [minirun.dev/contact](https://minirun.dev/contact)
+The [archived upstream README](docs/UPSTREAM-README.md) describes the original Minirun distribution. Its download/TestFlight links belong to that original product.

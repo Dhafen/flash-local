@@ -10,6 +10,7 @@ public struct StorageKey: RawRepresentable, Hashable, Codable, Sendable {
 
     /// Where artifacts are read from.
     public static let artifactRoot = StorageKey("artifact-root")
+    public static let appLocalModels = StorageKey("app-local-models")
 }
 
 /// Free space on a volume, with the optimistic number and the dependable one
@@ -333,15 +334,18 @@ public struct StorageManager: StorageManaging {
 
     private let box: Box
     private let ledger: any BookmarkLedger
+    private let appOwnedModelRoot: URL?
 
     public init(
         store: SecurityScopedLocationStore = SecurityScopedLocationStore(
             persistence: UserDefaultsBookmarkPersistence(prefix: "minirun.kit.location.")),
         bookmarkLedger: any BookmarkLedger = UserDefaultsBookmarkLedger(),
-        coding: any SecurityScopedURLCoding = SystemSecurityScopedURLCoding()
+        coding: any SecurityScopedURLCoding = SystemSecurityScopedURLCoding(),
+        appOwnedModelRoot: URL? = nil
     ) {
         self.box = Box(store: store, coding: coding)
         self.ledger = bookmarkLedger
+        self.appOwnedModelRoot = appOwnedModelRoot?.standardizedFileURL
     }
 
     // MARK: - Volumes
@@ -433,6 +437,12 @@ public struct StorageManager: StorageManaging {
     }
 
     public func resolve(_ key: StorageKey) throws -> StorageScope {
+        if key == .appLocalModels, let root = appOwnedModelRoot {
+            try LocalModelStorage.prepare(root: root)
+            // An app-owned Documents folder needs no security-scoped grant.
+            // Only this explicit root bypasses the bookmark grant requirement.
+            return StorageScope(url: root, coding: box.coding)
+        }
         let resolved: ResolvedBookmark
         do {
             resolved = try box.store.resolve(key: key.rawValue)
@@ -462,14 +472,22 @@ public struct StorageManager: StorageManaging {
         return scope
     }
 
-    public func bookmark(_ key: StorageKey) -> StorageBookmark? { ledger.bookmark(key) }
+    public func bookmark(_ key: StorageKey) -> StorageBookmark? {
+        if key == .appLocalModels, let root = appOwnedModelRoot {
+            return StorageBookmark(key: key, createdAt: .distantPast, recordedPath: root.path, byteCount: 0)
+        }
+        return ledger.bookmark(key)
+    }
 
     public func forget(_ key: StorageKey) {
         box.store.forget(key: key.rawValue)
         ledger.forget(key)
     }
 
-    public func knownLocations() -> [StorageKey] { ledger.keys() }
+    public func knownLocations() -> [StorageKey] {
+        let keys = ledger.keys()
+        return appOwnedModelRoot == nil || keys.contains(.appLocalModels) ? keys : keys + [.appLocalModels]
+    }
 
     public func bookmarkData(for url: URL) throws -> Data {
         do {
@@ -490,7 +508,7 @@ public struct StorageManager: StorageManaging {
 
         let scope = StorageScope(
             url: resolved.url, coding: box.coding, isStaleBookmark: resolved.isStale)
-        guard scope.isScoped else {
+        guard scope.isScoped || ownsModelLocation(resolved.url) else {
             scope.release()
             throw StorageError.accessRefused(path: resolved.url.path)
         }
@@ -508,5 +526,19 @@ public struct StorageManager: StorageManaging {
             throw StorageError.bookmarkRefreshFailed(
                 path: resolved.url.path, reason: String(describing: error))
         }
+    }
+
+    private func ownsModelLocation(_ url: URL) -> Bool {
+        guard let root = appOwnedModelRoot else { return false }
+        let expected = root.standardizedFileURL.path
+        let rootResolved = root.resolvingSymlinksInPath().standardizedFileURL.path
+        // Parent directories such as /var may be system symlinks. Compare the
+        // Models directory itself against its canonical parent, then resolve
+        // descendants to reject a user-created link escaping that directory.
+        let canonicalRoot = root.deletingLastPathComponent().resolvingSymlinksInPath()
+            .appendingPathComponent(root.lastPathComponent).standardizedFileURL.path
+        guard rootResolved == canonicalRoot, !expected.isEmpty else { return false }
+        let path = url.resolvingSymlinksInPath().standardizedFileURL.path
+        return path == canonicalRoot || path.hasPrefix(canonicalRoot + "/")
     }
 }

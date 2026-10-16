@@ -364,7 +364,7 @@ private struct LaunchRefusalView: View {
                 GettingReadyContent(
                     systemImage: "folder.badge.plus",
                     title: "Choose a model folder",
-                    detail: "Give Minirun access to the folder where local models are kept.",
+                    detail: "Give Flash Local access to the folder where local models are kept.",
                     actionTitle: "Open Storage",
                     action: { model.openSettings(.storage) })
 
@@ -372,7 +372,7 @@ private struct LaunchRefusalView: View {
                 GettingReadyContent(
                     systemImage: "externaldrive",
                     title: "Scanning your folders",
-                    detail: "Looking for complete Minirun models in the folders you chose.",
+                    detail: "Looking for complete local models in the folders you chose.",
                     showsProgress: true)
 
             case .needsVerification(let modelID):
@@ -691,7 +691,7 @@ private struct LaunchRefusalView: View {
         var body: some View {
             @Bindable var model = model
             VStack(spacing: 0) {
-                MacSidebarHeader(title: "Minirun")
+                MacSidebarHeader(title: "Flash Local")
                 HStack(spacing: MRSpace.s2) {
                     Text("Chats")
                         .font(MRType.headline)
@@ -818,7 +818,7 @@ private struct LaunchRefusalView: View {
         let updater: SoftwareUpdater
 
         var body: some Commands {
-            // Directly under "About Minirun", which is where every
+            // Directly under "About Flash Local", which is where every
             // non-App-Store Mac app puts it and therefore the only place an
             // operator will look for it. Disabled rather than hidden when the
             // updater is not running: a menu item that vanishes reads as a
@@ -1168,7 +1168,7 @@ private struct LaunchRefusalView: View {
                 ContentUnavailableView {
                     Label("Add model storage", systemImage: "externaldrive.badge.plus")
                 } description: {
-                    Text("Choose the folder that contains your Minirun models.")
+                    Text("Choose the folder that contains your local models.")
                 } actions: {
                     Button("Storage") { model.openSettings(.storage) }
                 }
@@ -1184,7 +1184,7 @@ private struct LaunchRefusalView: View {
                 ContentUnavailableView {
                     Label("Find a model", systemImage: "square.stack.3d.up")
                 } description: {
-                    Text("Open Models to find or manage a Minirun model.")
+                    Text("Open Models to find or manage a local model.")
                 } actions: {
                     Button("Models") { model.openSettings(.models) }
                 }

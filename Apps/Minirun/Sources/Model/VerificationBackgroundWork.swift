@@ -82,7 +82,7 @@ final class UnsuspendedVerificationWork: VerificationBackgroundWork {
     final class ContinuedProcessingVerificationWork: VerificationBackgroundWork {
         /// Must remain the bundle id plus semantic context. The submitted
         /// identifier appends one unique component below it.
-        static let identifierPrefix = "wang.wangdongdong.minirun.verification"
+        static let identifierPrefix = "com.dhafen.flashlocal.verification"
         static var permittedIdentifier: String { identifierPrefix + ".*" }
 
         private static weak var current: ContinuedProcessingVerificationWork?

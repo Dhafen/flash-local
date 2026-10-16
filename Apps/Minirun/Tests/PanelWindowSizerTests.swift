@@ -114,27 +114,27 @@
         #if DEBUG
             func testVisualReviewLaunchPolicyIsAbsentValidOrFailClosed() {
                 XCTAssertEqual(
-                    MinirunInitialModel.resolve(arguments: ["Minirun"]), .live)
+                    MinirunInitialModel.resolve(arguments: ["Flash Local"]), .live)
                 XCTAssertEqual(
                     MinirunInitialModel.resolve(
-                        arguments: ["Minirun", "-MinirunReviewPreview", "yes"]),
+                        arguments: ["Flash Local", "-MinirunReviewPreview", "yes"]),
                     .launchRefused)
                 XCTAssertEqual(
                     MinirunInitialModel.resolve(
-                        arguments: ["Minirun", "-MinirunReviewPreview", "YES"]),
+                        arguments: ["Flash Local", "-MinirunReviewPreview", "YES"]),
                     .visualReviewPreview)
                 XCTAssertEqual(
                     MinirunInitialModel.resolve(
-                        arguments: ["Minirun", "-MinirunReviewPreview"]),
+                        arguments: ["Flash Local", "-MinirunReviewPreview"]),
                     .launchRefused)
                 XCTAssertEqual(
                     MinirunInitialModel.resolve(
-                        arguments: ["Minirun", "-MinirunReviewPreviewTypo", "YES"]),
+                        arguments: ["Flash Local", "-MinirunReviewPreviewTypo", "YES"]),
                     .launchRefused)
                 XCTAssertEqual(
                     MinirunInitialModel.resolve(
                         arguments: [
-                            "Minirun", "-MinirunReviewPreview", "YES",
+                            "Flash Local", "-MinirunReviewPreview", "YES",
                             "-MinirunReviewPreview", "YES",
                         ]),
                     .launchRefused)
@@ -143,7 +143,7 @@
             func testReleasePolicyRefusesEvenAnExactlySpelledReviewRequest() {
                 XCTAssertEqual(
                     MinirunInitialModel.resolve(
-                        arguments: ["Minirun", "-MinirunReviewPreview", "YES"],
+                        arguments: ["Flash Local", "-MinirunReviewPreview", "YES"],
                         visualReviewAvailable: false),
                     .launchRefused)
             }
@@ -156,7 +156,7 @@
                 defaults.set(Data([4, 5, 6]), forKey: "minirun.kit.location.saved")
                 let before = defaults.persistentDomain(forName: suiteName) as NSDictionary?
                 let arguments = [
-                    "Minirun",
+                    "Flash Local",
                     "-MinirunReviewPreview", "YES",
                     "-MinirunPanel", "Instruments",
                     // This is deliberately ignored in visual-review mode. A
@@ -189,7 +189,7 @@
                 defaults.set(["artifact-location.saved"], forKey: "minirun.kit.ledger.__keys")
                 defaults.set(Data([4, 5, 6]), forKey: "minirun.kit.location.saved")
                 let before = defaults.persistentDomain(forName: suiteName) as NSDictionary?
-                let arguments = ["Minirun", "-MinirunReviewPreview", "yes"]
+                let arguments = ["Flash Local", "-MinirunReviewPreview", "yes"]
                 let launch = MinirunInitialModel.resolve(arguments: arguments)
                 let model = launch.makeModel(arguments: arguments, userDefaults: defaults)
 

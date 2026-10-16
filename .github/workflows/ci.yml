@@ -8,10 +8,35 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      release_archive:
+        description: 'Also build and inspect an unsigned Release archive for device iOS; does not upload'
+        type: boolean
+        default: false
+      probe_automatic_signing:
+        description: 'After the unsigned archive, try a local automatic Apple distribution export; never upload'
+        type: boolean
+        default: false
+      provisioning_only:
+        description: 'Compile the real device Release app and probe signing; skip tests/simulator (no test coverage claim)'
+        type: boolean
+        default: false
+      check_delivery_tools:
+        description: 'Only check Xcode delivery tool interfaces and Python delivery tests; no credentials or upload'
+        type: boolean
+        default: false
+      upload_private_testflight:
+        description: 'After all tests, archive and verified signing, upload to the configured own-tester internal group'
+        type: boolean
+        default: false
+      regenerate_project_only:
+        description: 'Only regenerate and publish the pinned Xcode project for review on hosts without Xcode'
+        type: boolean
+        default: false
 
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.ref }}${{ inputs.upload_private_testflight && '-delivery' || '' }}
+  cancel-in-progress: ${{ !inputs.upload_private_testflight }}
 
 permissions:
   contents: read
@@ -28,37 +53,191 @@ env:
   XCODEBUILD_FLAGS: -skipPackagePluginValidation -skipMacroValidation
 
 jobs:
-  build-and-test:
-    name: macOS build · app tests · package tests · iOS build
+  regenerate-project:
+    if: github.event_name == 'workflow_dispatch' && inputs.regenerate_project_only
     runs-on: macos-26
-    timeout-minutes: 90
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-
-      - name: Select the newest Xcode 26
+        with:
+          persist-credentials: false
+      - name: Refuse combined delivery modes
         run: |
-          XCODE=$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)
-          echo "Using $XCODE"
-          sudo xcode-select -s "$XCODE"
+          test '${{ inputs.release_archive }}' = false
+          test '${{ inputs.probe_automatic_signing }}' = false
+          test '${{ inputs.provisioning_only }}' = false
+          test '${{ inputs.check_delivery_tools }}' = false
+          test '${{ inputs.upload_private_testflight }}' = false
+          sudo xcode-select -s /Applications/Xcode_26.2.app
+      - run: python3 scripts/generate_xcode_project.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: generated-project
+          path: |
+            Apps/Minirun/Minirun.xcodeproj/project.pbxproj
+            Apps/Minirun/Minirun.xcodeproj/xcshareddata/xcschemes/*.xcscheme
+            Apps/Minirun/Info-iOS.plist
+            Apps/Minirun/Info-macOS.plist
+          retention-days: 7
+
+  delivery-tool-check:
+    if: github.event_name == 'workflow_dispatch' && inputs.check_delivery_tools && !inputs.regenerate_project_only
+    runs-on: macos-26
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - run: |
+          test '${{ inputs.upload_private_testflight }}' = false
+          test "$(uname -m)" = arm64
+          sudo xcode-select -s /Applications/Xcode_26.2.app
+          python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
+          python3 scripts/deliver_testflight.py --check-tools
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: delivery-tool-check
+          path: testflight-tools-check.json
+          retention-days: 7
+
+  build-and-test:
+    if: ${{ !inputs.check_delivery_tools && !inputs.regenerate_project_only }}
+    name: ${{ inputs.provisioning_only && 'device archive · signing probe (no test coverage)' || 'streaming tests · app tests · package tests · iOS build' }}
+    runs-on: macos-26
+    timeout-minutes: ${{ inputs.upload_private_testflight && 120 || 90 }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Validate private delivery configuration before any build
+        if: github.event_name == 'workflow_dispatch' && inputs.upload_private_testflight
+        env:
+          APP_STORE_APP_ID: ${{ vars.APP_STORE_APP_ID }}
+          TESTFLIGHT_INTERNAL_GROUP_ID: ${{ vars.TESTFLIGHT_INTERNAL_GROUP_ID }}
+          TESTFLIGHT_ALLOWED_TESTER_IDS: ${{ vars.TESTFLIGHT_ALLOWED_TESTER_IDS }}
+        run: |
+          test '${{ inputs.release_archive }}' = true
+          test '${{ inputs.probe_automatic_signing }}' = true
+          test '${{ inputs.provisioning_only }}' = false
+          test -n "$APP_STORE_APP_ID"
+          test -n "$TESTFLIGHT_INTERNAL_GROUP_ID"
+          test -n "$TESTFLIGHT_ALLOWED_TESTER_IDS"
+
+      - name: Validate isolated provisioning probe inputs
+        if: github.event_name == 'workflow_dispatch' && inputs.provisioning_only
+        run: |
+          test '${{ inputs.release_archive }}' = true
+          test '${{ inputs.probe_automatic_signing }}' = true
+
+      - name: Select pinned Xcode 26.2
+        run: |
+          test "$(uname -m)" = arm64
+          sudo xcode-select -s /Applications/Xcode_26.2.app
           xcodebuild -version
+
+      - name: Delivery logic tests
+        run: python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
+
+      - name: Build pinned tokenizer XCFramework (Mac, iPhone, Simulator)
+        run: python3 scripts/build_tokenizer_xcframework.py
+
+      - name: Generate fork project with pinned XcodeGen
+        run: python3 scripts/generate_xcode_project.py
+
+      - name: Require committed project to match the pinned generator
+        run: |
+          git diff --exit-code -- Apps/Minirun/Minirun.xcodeproj/project.pbxproj \
+            Apps/Minirun/Minirun.xcodeproj/xcshareddata/xcschemes \
+            Apps/Minirun/Info-iOS.plist Apps/Minirun/Info-macOS.plist
 
       - name: Resolve Swift packages
         run: xcodebuild -resolvePackageDependencies -project Apps/Minirun/Minirun.xcodeproj -scheme Minirun-macOS $XCODEBUILD_FLAGS
 
-      - name: Build the Mac app (Release)
+      - name: GGUF parser, state and storage correctness
+        if: github.event_name != 'workflow_dispatch' || !inputs.provisioning_only
         run: |
-          xcodebuild build -project Apps/Minirun/Minirun.xcodeproj $XCODEBUILD_FLAGS \
-            -scheme Minirun-macOS -configuration Release -destination 'platform=macOS' \
-            CODE_SIGNING_ALLOWED=NO 2>&1 | tail -20
+          python3 scripts/fetch_ream_metadata.py
+          python3 scripts/fetch_ornith_metadata.py
+          python3 scripts/make_engram_test_fixture.py
+          python3 scripts/make_qwen4exp_test_model.py
+          export GGUF_HEADER_FIXTURE="$GITHUB_WORKSPACE/.test-fixtures/ream.header"
+          export TEST_RUNNER_GGUF_HEADER_FIXTURE="$GGUF_HEADER_FIXTURE"
+          export FLASH_LOCAL_TEST_RANGE=1
+          export TEST_RUNNER_FLASH_LOCAL_TEST_RANGE=1
+          xcodebuild test -scheme minirun-Package $XCODEBUILD_FLAGS -destination 'platform=macOS' \
+            -only-testing:GGUFCoreTests -only-testing:ModelAdaptersTests -only-testing:MLXBridgeTests \
+            -only-testing:StorageCoreTests -only-testing:iOSBenchTests \
+            -only-testing:MinirunRunnersTests/Qwen4ExpGenerationPrimitivesTests \
+            -only-testing:MinirunKitTests/LocalModelStorageTests \
+            -only-testing:MinirunKitTests/VerifiedGGUFArtifactTests \
+            -only-testing:MinirunKitTests/GGUFModelTransferTests \
+            -skip-testing:ModelAdaptersTests/Qwen4ExpDecoderParityTests \
+            -skip-testing:ModelAdaptersTests/Qwen35MoEDecoderParityTests \
+            -skip-testing:ModelAdaptersTests/PublishedQwen35TokenizerParityTests \
+            -skip-testing:ModelAdaptersTests/CanonicalQwen35TokenizerParityTests \
+            -skip-testing:ModelAdaptersTests/Qwen4ExpCPUReferenceTests \
+            -resultBundlePath streaming-tests.xcresult 2>&1 | tee streaming-tests.log | tail -60
+          if grep -E 'PublishedGGUFTests.*skipped' streaming-tests.log; then exit 1; fi
+          if grep -E 'PublishedQwen4ExpLayoutTests.*skipped' streaming-tests.log; then exit 1; fi
+          if grep -E 'PublishedOrnithLayoutTests.*skipped' streaming-tests.log; then exit 1; fi
+          grep -E 'testPinnedOrnithHeaderValidatesTheCompleteTextTrunk.*passed' streaming-tests.log
+          grep 'REAM_URLSESSION_RANGE bytes=8 exact206=true sameETag=true closed=true noTensorPayload=true' streaming-tests.log
+          grep 'GGUF_PAIRED_PROJECTION_BENCH ' streaming-tests.log
+
+      - name: Synthetic full-graph logits against pinned CPU llama.cpp
+        if: github.event_name != 'workflow_dispatch' || !inputs.provisioning_only
+        run: |
+          python3 scripts/run_synthetic_reference.py
+          export GGUF_HEADER_FIXTURE="$GITHUB_WORKSPACE/.test-fixtures/ream.header"
+          export TEST_RUNNER_GGUF_HEADER_FIXTURE="$GGUF_HEADER_FIXTURE"
+          xcodebuild test -scheme minirun-Package $XCODEBUILD_FLAGS -destination 'platform=macOS' \
+            -only-testing:ModelAdaptersTests/Qwen4ExpDecoderParityTests \
+            -only-testing:ModelAdaptersTests/Qwen35MoEDecoderParityTests \
+            -only-testing:ModelAdaptersTests/PublishedQwen35TokenizerParityTests \
+            -only-testing:ModelAdaptersTests/CanonicalQwen35TokenizerParityTests \
+            -only-testing:MinirunRunnersTests/Qwen4ExpTextGenerationParityTests \
+            -only-testing:ModelAdaptersTests/Qwen4ExpCPUReferenceTests \
+            -only-testing:MinirunRunnersTests/Qwen4ExpLocalParityTests \
+            -resultBundlePath parity-tests.xcresult 2>&1 | tee parity-tests.log | tail -80
+          if grep -E 'Qwen4ExpDecoderParityTests.*skipped' parity-tests.log; then exit 1; fi
+          if grep -E 'Qwen35MoEDecoderParityTests.*skipped' parity-tests.log; then exit 1; fi
+          grep 'ORNITH_TEXT_SESSION exactPromptIDs=true exactGeneratedIDs=true prefixReuse=true syntheticOnly=true' parity-tests.log
+          grep 'ORNITH_PAIRED_GRAPH mixed=false exactLogitBits=true logicalWorkUnchanged=true fewerEvaluations=true syntheticOnly=true' parity-tests.log
+          grep 'ORNITH_PAIRED_GRAPH mixed=true exactLogitBits=true logicalWorkUnchanged=true fewerEvaluations=true syntheticOnly=true' parity-tests.log
+          grep -E 'testCompleteMixedQuantizedGraphMatchesPinnedLlamaCPPLogits.*passed' parity-tests.log
+          if grep -E 'PublishedQwen35TokenizerParityTests.*skipped' parity-tests.log; then exit 1; fi
+          if grep -E 'CanonicalQwen35TokenizerParityTests.*skipped' parity-tests.log; then exit 1; fi
+          if grep -E 'Qwen4ExpTextGenerationParityTests.*skipped' parity-tests.log; then exit 1; fi
+          grep 'REAM_CPU_REFERENCE_BRIDGE positions=5 samePinnedKernels=true lazyMode=on mmap=true noGPU=true' parity-tests.log
+          grep 'REAM_LOCAL_PARITY positions=5 cpuThenMLX=true allLogitsCompared=true passed=true syntheticOnly=true' parity-tests.log
 
       - name: App tests (macOS)
+        if: github.event_name != 'workflow_dispatch' || !inputs.provisioning_only
         run: |
           set -o pipefail
+          export GGUF_HEADER_FIXTURE="$GITHUB_WORKSPACE/.test-fixtures/ream.header"
+          export TEST_RUNNER_GGUF_HEADER_FIXTURE="$GGUF_HEADER_FIXTURE"
           xcodebuild test -project Apps/Minirun/Minirun.xcodeproj $XCODEBUILD_FLAGS \
             -scheme Minirun-macOS -destination 'platform=macOS' \
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee app-tests.log | tail -40
+          grep 'REAM_APP_SESSION_PARITY exactPromptIDs=true exactGeneratedIDs=true exactText=true saved=true stopRecovery=true' app-tests.log
+          grep 'ORNITH_APP_SESSION exactPromptIDs=true exactGeneratedIDs=true localCPUComparison=true syntheticOnly=true' app-tests.log
+
+      - name: macOS brand review in light and dark
+        if: github.event_name != 'workflow_dispatch' || !inputs.provisioning_only
+        run: |
+          xcodebuild test -project Apps/Minirun/Minirun.xcodeproj $XCODEBUILD_FLAGS \
+            -scheme Minirun-macOS -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO \
+            -only-testing:MinirunTests/ForkBrandRenderTests -resultBundlePath mac-brand.xcresult \
+            -only-testing:MinirunTests/REAMChatRenderTests \
+            2>&1 | tee mac-brand.log | tail -50
+          grep -E 'ForkBrandRenderTests.*passed' mac-brand.log
+          xcrun xcresulttool export attachments --path mac-brand.xcresult --output-path brand-macos
 
       - name: Package tests (MinirunKit)
+        if: github.event_name != 'workflow_dispatch' || !inputs.provisioning_only
         run: |
           set -o pipefail
           xcodebuild test -scheme minirun-Package $XCODEBUILD_FLAGS -destination 'platform=macOS' \
@@ -67,7 +246,7 @@ jobs:
       - name: Failing tests, if any
         if: failure()
         run: |
-          grep -hE "error: -\[|' failed \(|Executed [0-9]+ tests" app-tests.log package-tests.log 2>/dev/null | sed 's/^.*Test Case/Test Case/' | sort -u | head -80 || true
+          grep -hE "error:|failed: caught error|' failed \(|Executed [0-9]+ tests" streaming-tests.log parity-tests.log app-tests.log package-tests.log mac-brand.log 2>/dev/null | sed 's/^.*Test Case/Test Case/' | sort -u | head -80 || true
 
       - name: Upload test logs
         if: always()
@@ -77,11 +256,127 @@ jobs:
           path: |
             app-tests.log
             package-tests.log
+            streaming-tests.log
+            streaming-tests.xcresult
+            parity-tests.log
+            parity-tests.xcresult
+            .work/reference-build.log
+            .work/tokenizer-build.log
+            .work/runtime/build-manifest.json
+            .test-fixtures/llama-reference-logits.json
+            .test-fixtures/llama-mixed-reference-logits.json
+            .test-fixtures/synthetic-qwen4exp-mixed.json
+            .test-fixtures/synthetic-qwen4exp.json
+            .test-fixtures/qwen35-tokenizer-reference.json
+            .test-fixtures/qwen35-tokenizer-corpus.json
+            .test-fixtures/synthetic-qwen4exp-chat.json
+            .test-fixtures/qwen4exp-session-reference.json
           if-no-files-found: ignore
+          include-hidden-files: true
           retention-days: 14
 
       - name: Build the iOS app (Simulator)
+        if: github.event_name != 'workflow_dispatch' || !inputs.provisioning_only
         run: |
           xcodebuild build -project Apps/Minirun/Minirun.xcodeproj $XCODEBUILD_FLAGS \
             -scheme Minirun-iOS -destination 'generic/platform=iOS Simulator' \
-            CODE_SIGNING_ALLOWED=NO 2>&1 | tail -20
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee ios-build.log | tail -30
+
+      - name: iOS brand review in light and dark
+        if: github.event_name != 'workflow_dispatch' || !inputs.provisioning_only
+        run: |
+          SIMULATOR=$(xcrun simctl list devices available --json | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(x["udid"] for v in d["devices"].values() for x in v if x["name"] == "iPhone 17 Pro Max" and x.get("isAvailable")))')
+          xcodebuild test -project Apps/Minirun/Minirun.xcodeproj $XCODEBUILD_FLAGS \
+            -scheme Minirun-iOS -destination "platform=iOS Simulator,id=$SIMULATOR" CODE_SIGNING_ALLOWED=NO \
+            -only-testing:MinirunIOSTests/ForkBrandRenderTests -resultBundlePath ios-brand.xcresult \
+            -only-testing:MinirunIOSTests/REAMChatRenderTests \
+            2>&1 | tee ios-brand.log | tail -60
+          grep -E 'ForkBrandRenderTests.*passed' ios-brand.log
+          xcrun xcresulttool export attachments --path ios-brand.xcresult --output-path brand-ios
+
+      - name: Upload generated project and visual reviews
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fork-project-and-visuals
+          path: |
+            Apps/Minirun/Minirun.xcodeproj/project.pbxproj
+            Apps/Minirun/Minirun.xcodeproj/xcshareddata/xcschemes/*.xcscheme
+            Apps/Minirun/Info-iOS.plist
+            Apps/Minirun/Info-macOS.plist
+            brand-macos/
+            brand-ios/
+            mac-brand.log
+            ios-brand.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Archive and inspect Release for device iOS
+        if: github.event_name == 'workflow_dispatch' && inputs.release_archive
+        run: |
+          python3 -m unittest discover -s scripts/tests -p 'test_check_ios_archive.py' -v
+          xcodebuild archive -project Apps/Minirun/Minirun.xcodeproj $XCODEBUILD_FLAGS \
+            -scheme Minirun-iOS -configuration Release -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/FlashLocal.xcarchive" CODE_SIGNING_ALLOWED=NO \
+            CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
+            2>&1 | tee ios-archive.log | tail -60
+          python3 scripts/check_ios_archive.py "$RUNNER_TEMP/FlashLocal.xcarchive" --output ios-archive-check.json
+
+      - name: Try automatic Apple provisioning without uploading
+        if: github.event_name == 'workflow_dispatch' && inputs.release_archive && inputs.probe_automatic_signing
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_PRIVATE_KEY_B64: ${{ secrets.ASC_PRIVATE_KEY_B64 }}
+          IOS_DISTRIBUTION_P12_B64: ${{ secrets.IOS_DISTRIBUTION_P12_B64 }}
+          IOS_DISTRIBUTION_P12_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_P12_PASSWORD }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+        run: |
+          bash scripts/prepare_flash_signing.sh
+          export ASC_KEY_PATH="$RUNNER_TEMP/flash-local-signing/AuthKey.p8"
+          python3 scripts/probe_automatic_export.py "$RUNNER_TEMP/FlashLocal.xcarchive"
+
+      - name: Upload and verify the own-tester private TestFlight build
+        if: github.event_name == 'workflow_dispatch' && inputs.upload_private_testflight
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          APP_STORE_APP_ID: ${{ vars.APP_STORE_APP_ID }}
+          TESTFLIGHT_INTERNAL_GROUP_ID: ${{ vars.TESTFLIGHT_INTERNAL_GROUP_ID }}
+          TESTFLIGHT_ALLOWED_TESTER_IDS: ${{ vars.TESTFLIGHT_ALLOWED_TESTER_IDS }}
+        run: python3 scripts/deliver_testflight.py
+
+      - name: Remove temporary signing material and local IPA
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.probe_automatic_signing
+        run: |
+          security list-keychains -d user -s "$HOME/Library/Keychains/login.keychain-db"
+          security delete-keychain "$RUNNER_TEMP/flash-local-signing.keychain-db" 2>/dev/null || true
+          rm -rf "$RUNNER_TEMP/flash-local-signing"
+
+      - name: Upload compact text diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-text-logs
+          path: |
+            streaming-tests.log
+            parity-tests.log
+            app-tests.log
+            package-tests.log
+            mac-brand.log
+            ios-brand.log
+            ios-build.log
+            ios-archive.log
+            ios-archive-check.json
+            ios-signing-probe.json
+            testflight-tools-check.json
+            testflight-delivery.json
+            .work/reference-build.log
+            .work/tokenizer-build.log
+            .work/runtime/build-manifest.json
+            .test-fixtures/*reference*.json
+            .test-fixtures/synthetic-qwen4exp*.json
+            .test-fixtures/synthetic-ornith*.json
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 14

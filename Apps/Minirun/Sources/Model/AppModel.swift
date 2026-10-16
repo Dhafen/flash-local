@@ -100,7 +100,7 @@ struct AppDownloadServices {
                 for: .applicationSupportDirectory, in: .userDomainMask,
                 appropriateFor: nil, create: true)
             root = base.appendingPathComponent(
-                Bundle.main.bundleIdentifier ?? "wang.wangdongdong.minirun", isDirectory: true)
+                Bundle.main.bundleIdentifier ?? "com.dhafen.flashlocal", isDirectory: true)
         }
         let directory = root.appendingPathComponent("DownloadJobs", isDirectory: true)
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -434,10 +434,10 @@ final class AppModel {
     /// visual-review switch was present but malformed or unavailable, before
     /// the product is allowed to open any operator state.
     struct LaunchRefusal: Equatable, Sendable {
-        let title = "Minirun did not open"
+        let title = "Flash Local did not open"
         let message =
             "The visual review option was invalid or is unavailable in this build. "
-            + "Quit and launch Minirun again without that option."
+            + "Quit and launch Flash Local again without that option."
         let privacyNote = "No conversations, defaults, or storage locations were opened."
     }
 
@@ -1193,7 +1193,7 @@ final class AppModel {
             try .applicationSupport()
         },
         downloadServicesFactory: ((any StorageManaging) throws -> AppDownloadServices)? = nil,
-        storageFactory: () -> any StorageManaging = { StorageManager() },
+        storageFactory: () -> any StorageManaging = { StorageManager.applicationDefault() },
         startDiscovery: Bool = true
     ) -> AppModel {
         let effectiveCatalogCache: (any CatalogCache)? =
@@ -3073,7 +3073,7 @@ final class AppModel {
             return PlatformFitness(
                 verdict: .noRunner,
                 reason:
-                    "This version of Minirun can find, verify, and download "
+                    "This version of Flash Local can find, verify, and download "
                     + "\(descriptor.displayName), but cannot run it yet.",
                 requiredFreeBytes: descriptor.totalBytes,
                 headroomBytes: nil)

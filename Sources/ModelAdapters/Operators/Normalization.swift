@@ -1,5 +1,41 @@
 import Foundation
+import GGUFCore
 import MLX
+
+/// The GGML CPU RMS operation accumulates Float32 squares into a Float64 sum,
+/// then rounds its mean, reciprocal square root and two products to Float32.
+/// A GPU reduction/rsqrt can differ by one ULP; a subsequent Q8 activation or
+/// FP16 KV cast can amplify that at a rounding boundary. This bounded helper
+/// aligns qwen35moe's small norm rows, without loading any projection weights.
+enum Qwen35CPUAlignedNorm {
+    static func rms(_ x: MLXArray, weight: MLXArray, eps: Float) throws -> MLXArray {
+        guard let columns = x.shape.last, columns > 0, columns <= 65536,
+              x.size > 0, x.size <= 65536, weight.shape == [columns],
+              eps.isFinite, eps > 0 else { throw GGUFError.limit("qwen35moe bounded RMS rows") }
+        let values = x.asType(.float32).asArray(Float.self)
+        let gamma = weight.asType(.float32).asArray(Float.self)
+        guard values.allSatisfy({ $0.isFinite }), gamma.allSatisfy({ $0.isFinite }) else {
+            throw GGUFError.invalid("qwen35moe nonfinite RMS operand")
+        }
+        var output = Array(repeating: Float.zero, count: values.count)
+        for start in stride(from: 0, to: values.count, by: columns) {
+            var total = 0.0
+            for column in 0..<columns {
+                let value = values[start + column]
+                total += Double(value * value)
+            }
+            let mean = Float(total / Double(columns))
+            let scale: Float = 1 / sqrt(mean + eps)
+            guard scale.isFinite, scale > 0 else { throw GGUFError.invalid("qwen35moe RMS scale") }
+            for column in 0..<columns {
+                let scaled = values[start + column] * scale
+                output[start + column] = scaled * gamma[column]
+            }
+        }
+        guard output.allSatisfy({ $0.isFinite }) else { throw GGUFError.invalid("qwen35moe nonfinite RMS result") }
+        return MLXArray(output, x.shape)
+    }
+}
 
 /// The three normalisations this model uses. They differ in ways that matter.
 public enum K3Norm {

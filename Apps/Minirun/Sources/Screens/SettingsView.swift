@@ -902,7 +902,7 @@ struct DefaultBudgetPage: View {
 }
 
 enum ConversationStoragePresentation {
-    static let folderDescription = "Saved privately in Minirun's app data"
+    static let folderDescription = "Saved privately in Flash Local's app data"
 }
 
 enum GeneralSettingsPresentation {

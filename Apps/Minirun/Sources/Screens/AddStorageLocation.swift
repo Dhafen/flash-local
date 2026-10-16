@@ -41,7 +41,7 @@ enum FolderChooser {
             startingAt directory: URL?,
             prompt: String = "Use this folder",
             message: String =
-                "Choose a folder Minirun may use for local model data. Nothing is written or "
+                "Choose a folder Flash Local may use for local model data. Nothing is written or "
                 + "moved when the folder is added."
         ) -> Outcome {
             let panel = NSOpenPanel()
@@ -158,7 +158,7 @@ struct NoStorageLocationCard: View {
                     .font(MRType.title)
                     .foregroundStyle(MRColor.primary)
                 Text(
-                    "Choose a folder for Minirun to scan. It keeps read access, so the same "
+                    "Choose a folder for Flash Local to scan. It keeps read access, so the same "
                         + "folder is there after a relaunch."
                 )
                 .font(MRType.body)
@@ -197,7 +197,7 @@ struct NoStorageLocationCard: View {
                     .accessibilityAddTraits(.isHeader)
             }
             Text(
-                "Choose a folder for Minirun to scan. The app keeps read access so the same "
+                "Choose a folder for Flash Local to scan. The app keeps read access so the same "
                     + "folder is available after relaunch; you can remove that access here."
             )
             .font(MRType.pageSubtitle)

@@ -43,14 +43,26 @@ final class StorageBenchmarkTests: XCTestCase {
             path: filePath,
             readSizeBytes: readSize,
             queueDepth: queueDepth,
-            durationSeconds: duration,
-            warmupSeconds: 0.05,
+            // These are correctness runs, not timing measurements. Channel
+            // initialization on a contended hosted Mac can outlast 150 ms;
+            // excluding its first reads as warm-up can then leave no evidence
+            // to verify. Give setup scheduling headroom and count every read.
+            durationSeconds: max(duration, 2),
+            warmupSeconds: 0,
             pattern: pattern,
             mode: mode,
             disableCache: false,
             seed: seed ?? self.seed,
             verify: verify,
             verifySampleInterval: sampleInterval)
+    }
+
+    func testMeasurementWindowExcludesWarmupAndStopsAtExactBoundaries() {
+        let window = RunWindow(warmupDeadline: 100, stopDeadline: 200)
+        XCTAssertFalse(window.isMeasuring(at: 99))
+        XCTAssertTrue(window.isMeasuring(at: 100))
+        XCTAssertFalse(window.isFinished(at: 199))
+        XCTAssertTrue(window.isFinished(at: 200))
     }
 
     private func assertHealthy(_ result: BenchmarkResult, file: StaticString = #filePath, line: UInt = #line) {

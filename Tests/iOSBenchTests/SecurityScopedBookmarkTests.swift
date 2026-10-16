@@ -216,8 +216,8 @@ final class SystemSecurityScopedURLCodingTests: XCTestCase {
         let resolved = try coding.resolve(data)
         XCTAssertFalse(resolved.isStale)
         XCTAssertEqual(
-            resolved.url.resolvingSymlinksInPath().standardizedFileURL,
-            directory.url.resolvingSymlinksInPath().standardizedFileURL)
+            resolved.url.resolvingSymlinksInPath().standardizedFileURL.path,
+            directory.url.resolvingSymlinksInPath().standardizedFileURL.path)
     }
 
     func testRealStaleBookmarkIsRewrittenByTheStore() throws {
@@ -239,8 +239,8 @@ final class SystemSecurityScopedURLCodingTests: XCTestCase {
 
         let resolved = try store.resolve(key: "model")
         XCTAssertEqual(
-            resolved.url.resolvingSymlinksInPath().standardizedFileURL,
-            moved.resolvingSymlinksInPath().standardizedFileURL,
+            resolved.url.resolvingSymlinksInPath().standardizedFileURL.path,
+            moved.resolvingSymlinksInPath().standardizedFileURL.path,
             "a stale bookmark should still find the item it was made for")
         XCTAssertFalse(resolved.isStale, "the store refreshes rather than passing staleness up")
         XCTAssertNotEqual(persistence.data(forKey: "model"), before, "the blob must be rewritten")

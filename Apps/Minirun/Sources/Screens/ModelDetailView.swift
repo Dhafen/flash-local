@@ -456,7 +456,7 @@ struct ModelDetailPage: View {
     private var unsupportedArtifact: some View {
         MRInlineNote(
             message:
-                "Minirun found this repository in the live catalog, but this version does not "
+                "Flash Local found this repository in the live catalog, but this version does not "
                 + "recognize its artifact layout or architecture. Download and run actions "
                 + "stay unavailable until support is explicit.",
             title: "Not supported in this version",

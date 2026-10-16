@@ -175,7 +175,7 @@ struct EmptyChatsPresentation: Equatable, Sendable {
         case .needsStorage:
             systemImage = "folder.badge.plus"
             title = "Choose a model folder"
-            detail = "Give Minirun access to a folder where it can find or keep local models."
+            detail = "Give Flash Local access to a folder where it can find or keep local models."
             showsProgress = false
             primary = EmptyChatsButton(title: "Choose Storage", action: .storage)
             secondary = EmptyChatsButton(title: "Find Models", action: .models)
@@ -183,7 +183,7 @@ struct EmptyChatsPresentation: Equatable, Sendable {
         case .scanningStorage:
             systemImage = "externaldrive"
             title = "Scanning your folders"
-            detail = "Looking for complete Minirun models in the folders you chose."
+            detail = "Looking for complete local models in the folders you chose."
             showsProgress = true
             primary = EmptyChatsButton(title: "Open Storage", action: .storage)
             secondary = nil
@@ -199,7 +199,7 @@ struct EmptyChatsPresentation: Equatable, Sendable {
         case .needsModel:
             systemImage = "square.stack.3d.up"
             title = "Find a model"
-            detail = "Browse Minirun models, then choose where to keep a local copy."
+            detail = "Browse compatible local models, then choose where to keep a local copy."
             showsProgress = false
             primary = EmptyChatsButton(title: "Find Models", action: .models)
             secondary = EmptyChatsButton(title: "Storage", action: .storage)

@@ -1306,7 +1306,7 @@ final class StoragePageCopyTests: XCTestCase {
     }
 
     /// First-run guidance is not a warning, and the page says so in one place:
-    /// the sentence under "Folders Minirun can access" explains the grant
+    /// the sentence under "Folders Flash Local can access" explains the grant
     /// rather than warning about it.
     func testTheFolderSectionExplainsTheGrantInsteadOfWarningAboutIt() {
         let explanation = StorageLocationsPresentation.explanation

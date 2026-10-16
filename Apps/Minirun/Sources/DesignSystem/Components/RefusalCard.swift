@@ -39,7 +39,7 @@ struct RefusalCard: View {
             }
 
             Text(
-                "Minirun refuses this configuration rather than quietly using more memory "
+                "Flash Local refuses this configuration rather than quietly using more memory "
                     + "than you stated."
             )
             .font(MRType.caption)

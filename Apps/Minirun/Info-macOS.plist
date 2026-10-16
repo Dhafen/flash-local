@@ -11,7 +11,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>Minirun</string>
+	<string>Flash Local</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -29,8 +29,10 @@
 	<key>SUEnableInstallerLauncherService</key>
 	<true/>
 	<key>SUFeedURL</key>
-	<string>https://downloads.minirun.dev/appcast.xml</string>
+	<string>https://github.com/Dhafen/flash-local/releases.atom</string>
 	<key>SUPublicEDKey</key>
-	<string>m4VqOWh+EnkcPXXo7vnY66/X4ltF4hls4RJKTX9feM8=</string>
+	<string>FLASH_LOCAL_UPDATER_NOT_CONFIGURED</string>
+	<key>CFBundleDisplayName</key>
+	<string>Flash Local</string>
 </dict>
 </plist>

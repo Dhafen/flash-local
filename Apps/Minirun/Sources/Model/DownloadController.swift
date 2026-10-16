@@ -172,7 +172,7 @@ final class DownloadController {
         guard let layout = ArtifactFolderPolicy.resolve(picked: destination, plan: plan) else {
             scope?.release()
             operationError =
-                "\(plan.repo.repoID) is not a repository name Minirun can turn into a folder."
+                "\(plan.repo.repoID) is not a repository name Flash Local can turn into a folder."
             return false
         }
         if let refusal = layout.state.refusal {

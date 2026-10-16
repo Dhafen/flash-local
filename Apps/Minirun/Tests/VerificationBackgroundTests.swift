@@ -372,7 +372,7 @@ final class VerificationBackgroundTests: XCTestCase {
         XCTAssertNil(installed.verificationInFlight)
         XCTAssertEqual(
             installed.verificationOutcome[artifact.rootPath],
-            "Paused where it stopped; open Minirun to continue from there.")
+            "Paused where it stopped; open Flash Local to continue from there.")
         XCTAssertEqual(
             backgroundWork.endedSuccessfully, [false],
             "an expired pass is not reported as a success")

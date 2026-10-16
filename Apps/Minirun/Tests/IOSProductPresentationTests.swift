@@ -74,17 +74,17 @@ final class IOSProductPresentationTests: XCTestCase {
             XCTAssertTrue(plist.contains("$(CURRENT_PROJECT_VERSION)"))
         }
         // The numbers themselves move every release; the shape does not: a
-        // marketing version like 0.2 and a ten-digit YYYYMMDDNN build, stamped
+        // marketing version like 0.1.0 and a positive integer build, stamped
         // identically on both platform targets.
         let marketing = try XCTUnwrap(
-            project.firstMatch(of: #"MARKETING_VERSION: "(\d+\.\d+)""#))
+            project.firstMatch(of: #"MARKETING_VERSION: "(\d+\.\d+\.\d+)""#))
         let build = try XCTUnwrap(
-            project.firstMatch(of: #"CURRENT_PROJECT_VERSION: "(\d{10})""#))
+            project.firstMatch(of: #"CURRENT_PROJECT_VERSION: "([1-9]\d*)""#))
         XCTAssertEqual(
             project.components(separatedBy: "MARKETING_VERSION: \"\(marketing)\"").count, 3)
         XCTAssertEqual(
             project.components(separatedBy: "CURRENT_PROJECT_VERSION: \"\(build)\"").count, 3)
-        XCTAssertFalse(project.contains("CURRENT_PROJECT_VERSION: \"1\""))
+        XCTAssertGreaterThan(UInt64(build) ?? 0, 0)
     }
 
     func testPreferenceRowsStackOnlyWhenWidthOrTypeRequiresIt() {
@@ -142,7 +142,7 @@ final class IOSProductPresentationTests: XCTestCase {
         XCTAssertEqual(AboutPresentation.linksTitle, "Links")
         XCTAssertEqual(AboutPresentation.websiteTitle, "Website")
         XCTAssertEqual(AboutPresentation.privacyTitle, "Privacy Policy")
-        XCTAssertEqual(AboutPresentation.termsTitle, "Terms of Service")
+        XCTAssertEqual(AboutPresentation.termsTitle, "Source license")
         XCTAssertEqual(AboutPresentation.buildTitle, "This build")
         XCTAssertTrue(source.contains("MRPageSection(title: AboutPresentation.linksTitle)"))
         XCTAssertTrue(source.contains("linkFact("))

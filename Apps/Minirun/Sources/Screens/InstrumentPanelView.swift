@@ -22,7 +22,7 @@ enum InstrumentPanelPresentation: Equatable {
 
 enum InstrumentHelpCopy {
     static let byteFlow =
-        "Shows successful model-weight reads completed into Minirun in fixed half-second "
+        "Shows successful model-weight reads completed into Flash Local in fixed half-second "
         + "windows. Model layers are shared weights; experts are routed weights. Cached "
         + "reads count too, so this is comparable process data flow, not drive or network speed."
 
@@ -37,7 +37,7 @@ enum InstrumentHelpCopy {
     /// other.
     static let storageSection =
         "Two views of what this run is getting out of storage. Data flow is successful "
-        + "model-weight reads completed into Minirun in fixed half-second windows — model "
+        + "model-weight reads completed into Flash Local in fixed half-second windows — model "
         + "layers are shared weights, experts are routed weights, and cached reads count, so "
         + "it is process data flow rather than drive or network speed. Overlap is the share "
         + "of the routed-expert phase that was not blocked waiting for that data; it includes "
@@ -47,7 +47,7 @@ enum InstrumentHelpCopy {
 
     /// The chip that used to read `Accounting waiting`.
     static let byteCounts =
-        "Minirun checks that the model-layer bytes and the expert bytes a run reports add up "
+        "Flash Local checks that the model-layer bytes and the expert bytes a run reports add up "
         + "to exactly the total it reports. That total settles at a pass boundary, so until "
         + "this run finishes its first pass there is nothing to check yet and the chip reads "
         + "pending. Balanced means every reported byte was counted once; mismatch names the "
