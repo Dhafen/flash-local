@@ -21,6 +21,84 @@ final class REAMAppModelTests: XCTestCase {
         let decodedHex: String
     }
 
+    func testEmptyInterruptedTurnsDoNotCreateConsecutiveUserRoles() {
+        let history: [REAMMessage] = [
+            .init(role: .system, text: "Public synthetic system"),
+            .init(role: .user, text: "Completed question"),
+            .init(role: .assistant, text: "Completed answer"),
+            .init(role: .user, text: "Stopped before output"),
+            .init(role: .assistant, text: "", interrupted: true),
+            .init(role: .user, text: "Another stopped attempt"),
+            .init(role: .assistant, text: "", interrupted: true),
+            .init(role: .user, text: "Current question")
+        ]
+        XCTAssertEqual(REAMMessage.generationPrompt(history), [
+            .init(role: .system, content: "Public synthetic system"),
+            .init(role: .user, content: "Completed question"),
+            .init(role: .assistant, content: "Completed answer"),
+            .init(role: .user, content: "Current question")
+        ])
+        XCTAssertEqual(history.count, 8, "Context recovery must preserve visible failed attempts")
+    }
+
+    func testPromptKeepsRealPartialAnswersAndRecoversLegacyUnansweredUsers() {
+        let history: [REAMMessage] = [
+            .init(role: .user, text: "First question"),
+            .init(role: .assistant, text: "A real partial answer", interrupted: true),
+            .init(role: .user, text: "Old unanswered question"),
+            .init(role: .user, text: "Current question")
+        ]
+        XCTAssertEqual(REAMMessage.generationPrompt(history), [
+            .init(role: .user, content: "First question"),
+            .init(role: .assistant, content: "A real partial answer"),
+            .init(role: .user, content: "Current question")
+        ])
+        XCTAssertEqual(REAMMessage.generationPrompt([
+            .init(role: .user, text: "Question"), .init(role: .assistant, text: ""),
+            .init(role: .user, text: "Next")
+        ]).map(\.role), [.user, .assistant, .user],
+        "A completed empty answer is different from an interrupted placeholder")
+    }
+
+    func testRestoredEmptyFailuresGenerateWithoutClearingVisibleHistory() async throws {
+        let env = ProcessInfo.processInfo.environment
+        guard let path = env["GGUF_HEADER_FIXTURE"] ?? env["TEST_RUNNER_GGUF_HEADER_FIXTURE"] else {
+            throw XCTSkip("Set GGUF_HEADER_FIXTURE and run the synthetic text-session reference")
+        }
+        let fixtures = URL(fileURLWithPath: path).deletingLastPathComponent()
+        let fixture = try JSONDecoder().decode(Fixture.self,
+            from: Data(contentsOf: fixtures.appendingPathComponent("synthetic-qwen4exp-chat.json")))
+        let reference = try JSONDecoder().decode(Reference.self,
+            from: Data(contentsOf: fixtures.appendingPathComponent("qwen4exp-session-reference.json")))
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let root = folder.appendingPathComponent("Models"), file = folder.appendingPathComponent("chat.json")
+        try LocalModelStorage.prepare(root: root)
+        try FileManager.default.copyItem(at: fixtures.appendingPathComponent(fixture.fileName),
+            to: root.appendingPathComponent(fixture.fileName))
+        let failed: [REAMMessage] = [
+            .init(role: .user, text: "Stopped before output"),
+            .init(role: .assistant, text: "", interrupted: true),
+            .init(role: .user, text: "Stopped again"),
+            .init(role: .assistant, text: "", interrupted: true)
+        ]
+        try JSONEncoder().encode(failed).write(to: file)
+        let source = try PinnedGGUFDownload(url: URL(string: "https://example.invalid/synthetic.gguf")!,
+            manifest: GGUFModelManifest(fileName: fixture.fileName, fileByteCount: fixture.fileByteCount, sha256: fixture.sha256))
+        let model = REAMAppModel(root: root, source: source, chatFile: file,
+            settings: REAMRunSettings(contextTokens: fixture.contextTokens, budgetBytes: 4_000_000_000,
+                maximumNewTokens: fixture.maximumNewTokens, rawCacheBytes: 2 << 20))
+        model.prepare(); await model.waitUntilIdle()
+        XCTAssertTrue(model.canChat)
+        model.draft = try XCTUnwrap(fixture.messages.first).content; model.send(); await model.waitUntilIdle()
+        XCTAssertNil(model.error)
+        XCTAssertEqual(model.summary?.promptTokenIDs, reference.promptTokenIDs)
+        XCTAssertEqual(model.summary?.generatedTokenIDs, reference.generatedTokenIDs)
+        XCTAssertEqual(model.messages.count, 6)
+        XCTAssertEqual(Array(model.messages.prefix(4)).map(\.id), failed.map(\.id))
+        print("CHAT_EMPTY_STOP_RECOVERY restored=true noClearRequired=true exactReferencePrompt=true visibleHistoryKept=true")
+    }
+
     func testVerifiedLocalModelGeneratesReferenceTextPersistsAndRecoversAfterStop() async throws {
         let env = ProcessInfo.processInfo.environment
         guard let path = env["GGUF_HEADER_FIXTURE"] ?? env["TEST_RUNNER_GGUF_HEADER_FIXTURE"] else {

@@ -13,6 +13,24 @@ struct REAMMessage: Codable, Identifiable, Sendable {
     init(role: Qwen35ChatMessage.Role, text: String, interrupted: Bool = false) {
         id = UUID(); self.role = role; self.text = text; self.interrupted = interrupted
     }
+
+    /// Keep visible failed attempts, but omit an unanswered turn as a pair
+    /// from the model context. Removing only its empty assistant would leave
+    /// consecutive user roles, which the canonical chat template rejects.
+    static func generationPrompt(_ history: [REAMMessage]) -> [Qwen35ChatMessage] {
+        var prompt: [Qwen35ChatMessage] = []
+        for message in history {
+            if message.role == .assistant && message.interrupted && message.text.isEmpty {
+                if prompt.last?.role == .user { prompt.removeLast() }
+                continue
+            }
+            // Recover old persisted histories that already contain an
+            // unanswered user: the next send supersedes that pending turn.
+            if message.role == .user && prompt.last?.role == .user { prompt.removeLast() }
+            prompt.append(.init(role: message.role, content: message.text))
+        }
+        return prompt
+    }
 }
 
 private final class REAMCancellation: @unchecked Sendable {
@@ -317,8 +335,7 @@ final class REAMAppModel {
         let input = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !input.isEmpty, input.utf8.count <= 262144 else { return }
         draft = ""; messages.append(.init(role: .user, text: input))
-        let prompt = messages.filter { !($0.role == .assistant && $0.interrupted && $0.text.isEmpty) }
-            .map { Qwen35ChatMessage(role: $0.role, content: $0.text) }
+        let prompt = REAMMessage.generationPrompt(messages)
         messages.append(.init(role: .assistant, text: "", interrupted: true))
         let responseID = messages.last!.id
         let (id, flag) = begin(.generating, status: "Förbereder lokal generering…")
