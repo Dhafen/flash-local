@@ -1,5 +1,6 @@
 """Small App Store Connect client. Credentials stay in memory/private files."""
 import base64
+import http.client
 import json
 import pathlib
 import re
@@ -102,7 +103,10 @@ class AppleAPI:
                 finally:
                     error.close()
                 raise RuntimeError(f'Apple API HTTP {status}, codes={codes}') from None
-            except urllib.error.URLError:
+            except (urllib.error.URLError, TimeoutError, ConnectionError, http.client.IncompleteRead):
+                # A TLS socket can time out while reading the response without
+                # urllib wrapping it in URLError. Only reads may be repeated:
+                # an uncertain write could already have changed Apple's state.
                 if method == 'GET' and attempt < 3:
                     time.sleep(2 ** attempt); continue
                 raise RuntimeError('Apple API connection unavailable; no mutation retry was attempted') from None
