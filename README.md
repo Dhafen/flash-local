@@ -14,7 +14,7 @@ Private TestFlight version **0.1.0 (56)**, app source `5b602d2`, is uploaded and
 
 The user now reports text generation on the physical iPhone, with unusably slow performance. The first performance revision adds packed Metal products, grouped experts, an admitted dense cache and unused prompt-head elision; see [performance work and validation](docs/REAM-PERFORMANCE.md). Its candidate policy uses the authorized 5.5 GB process ceiling and the same model file. This revision is not yet delivered or phone-tested. Full-model logit agreement, offline generation, measured phone peak memory/performance, 65K context and comparative quality remain unverified. The inherited model catalog is not evidence of REAM support.
 
-See [implementation and validation](docs/REAM-IMPLEMENTATION.md) and the [draft implementation PR](https://github.com/Dhafen/flash-local/pull/1). GitHub Actions builds on Apple silicon with pinned Xcode 26.2. Actual model inference is not run in the cloud.
+The quality target remains Qwen3.8-27B-class capability. See [model candidates and the paired local evaluation contract](docs/REAM-QUALITY.md), [implementation and validation](docs/REAM-IMPLEMENTATION.md) and the [draft implementation PR](https://github.com/Dhafen/flash-local/pull/1). GitHub Actions builds on Apple silicon with pinned Xcode 26.2. Actual model inference is not run in the cloud.
 
 ## Build
 
