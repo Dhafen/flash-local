@@ -1,6 +1,7 @@
 import Foundation
 import GGUFCore
 import MLX
+import MLXBridge
 import MinirunKit
 import StorageCore
 
@@ -145,14 +146,18 @@ public final class Qwen4ExpDecoder {
 
     public init(artifact: VerifiedGGUFArtifact, contextTokens: Int,
                 budgetBytes: UInt64, workingReserveBytes: UInt64 = 1_000_000_000,
-                rawCacheBytes: Int = 64 << 20) throws {
+                rawCacheBytes: Int = 64 << 20, residentCacheBytes: Int = 0,
+                execution: GGUFLinearExecution = .packedMetal) throws {
         layout = try Layout(index: artifact.index)
         memoryPlan = try Qwen4ExpMemoryPlan(config: layout.config, contextTokens: contextTokens,
             budgetBytes: budgetBytes, reservedWorkingBytes: workingReserveBytes)
-        guard rawCacheBytes >= 0, UInt64(rawCacheBytes) <= memoryPlan.cacheBytes else {
-            throw GGUFError.limit("raw cache exceeds the admitted run")
+        guard rawCacheBytes >= 8192, residentCacheBytes >= 0,
+              UInt64(rawCacheBytes) <= memoryPlan.cacheBytes,
+              UInt64(residentCacheBytes) <= memoryPlan.cacheBytes - UInt64(rawCacheBytes) else {
+            throw GGUFError.limit("weight caches exceed the admitted run")
         }
-        weights = try GGUFWeightSource(artifact: artifact, rawCacheBytes: rawCacheBytes)
+        weights = try GGUFWeightSource(artifact: artifact, rawCacheBytes: rawCacheBytes,
+            tileBytes: min(4 << 20, rawCacheBytes / 2), execution: execution, residentCacheBytes: residentCacheBytes)
         for layer in 0..<layout.config.layers where (layer + 1) % layout.config.attentionInterval == 0 {
             attentionCaches[layer] = try Qwen4ExpTextAttention.Cache(keyValueHeads: layout.config.keyValueHeads,
                 headDimension: layout.config.keyLength, contextLimit: contextTokens,
@@ -166,6 +171,7 @@ public final class Qwen4ExpDecoder {
     public var readStatistics: TileReaderStatistics { weights.readStatistics }
     public var rawCacheStatistics: BufferPoolStatistics { weights.poolStatistics }
     public var projectionStatistics: GGUFProjectionStatistics { weights.projectionStatistics }
+    public var residentCacheStatistics: GGUFResidentWeightCacheStatistics { weights.residentCacheStatistics }
 
     public func reset() {
         for cache in attentionCaches.values { cache.reset() }
@@ -174,6 +180,17 @@ public final class Qwen4ExpDecoder {
     }
 
     public func logits(for token: UInt64, cancellationRequested: () -> Bool = { false }) throws -> MLXArray {
+        // calculateLogits guarantees a non-nil result after successful work.
+        try step(token, calculateLogits: true, cancellationRequested: cancellationRequested)!
+    }
+
+    /// Advance every recurrent/KV/PLE state exactly as logits(for:) does, but
+    /// omit the final HC and vocabulary head when no caller needs that output.
+    public func consume(_ token: UInt64, cancellationRequested: () -> Bool = { false }) throws {
+        _ = try step(token, calculateLogits: false, cancellationRequested: cancellationRequested)
+    }
+
+    private func step(_ token: UInt64, calculateLogits: Bool, cancellationRequested: () -> Bool) throws -> MLXArray? {
         guard !requiresReset, position < memoryPlan.contextTokens, token < UInt64(layout.vocabularySize) else {
             throw GGUFError.invalid("decoder token/context/state; reset required after a failed step")
         }
@@ -211,14 +228,18 @@ public final class Qwen4ExpDecoder {
                 residual.eval()
                 parityCheckpoint("l_last-\(layer)", residual)
             }
-            let final = try hc(residual, prefix: "output_hc_", injection: false)
-            parityCheckpoint("result_norm", final.mixed)
-            let logits = try weights.linear(final.mixed, tensor: "output.weight")
-            logits.eval()
+            let logits: MLXArray?
+            if calculateLogits {
+                let final = try hc(residual, prefix: "output_hc_", injection: false)
+                parityCheckpoint("result_norm", final.mixed)
+                let output = try weights.linear(final.mixed, tensor: "output.weight")
+                output.eval()
+                guard output.asArray(Float.self).allSatisfy({ $0.isFinite }) else {
+                    throw GGUFError.invalid("nonfinite model logits")
+                }
+                logits = output
+            } else { logits = nil }
             try checkBudgetAndCancellation(cancellationRequested)
-            guard logits.asArray(Float.self).allSatisfy({ $0.isFinite }) else {
-                throw GGUFError.invalid("nonfinite model logits")
-            }
             previousTokens.append(token)
             if previousTokens.count > c.pleMultipliers.count - 1 { previousTokens.removeFirst() }
             position += 1
@@ -292,15 +313,17 @@ public final class Qwen4ExpDecoder {
         let c = layout.config, p = "blk.\(layer)."
         let selected = try Qwen4ExpRouting.select(logits: weights.linear(input, tensor: p + "ffn_gate_inp.weight"),
                                                    topK: c.expertsPerToken)
+        let experts = selected.ids[0].map { UInt64($0) }
+        try checkBudgetAndCancellation(cancellationRequested)
+        let gate = try weights.linearExperts(input, tensor: p + "ffn_gate_exps.weight", experts: experts)
+        let up = try weights.linearExperts(input, tensor: p + "ffn_up_exps.weight", experts: experts)
+        let down = try weights.linearExperts(K3Activation.silu(gate) * up, tensor: p + "ffn_down_exps.weight", experts: experts)
         var routed = MLXArray.zeros([1, c.hiddenSize], dtype: .float32)
-        for (slot, expert) in selected.ids[0].enumerated() {
-            try checkBudgetAndCancellation(cancellationRequested)
-            let gate = try weights.linear(input, tensor: p + "ffn_gate_exps.weight", expert: UInt64(expert))
-            let up = try weights.linear(input, tensor: p + "ffn_up_exps.weight", expert: UInt64(expert))
-            let down = try weights.linear(K3Activation.silu(gate) * up, tensor: p + "ffn_down_exps.weight", expert: UInt64(expert))
-            routed = routed + down * selected.weights[0, slot]
-            routed.eval()
+        // Keep the canonical router order for accumulation.
+        for slot in experts.indices {
+            routed = routed + down[slot..<(slot+1)] * selected.weights[0, slot]
         }
+        routed.eval()
         let sharedGate = try weights.linear(input, tensor: p + "ffn_gate_shexp.weight")
         let sharedUp = try weights.linear(input, tensor: p + "ffn_up_shexp.weight")
         let shared = try weights.linear(K3Activation.silu(sharedGate) * sharedUp, tensor: p + "ffn_down_shexp.weight")

@@ -64,6 +64,8 @@ final class Qwen4ExpTextGenerationParityTests: XCTestCase {
         XCTAssertGreaterThan(summary.projections.calls, 0)
         XCTAssertGreaterThan(summary.projections.logicalWeightBytes, 0)
         XCTAssertGreaterThan(summary.projections.computeSeconds, 0)
+        XCTAssertEqual(summary.promptOutputProjectionsSkipped, reference.promptTokenIDs.count - 1)
+        XCTAssertEqual((summary.prefillIOBytesRead ?? 0) + (summary.decodeIOBytesRead ?? 0), summary.ioBytesRead)
         XCTAssertGreaterThan(summary.rawCacheMisses, 0)
         XCTAssertLessThanOrEqual(summary.rawCacheLifetimePeakBytes, summary.rawCacheCapacityBytes)
         let report = try JSONDecoder().decode(Qwen4ExpTextGeneration.Summary.self, from: JSONEncoder().encode(summary))

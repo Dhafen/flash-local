@@ -6,6 +6,8 @@ import MinirunKit
 import StorageCore
 import LlamaTokenizerRuntime
 
+public typealias GGUFResidentWeightCacheStatistics = GGUFPackedTileCache.Statistics
+
 /// Projection-only cumulative work on the weight source's serial executor.
 /// Logical weight bytes include cache hits. I/O wait includes cache lookup and
 /// lease acquisition; these figures do not claim physical flash-controller I/O.
@@ -19,6 +21,9 @@ public struct GGUFProjectionStatistics: Codable, Equatable, Sendable {
     public private(set) var computeSeconds = 0.0
     public private(set) var activationRoundingCalls: UInt64 = 0
     public private(set) var activationRoundingSeconds = 0.0
+    public private(set) var packedMetalCalls: UInt64? = 0
+    public private(set) var packedWeightCopyBytes: UInt64? = 0
+    public private(set) var residentWeightBytesReused: UInt64? = 0
 
     mutating func record(_ report: GGUFLinearReport, roundingSeconds: Double = 0, rounded: Bool = false) throws {
         func add(_ a: UInt64, _ b: UInt64) throws -> UInt64 {
@@ -28,6 +33,9 @@ public struct GGUFProjectionStatistics: Codable, Equatable, Sendable {
         }
         calls = try add(calls, 1); tiles = try add(tiles, UInt64(report.tiles))
         logicalWeightBytes = try add(logicalWeightBytes, report.logicalWeightBytes)
+        packedMetalCalls = try add(packedMetalCalls ?? 0, report.execution == .packedMetal ? 1 : 0)
+        packedWeightCopyBytes = try add(packedWeightCopyBytes ?? 0, report.packedWeightCopyBytes ?? 0)
+        residentWeightBytesReused = try add(residentWeightBytesReused ?? 0, report.residentWeightBytesReused ?? 0)
         if rounded { activationRoundingCalls = try add(activationRoundingCalls, 1) }
         activationRoundingSeconds += roundingSeconds
         wallSeconds += report.wallSeconds + roundingSeconds; waitOnIOSeconds += report.waitOnIOSeconds
@@ -53,6 +61,13 @@ public struct GGUFProjectionStatistics: Codable, Equatable, Sendable {
         value.computeSeconds = computeSeconds - earlier.computeSeconds
         value.activationRoundingCalls = activationRoundingCalls - earlier.activationRoundingCalls
         value.activationRoundingSeconds = activationRoundingSeconds - earlier.activationRoundingSeconds
+        for (a, b) in [(packedMetalCalls, earlier.packedMetalCalls), (packedWeightCopyBytes, earlier.packedWeightCopyBytes),
+                       (residentWeightBytesReused, earlier.residentWeightBytesReused)] {
+            guard (a ?? 0) >= (b ?? 0) else { throw GGUFError.invalid("packed projection counters went backwards") }
+        }
+        value.packedMetalCalls = (packedMetalCalls ?? 0) - (earlier.packedMetalCalls ?? 0)
+        value.packedWeightCopyBytes = (packedWeightCopyBytes ?? 0) - (earlier.packedWeightCopyBytes ?? 0)
+        value.residentWeightBytesReused = (residentWeightBytesReused ?? 0) - (earlier.residentWeightBytesReused ?? 0)
         return value
     }
 }
@@ -73,14 +88,19 @@ public final class GGUFWeightSource {
     private let activationPackingScratch: AlignedBuffer
     private let sourceIDs: [String: UInt64]
     private let tileBytes: Int
+    private let execution: GGUFLinearExecution
+    private let packedCache: GGUFPackedTileCache
     private var closed = false
 
     public init(artifact: VerifiedGGUFArtifact, rawCacheBytes: Int,
-                tileBytes: Int = 1 << 20, noCache: Bool = true) throws {
+                tileBytes: Int = 1 << 20, noCache: Bool = true,
+                execution: GGUFLinearExecution = .packedMetal, residentCacheBytes: Int = 0) throws {
         guard (4096...(4 << 20)).contains(tileBytes), rawCacheBytes >= tileBytes * 2,
-              rawCacheBytes <= 1_000_000_000 else { throw GGUFError.limit("raw weight cache") }
+              rawCacheBytes <= 1_000_000_000, residentCacheBytes >= 0,
+              residentCacheBytes <= 4_500_000_000 else { throw GGUFError.limit("weight cache") }
         self.artifact = artifact
         self.tileBytes = tileBytes
+        self.execution = execution
         let slots = rawCacheBytes / tileBytes
         guard slots <= 4096 else { throw GGUFError.limit("raw cache slot metadata") }
         pool = try BufferPool(configuration: .init(slotCount: slots, slotBytes: tileBytes,
@@ -95,6 +115,19 @@ public final class GGUFWeightSource {
         sourceIDs = Dictionary(uniqueKeysWithValues: artifact.index.tensors.keys.sorted().enumerated().map {
             ($0.element, UInt64($0.offset + 1))
         })
+        // Admit whole matrices in decreasing size, deterministically. Rows of
+        // the large token/PLE tables and all routed experts remain streamed.
+        // Reserving dense entries separately avoids a cyclic LRU with no hits.
+        var remaining = residentCacheBytes, admitted = Set<UInt64>()
+        for tensor in artifact.index.tensors.values.sorted(by: {
+            $0.byteCount == $1.byteCount ? $0.name < $1.name : $0.byteCount > $1.byteCount
+        }) where execution == .packedMetal && tensor.dimensions.count == 2
+            && tensor.name != "token_embd.weight" && tensor.name != "per_layer_token_embd.weight" {
+            if tensor.byteCount <= UInt64(max(0, remaining)) {
+                admitted.insert(sourceIDs[tensor.name]!); remaining -= Int(tensor.byteCount)
+            }
+        }
+        packedCache = try GGUFPackedTileCache(capacityBytes: residentCacheBytes, admittedSources: admitted)
         reader = try TileReader(owningFileDescriptor: artifact.duplicateForReading(),
             path: artifact.manifest.fileName, pool: pool,
             configuration: .init(queueDepth: 2, readAhead: 1, noCache: noCache, slotAcquireTimeout: 120))
@@ -104,11 +137,12 @@ public final class GGUFWeightSource {
 
     public func shutdown() {
         guard !closed else { return }
-        closed = true; reader.shutdown()
+        closed = true; reader.shutdown(); packedCache.clear()
     }
 
     public var readStatistics: TileReaderStatistics { reader.statistics }
     public var poolStatistics: BufferPoolStatistics { pool.statistics }
+    public var residentCacheStatistics: GGUFPackedTileCache.Statistics { packedCache.statistics }
 
     public func linear(_ x: MLXArray, tensor name: String, expert: UInt64? = nil) throws -> MLXArray {
         try artifact.assertUnchanged()
@@ -119,7 +153,8 @@ public final class GGUFWeightSource {
               expert == nil || expert! <= UInt64(UInt32.max) else {
             throw GGUFError.invalid("linear tensor or expert \(name)")
         }
-        let rows = min(256, tileBytes / bytes, scratch.elements / columns)
+        let rows = execution == .packedMetal ? min(4096, tileBytes / bytes)
+            : min(256, tileBytes / bytes, scratch.elements / columns)
         guard rows > 0 else { throw GGUFError.limit("tensor reduction row exceeds scratch") }
         // Each tensor has its own stable source ID; low 32 bits name tiles,
         // high 32 bits name an expert. Cache keys do not grow with token count.
@@ -129,7 +164,35 @@ public final class GGUFWeightSource {
         let roundingSeconds = tensor.quantization == .f32 ? 0 : MonotonicClock.seconds(since: roundingStart)
         let result = try GGUFStreamedLinear.run(activations, tensor: tensor, expert: expert,
             payloadOffset: artifact.index.payloadOffset, sourceID: sourceIDs[name]!,
-            firstRegionID: firstRegion, tileRows: rows, reader: reader, scratch: scratch)
+            firstRegionID: firstRegion, tileRows: rows, reader: reader, scratch: scratch,
+            execution: execution, packedCache: expert == nil ? packedCache : nil)
+        try artifact.assertUnchanged()
+        try projectionStatistics.record(result.report, roundingSeconds: roundingSeconds, rounded: tensor.quantization != .f32)
+        return result.output
+    }
+
+    public func linearExperts(_ x: MLXArray, tensor name: String, experts: [UInt64]) throws -> MLXArray {
+        try artifact.assertUnchanged()
+        guard !closed, let tensor = artifact.index.tensors[name], tensor.dimensions.count == 3,
+              !experts.isEmpty, experts.count <= 64, x.ndim == 2,
+              (x.shape[0] == 1 || x.shape[0] == experts.count),
+              let columns = Int(exactly: tensor.dimensions[0]), x.shape[1] == columns,
+              experts.allSatisfy({ $0 < tensor.dimensions[2] && $0 <= UInt64(UInt32.max) }) else {
+            throw GGUFError.invalid("grouped expert projection")
+        }
+        if execution == .dequantized {
+            return try concatenated(experts.enumerated().map { slot, expert in
+                try linear(x[x.shape[0] == 1 ? 0..<1 : slot..<(slot+1)], tensor: name, expert: expert)
+            }, axis: 0)
+        }
+        let rows = min(4096, (4 << 20) / experts.count / Int(tensor.rowBytes), tileBytes / Int(tensor.rowBytes))
+        guard rows > 0 else { throw GGUFError.limit("grouped expert row") }
+        let roundingStart = MonotonicClock.now()
+        let activations = try canonicalActivations(x, type: tensor.quantization, columns: columns)
+        let roundingSeconds = tensor.quantization == .f32 ? 0 : MonotonicClock.seconds(since: roundingStart)
+        let result = try GGUFStreamedLinear.runExperts(broadcast(activations, to: [experts.count, columns]),
+            tensor: tensor, experts: experts, payloadOffset: artifact.index.payloadOffset,
+            sourceID: sourceIDs[name]!, tileRows: rows, reader: reader)
         try artifact.assertUnchanged()
         try projectionStatistics.record(result.report, roundingSeconds: roundingSeconds, rounded: tensor.quantization != .f32)
         return result.output

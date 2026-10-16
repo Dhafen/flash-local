@@ -28,6 +28,36 @@ final class Qwen4ExpDecoderParityTests: XCTestCase {
         try checkCompleteGraph(mixed: true)
     }
 
+    func testPromptConsumptionKeepsRecurrentStateAndLastLogitsWhileSkippingUnusedOutputHeads() throws {
+        let env = ProcessInfo.processInfo.environment
+        guard let path = env["GGUF_HEADER_FIXTURE"] ?? env["TEST_RUNNER_GGUF_HEADER_FIXTURE"] else {
+            throw XCTSkip("Run the synthetic reference harness first")
+        }
+        let folder = URL(fileURLWithPath: path).deletingLastPathComponent()
+        let manifest = try JSONDecoder().decode(Manifest.self,
+            from: Data(contentsOf: folder.appendingPathComponent("synthetic-qwen4exp-mixed.json")))
+        let artifact = try VerifiedGGUFArtifact.verify(insideRoot: folder,
+            manifest: GGUFModelManifest(fileName: manifest.fileName, fileByteCount: manifest.fileByteCount, sha256: manifest.sha256))
+        let full = try Qwen4ExpDecoder(artifact: artifact, contextTokens: manifest.contextTokens,
+            budgetBytes: 5_500_000_000, rawCacheBytes: 2 << 20)
+        let lean = try Qwen4ExpDecoder(artifact: artifact, contextTokens: manifest.contextTokens,
+            budgetBytes: 5_500_000_000, rawCacheBytes: 2 << 20, residentCacheBytes: 4 << 20)
+        let prefix = Array(manifest.tokens.prefix(3))
+        for token in prefix { _ = try full.logits(for: token); try lean.consume(token) }
+        XCTAssertEqual(full.position, lean.position)
+        let head = try XCTUnwrap(artifact.index.tensors["output.weight"])
+        let savedBytes = full.projectionStatistics.logicalWeightBytes - lean.projectionStatistics.logicalWeightBytes
+        XCTAssertGreaterThanOrEqual(savedBytes, UInt64(prefix.count) * head.byteCount)
+        for token in manifest.tokens.dropFirst(prefix.count) {
+            let expected = try full.logits(for: token).asArray(Float.self)
+            let actual = try lean.logits(for: token).asArray(Float.self)
+            for (a,b) in zip(expected,actual) { XCTAssertEqual(a,b,accuracy:1e-7) }
+        }
+        XCTAssertGreaterThan(lean.residentCacheStatistics.hits, 0)
+        XCTAssertLessThanOrEqual(lean.residentCacheStatistics.residentPayloadBytes, 4 << 20)
+        print("GGUF_PROMPT_HEAD_ELISION prefix=\(prefix.count) savedLogicalWeightBytes=\(savedBytes) followingLogitsUnchanged=true")
+    }
+
     private func checkCompleteGraph(mixed: Bool) throws {
         let environment = ProcessInfo.processInfo.environment
         guard let header = environment["GGUF_HEADER_FIXTURE"] ?? environment["TEST_RUNNER_GGUF_HEADER_FIXTURE"] else {

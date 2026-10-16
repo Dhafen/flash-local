@@ -32,8 +32,15 @@ struct REAMRunSettings: Sendable {
     let budgetBytes: UInt64
     let maximumNewTokens: Int
     let rawCacheBytes: Int
-    static let initial = REAMRunSettings(contextTokens: 1024, budgetBytes: 4_000_000_000,
-        maximumNewTokens: 128, rawCacheBytes: 64 << 20)
+    let residentCacheBytes: Int
+    init(contextTokens: Int, budgetBytes: UInt64, maximumNewTokens: Int, rawCacheBytes: Int,
+         residentCacheBytes: Int = 0) {
+        self.contextTokens = contextTokens; self.budgetBytes = budgetBytes
+        self.maximumNewTokens = maximumNewTokens; self.rawCacheBytes = rawCacheBytes
+        self.residentCacheBytes = residentCacheBytes
+    }
+    static let initial = REAMRunSettings(contextTokens: 1024, budgetBytes: 5_500_000_000,
+        maximumNewTokens: 128, rawCacheBytes: 64 << 20, residentCacheBytes: 4_250_000_000)
 }
 
 /// Saved only by an explicit action. No report is uploaded. Token IDs preserve
@@ -262,13 +269,14 @@ final class REAMAppModel {
         let (id, flag) = begin(.generating, status: "Förbereder lokal generering…")
         generationProgress = nil; summary = nil; lastMeasurementURL = nil; save()
         let context = contextTokens, budget = budgetBytes, limit = maximumNewTokens, cache = settings.rawCacheBytes
+        let residentCache = settings.residentCacheBytes
         let channel = AsyncThrowingStream<Qwen4ExpTextGeneration.Event, Error>.makeStream(bufferingPolicy: .bufferingOldest(32))
         channel.continuation.onTermination = { if case .cancelled = $0 { flag.cancel() } }
         let worker = Task.detached(priority: .userInitiated) { () -> Result<Qwen4ExpTextGeneration.Summary, Error> in
             let result = Result {
                 try autoreleasepool {
                     let engine = try Qwen4ExpTextGeneration(artifact: artifact, contextTokens: context, budgetBytes: budget,
-                        rawCacheBytes: cache)
+                        rawCacheBytes: cache, residentCacheBytes: residentCache)
                     var lastProgress = 0.0
                     return try engine.generate(messages: prompt, maximumNewTokens: limit,
                         cancellationRequested: { flag.requested() || Task.isCancelled }) { event in

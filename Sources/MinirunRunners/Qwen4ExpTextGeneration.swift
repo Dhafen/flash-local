@@ -92,6 +92,10 @@ public final class Qwen4ExpTextGeneration {
         public let maximumObservedFootprintBytes: UInt64
         /// Explicitly process-lifetime, since a previous run may own this peak.
         public let processLifetimePeakFootprintBytes: UInt64
+        public var residentWeightCache: GGUFResidentWeightCacheStatistics? = nil
+        public var promptOutputProjectionsSkipped: Int? = nil
+        public var prefillIOBytesRead: UInt64? = nil
+        public var decodeIOBytesRead: UInt64? = nil
         public var decodeTokensPerSecond: Double? {
             decodeForwardPasses > 0 && decodeForwardSeconds > 0 ? Double(decodeForwardPasses) / decodeForwardSeconds : nil
         }
@@ -103,7 +107,8 @@ public final class Qwen4ExpTextGeneration {
     private var running = false
 
     public init(artifact: VerifiedGGUFArtifact, contextTokens: Int = 1024,
-                budgetBytes: UInt64 = 4_000_000_000, rawCacheBytes: Int = 64 << 20) throws {
+                budgetBytes: UInt64 = 4_000_000_000, rawCacheBytes: Int = 64 << 20,
+                residentCacheBytes: Int = 0) throws {
         guard (16...65536).contains(contextTokens), budgetBytes <= 5_500_000_000,
               let footprint = ProcessFootprint.current(), footprint.footprintBytes < budgetBytes else {
             throw GGUFError.limit("context, total process budget or physical footprint availability")
@@ -111,7 +116,7 @@ public final class Qwen4ExpTextGeneration {
         self.artifact = artifact; self.contextTokens = contextTokens
         tokenizer = try CanonicalQwen35Tokenizer(artifact: artifact)
         decoder = try Qwen4ExpDecoder(artifact: artifact, contextTokens: contextTokens,
-            budgetBytes: budgetBytes, rawCacheBytes: rawCacheBytes)
+            budgetBytes: budgetBytes, rawCacheBytes: rawCacheBytes, residentCacheBytes: residentCacheBytes)
         guard decoder.layout.vocabularySize == tokenizer.vocabularySize else {
             throw GGUFError.invalid("tokenizer and model vocabulary sizes disagree")
         }
@@ -154,10 +159,15 @@ public final class Qwen4ExpTextGeneration {
         }
         for (i, id) in prompt.tokenIDs.enumerated() {
             try check()
-            logits = try autoreleasepool { try decoder.logits(for: UInt64(id), cancellationRequested: cancellationRequested).asArray(Float.self) }
+            try autoreleasepool {
+                if i + 1 == prompt.tokenIDs.count {
+                    logits = try decoder.logits(for: UInt64(id), cancellationRequested: cancellationRequested).asArray(Float.self)
+                } else { try decoder.consume(UInt64(id), cancellationRequested: cancellationRequested) }
+            }
             try onEvent(.prefill(progress(i + 1)))
         }
         let prefillSeconds = ProcessInfo.processInfo.systemUptime - started
+        let prefillIO = try ioBytes()
         var reason = StopReason.tokenLimit, decodeSeconds = 0.0, decodePasses = 0
         for step in 0..<maximumNewTokens {
             try check()
@@ -193,6 +203,9 @@ public final class Qwen4ExpTextGeneration {
             rawCacheMisses: cache.cacheMissCount - baselineCache.cacheMissCount,
             rawCacheEvictions: cache.cacheEvictionCount - baselineCache.cacheEvictionCount,
             rawCacheCapacityBytes: cache.budgetBytes, rawCacheLifetimePeakBytes: cache.peakInUseBytes,
-            maximumObservedFootprintBytes: peak, processLifetimePeakFootprintBytes: lifetimePeak)
+            maximumObservedFootprintBytes: peak, processLifetimePeakFootprintBytes: lifetimePeak,
+            residentWeightCache: decoder.residentCacheStatistics,
+            promptOutputProjectionsSkipped: max(0, prompt.tokenIDs.count - 1),
+            prefillIOBytesRead: prefillIO, decodeIOBytesRead: try ioBytes() - prefillIO)
     }
 }

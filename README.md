@@ -12,7 +12,7 @@ The iPhone chat route now connects a fully verified local GGUF to the canonical 
 
 Private TestFlight version **0.1.0 (56)**, app source `5b602d2`, is uploaded and Apple confirms `VALID`, `INTERNAL_ONLY` and `IN_BETA_TESTING` for the configured own-tester group. The actual exported app passed signature/profile, both memory entitlement and privacy-manifest checks. All build/test gates passed before upload; the CI run's final group lookup failed and was recovered through the corrected Apple API query in `f78d164`. See the [delivery record](docs/TESTFLIGHT.md) for that distinction.
 
-Installation and actual model execution on a physical iPhone are not yet confirmed. Full-model logit agreement, offline generation, measured phone memory/performance, 65K context and comparative quality remain unverified. The inherited model catalog is not evidence of REAM support.
+The user now reports text generation on the physical iPhone, with unusably slow performance. The first performance revision adds packed Metal products, grouped experts, an admitted dense cache and unused prompt-head elision; see [performance work and validation](docs/REAM-PERFORMANCE.md). Its candidate policy uses the authorized 5.5 GB process ceiling and the same model file. This revision is not yet delivered or phone-tested. Full-model logit agreement, offline generation, measured phone peak memory/performance, 65K context and comparative quality remain unverified. The inherited model catalog is not evidence of REAM support.
 
 See [implementation and validation](docs/REAM-IMPLEMENTATION.md) and the [draft implementation PR](https://github.com/Dhafen/flash-local/pull/1). GitHub Actions builds on Apple silicon with pinned Xcode 26.2. Actual model inference is not run in the cloud.
 

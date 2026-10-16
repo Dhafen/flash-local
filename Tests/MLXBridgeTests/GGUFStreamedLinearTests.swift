@@ -72,7 +72,7 @@ final class GGUFStreamedLinearTests: XCTestCase {
             let x = MLXArray([Float(1), 2, 3, 4], [1, 4])
             XCTAssertThrowsError(try GGUFStreamedLinear.run(x, tensor: tensor, expert: 0,
                 payloadOffset: index.payloadOffset, sourceID: 1, firstRegionID: 0,
-                tileRows: 2, reader: reader, scratch: scratch))
+                tileRows: 2, reader: reader, scratch: scratch, execution: .dequantized))
             XCTAssertThrowsError(try GGUFStreamedLinear.run(x, tensor: tensor, expert: 3,
                 payloadOffset: index.payloadOffset, sourceID: 1, firstRegionID: 0,
                 tileRows: 1, reader: reader, scratch: scratch))

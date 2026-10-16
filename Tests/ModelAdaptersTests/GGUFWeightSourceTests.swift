@@ -6,7 +6,7 @@ import XCTest
 @testable import ModelAdapters
 
 final class GGUFWeightSourceTests: XCTestCase {
-    private func withSource(_ body: (GGUFWeightSource) throws -> Void) throws {
+    private func withSource(residentCacheBytes: Int = 0, _ body: (GGUFWeightSource) throws -> Void) throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -36,9 +36,47 @@ final class GGUFWeightSourceTests: XCTestCase {
                                              sha256: FileDigestComputer.sha256(of: header))
         try header.write(to: root.appendingPathComponent(manifest.fileName))
         let artifact = try VerifiedGGUFArtifact.verify(insideRoot: root, manifest: manifest)
-        let source = try GGUFWeightSource(artifact: artifact, rawCacheBytes: 8192, tileBytes: 4096, noCache: false)
+        let source = try GGUFWeightSource(artifact: artifact, rawCacheBytes: 8192, tileBytes: 4096,
+            noCache: false, residentCacheBytes: residentCacheBytes)
         defer { source.shutdown() }
         try body(source)
+    }
+
+    func testGroupedRoutingMatchesSeparateExpertsWithDistinctActivationsAndRanges() throws {
+        try withSource { source in
+            let x = MLXArray([Float(1), 2, 3, 4], [1, 4])
+            let single = try [UInt64(2), 0].map { try source.linear(x, tensor: "experts", expert: $0).asArray(Float.self) }
+            let together = try source.linearExperts(x, tensor: "experts", experts: [2, 0]).asArray(Float.self)
+            XCTAssertEqual(together, single.flatMap { $0 })
+            let distinct = MLXArray([Float(1), 2, 3, 4, 4, 3, 2, 1], [2, 4])
+            let actual = try source.linearExperts(distinct, tensor: "experts", experts: [2, 0]).asArray(Float.self)
+            XCTAssertEqual(actual, [420, 460, 500, 540, 580, 10, 50, 90, 130, 170])
+            XCTAssertThrowsError(try source.linearExperts(x, tensor: "experts", experts: [3]))
+            XCTAssertThrowsError(try source.linearExperts(x, tensor: "experts", experts: []))
+        }
+    }
+
+    func testDenseResidentCacheSurvivesRoutedExpertChurnWithinItsDeclaredCapacity() throws {
+        try withSource(residentCacheBytes: 48) { source in
+            let x = MLXArray([Float(1), 2, 3, 4], [1, 4])
+            let original = try source.linear(x, tensor: "embedding").asArray(Float.self)
+            for e in [UInt64(0), 1, 2] { _ = try source.linear(x, tensor: "experts", expert: e) }
+            let before = source.readStatistics.bytesRead
+            XCTAssertEqual(try source.linear(x, tensor: "embedding").asArray(Float.self), original)
+            XCTAssertEqual(source.readStatistics.bytesRead, before)
+            XCTAssertEqual(source.residentCacheStatistics.residentPayloadBytes, 48)
+            XCTAssertEqual(source.residentCacheStatistics.reusedPayloadBytes, 48)
+            XCTAssertEqual(source.projectionStatistics.residentWeightBytesReused, 48)
+            source.shutdown()
+            XCTAssertEqual(source.residentCacheStatistics.residentPayloadBytes, 0)
+        }
+    }
+
+    func testFirstBuildProjectionReportsRemainReadable() throws {
+        let report = Data("{\"calls\":1,\"tiles\":1,\"logicalWeightBytes\":16,\"wallSeconds\":1,\"waitOnIOSeconds\":0.1,\"dequantizeAndCopySeconds\":0.2,\"computeSeconds\":0.3,\"activationRoundingCalls\":0,\"activationRoundingSeconds\":0}".utf8)
+        let old = try JSONDecoder().decode(GGUFProjectionStatistics.self, from: report)
+        XCTAssertNil(old.packedMetalCalls)
+        XCTAssertEqual(old.calls, 1)
     }
 
     func testVerifiedExpertAndEmbeddingReadsShareBoundedCache() throws {

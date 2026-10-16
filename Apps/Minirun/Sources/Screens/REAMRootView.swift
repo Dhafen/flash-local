@@ -107,7 +107,7 @@ struct REAMChatPage: View {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Qwen3.8 Flash Next · REAM").font(.subheadline.bold())
-                    Text("\(model.modelSize) · intern lagring · 4,0 GB RAM-gräns")
+                    Text("\(model.modelSize) · intern lagring · \(String(format: "%.1f", Double(model.budgetBytes) / 1_000_000_000)) GB RAM-gräns")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 8)
