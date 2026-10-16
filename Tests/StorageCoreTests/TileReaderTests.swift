@@ -68,6 +68,32 @@ final class TileReaderTests: XCTestCase {
 
     // MARK: - Happy path
 
+    func testAdvisoryPrefetchSkipsCachedReadsAndKeepsSlotsAvailable() throws {
+        let path = try makeFile(regionCount: 12, regionBytes: 4096)
+        let pool = try BufferPool(configuration: .init(slotCount: 4, slotBytes: 4096,
+                                                      cachePolicy: .leastRecentlyUsed))
+        let reader = try TileReader(path: path, pool: pool,
+            configuration: .init(queueDepth: 3, readAhead: 3, slotAcquireTimeout: 5))
+        defer { reader.shutdown() }
+        let descriptors = regions(count: 12, bytes: 4096)
+        for group in stride(from: 0, to: 12, by: 3) {
+            let batch = Array(descriptors[group..<(group + 3)])
+            try reader.prefetch(batch)
+            for region in batch {
+                let lease = try reader.acquire(region)
+                XCTAssertTrue(lease.contents.allSatisfy { $0 == UInt8(region.identity.index + 1) })
+                try lease.releaseChecked()
+            }
+            let reads = reader.statistics.readCount
+            try reader.prefetch(batch)
+            for region in batch { try reader.acquire(region).releaseChecked() }
+            XCTAssertEqual(reader.statistics.readCount, reads, "Cached lookahead must not strand duplicate ready entries")
+        }
+        XCTAssertEqual(reader.statistics.readCount, 12)
+        XCTAssertEqual(pool.census.inUse, 0)
+        XCTAssertTrue(pool.statistics.faults.isEmpty)
+    }
+
     func testStreamsEveryRegionInOrderWithCorrectBytes() throws {
         let regionBytes = 4096
         let count = 40

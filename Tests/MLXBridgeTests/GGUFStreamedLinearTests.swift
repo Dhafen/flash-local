@@ -50,6 +50,34 @@ final class GGUFStreamedLinearTests: XCTestCase {
         }
     }
 
+    func testPackedBatchReducesEvaluationBarriersWithoutChangingSelectedExpertProducts() throws {
+        try withExpertMatrix { index, reader, pool in
+            let tensor = try XCTUnwrap(index.tensors["experts"])
+            let x = MLXArray([Float(1), 2, 3, 4], [1, 4])
+            let scratch = try GGUFLinearScratch(elements: 4)
+            var times: [String: [Double]] = [:]
+            for evaluation in [GGUFLinearEvaluation.perTile, .boundedBatch] {
+                for sample in 0..<4 {
+                    let result = try GGUFStreamedLinear.run(x, tensor: tensor, expert: 2,
+                        payloadOffset: index.payloadOffset, sourceID: 1, firstRegionID: 0,
+                        tileRows: 1, reader: reader, scratch: scratch, evaluation: evaluation)
+                    XCTAssertEqual(result.output.asArray(Float.self), [420, 460, 500, 540, 580])
+                    XCTAssertEqual(result.report.evaluationBatches, evaluation == .perTile ? 5 : 1)
+                    XCTAssertLessThanOrEqual(result.report.peakCopiedWeightBytes, 16 << 20)
+                    if sample > 0 { times[evaluation == .perTile ? "perTileSeconds" : "boundedBatchSeconds", default: []].append(result.report.wallSeconds) }
+                }
+            }
+            XCTAssertEqual(reader.statistics.bytesRead, 8 * 80)
+            XCTAssertEqual(pool.census.inUse, 0)
+            let record: [String: Any] = ["kind": "synthetic-streamed-evaluation-control", "physicalPhone": false,
+                "shape": [5, 4], "expertsSelected": [2], "tileRows": 1, "includesFileIO": true,
+                "warmup": 1, "samples": times, "sourceRevision": BuildInfo.gitRevision,
+                "os": ProcessInfo.processInfo.operatingSystemVersionString,
+                "physicalMemoryBytes": ProcessInfo.processInfo.physicalMemory]
+            print("GGUF_EVALUATION_BATCH_BENCH " + String(decoding: try JSONSerialization.data(withJSONObject: record, options: .sortedKeys), as: UTF8.self))
+        }
+    }
+
     func testDifferentTileSizesMatchIndependentDotProducts() throws {
         for rows in [1, 2, 3] {
             try withExpertMatrix { index, reader, _ in

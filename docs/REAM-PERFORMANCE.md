@@ -1,5 +1,64 @@
 # REAM performance work
 
+## Physical build 63 baseline and the next revision
+
+The user supplied a complete local measurement from an iPhone18,2 with
+12,263,424,000 physical memory bytes, iOS 27.2 build 24B5089g, app 0.1.0 (63),
+timestamp 2026-10-16T09:57:47Z. This is user-provided telemetry, not a remote
+device profile captured by CI. The reported artifact hash matches the pinned
+model. The embedded source string is `ddfa7526d829-dirty`; the separate CI
+export seal binds build 63 to `ddfa752`. No conversation/token arrays are
+copied into this source repository.
+
+| Observed metric | Value |
+| --- | ---: |
+| Prompt | 64 tokens, 306.644 s |
+| Completed decode forwards | 10, 47.387 s |
+| Decode forwards/s | 0.211027 |
+| Prefill/decode reader bytes | 99,900,884,608 / 14,950,923,220 |
+| Sampled/process-lifetime peak footprint | 4,633,285,736 / 4,634,465,384 bytes |
+| Resident packed payload / reuse | 4,217,556,480 / 264,890,826,240 bytes |
+| Projection I/O wait / compute (whole run) | 144.894 / 154.039 s |
+| Raw-slot lifetime peak **in use** | 4,194,304 bytes |
+
+The footprint is within the requested budget in this short run, while speed
+is unusable. Per-phase projection times were absent from that report, so the
+whole-run wait/compute figures must not be described as decode-only. Reader
+bytes are returned `pread` bytes, not physical NAND counters. Offline mode,
+trained-model numerical agreement, quality and longer context remain unproven.
+
+Changes now under validation, preserving the same weights and RAM policy:
+
+- One serialized foreground engine retains hot dense weights and compares
+  exact new prompt token IDs with its evaluated state. A single immutable
+  KV/GDN/convolution/PLE rewind point before the assistant generation header
+  handles templates that remove the no-thinking prelude on the next turn.
+  Divergent prefixes reset; failed steps cannot silently reuse partial state.
+  Checkpoint payload is capped at 256 MiB **inside** the existing 1 GB working
+  reserve, leaving more than 512 MiB for other work. A larger state disables
+  that checkpoint rather than truncating context. Backgrounding, memory
+  warnings, verification and CPU diagnostics release the retained engine.
+- Raw-slot lookahead skips cached regions and issues up to three bounded
+  reads in consumption order, leaving a spare slot for urgent misses. Only
+  router-selected experts are scheduled. The original raw-pool budget holds.
+- Packed projections evaluate at most 16 MiB of pending packed operands at a
+  time rather than synchronizing every row tile. Expert concatenation can
+  coexist with its inputs: the conservative copied-payload bound is 32 MiB.
+  The previous per-tile evaluation remains a benchmark control. Weights and
+  canonical arithmetic are unchanged; no full matrix/model fallback exists.
+- Empty interrupted assistant placeholders stay out of model prompts.
+  Reports distinguish reused/evaluated prompt positions, evaluation batches
+  and prefill/decode projection work. A prefix speedup does not establish
+  faster answer generation; both require new physical measurements.
+
+Tests compare rewound state and complete follow-up replies with fresh
+decoders, exercise cancellation/divergence/clear, verify cached lookahead
+does not leak ready slots or duplicate reads, and compare per-tile/batched
+products with independent expected dots and poisoned released buffers.
+`GGUF_EVALUATION_BATCH_BENCH` records one warmup/three timings for the tiny
+5x4 F32 selected-expert control, including file I/O, source and host metadata.
+It measures synchronization overhead; it is not phone throughput evidence.
+
 Build 56 is a functional first path, not a performance-complete runtime. The
 user reports extremely slow text generation on a physical iPhone. Their screen
 shows 97.12 GB returned reader bytes, four generated tokens and 0.32 GB current

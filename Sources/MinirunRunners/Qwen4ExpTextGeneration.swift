@@ -64,6 +64,7 @@ public final class Qwen4ExpTextGeneration {
         public let elapsedSeconds: Double
         public let ioBytesRead: UInt64
         public let footprintBytes: UInt64
+        public let reusedPromptTokens: Int
     }
     public enum Event: Sendable {
         case prefill(Progress)
@@ -99,6 +100,11 @@ public final class Qwen4ExpTextGeneration {
         public var promptTokensCompleted: Int? = nil
         /// A stopped partial forward is excluded from completed-forward speed.
         public var interruptedDecodeForwardSeconds: Double? = nil
+        public var reusedPromptTokens: Int? = nil
+        public var evaluatedPromptTokens: Int? = nil
+        public var prefixCheckpointPayloadBytes: UInt64? = nil
+        public var prefillProjections: GGUFProjectionStatistics? = nil
+        public var decodeProjections: GGUFProjectionStatistics? = nil
         public var decodeTokensPerSecond: Double? {
             decodeForwardPasses > 0 && decodeForwardSeconds > 0 ? Double(decodeForwardPasses) / decodeForwardSeconds : nil
         }
@@ -108,6 +114,20 @@ public final class Qwen4ExpTextGeneration {
     private let decoder: Qwen4ExpDecoder
     private let contextTokens: Int
     private var running = false
+    private var stateTokens: [Int] = []
+    private var stateLogits: [Float] = []
+    private var prefixCheckpoint: Qwen4ExpDecoder.Checkpoint?
+    private var checkpointTokens: [Int] = []
+
+    private func discardConversation() {
+        prefixCheckpoint = nil; checkpointTokens.removeAll(); stateTokens.removeAll(); stateLogits.removeAll()
+        decoder.reset()
+    }
+
+    public func resetConversation() throws {
+        guard !running else { throw GGUFError.invalid("cannot reset an active conversation") }
+        discardConversation()
+    }
 
     public init(artifact: VerifiedGGUFArtifact, contextTokens: Int = 1024,
                 budgetBytes: UInt64 = 4_000_000_000, rawCacheBytes: Int = 64 << 20,
@@ -126,14 +146,21 @@ public final class Qwen4ExpTextGeneration {
     }
 
     public func generate(messages: [Qwen35ChatMessage], maximumNewTokens: Int = 128,
+                         reusePromptPrefix: Bool = false,
                          cancellationRequested: () -> Bool = { false },
                          captureCancelledSummary: Bool = false,
                          onEvent: (Event) throws -> Void) throws -> Summary {
         guard !running, (1...4096).contains(maximumNewTokens), maximumNewTokens < contextTokens else {
             throw GGUFError.limit("generation already active or output/context budget invalid")
         }
-        running = true; decoder.reset()
-        defer { decoder.onFootprintObservation = nil; decoder.reset(); running = false }
+        running = true
+        var retainState = false
+        if !reusePromptPrefix { discardConversation() }
+        defer {
+            decoder.onFootprintObservation = nil
+            if !retainState { discardConversation() }
+            running = false
+        }
         let started = ProcessInfo.processInfo.systemUptime
         let baselineIO = decoder.readStatistics.bytesRead
         let baselineProjections = decoder.projectionStatistics
@@ -155,28 +182,57 @@ public final class Qwen4ExpTextGeneration {
         }
         try check()
         let prompt = try tokenizer.chat(messages, maximumTokens: contextTokens - maximumNewTokens)
-        var logits: [Float] = [], generated: [Int] = [], text = Qwen4ExpTokenText(), outputBytes = 0
+        var reused = 0
+        if reusePromptPrefix {
+            if !stateTokens.isEmpty, prompt.tokenIDs.starts(with: stateTokens),
+               stateTokens.count < prompt.tokenIDs.count || !stateLogits.isEmpty {
+                reused = stateTokens.count
+            } else if let checkpoint = prefixCheckpoint, !checkpointTokens.isEmpty,
+                      prompt.tokenIDs.starts(with: checkpointTokens), checkpointTokens.count < prompt.tokenIDs.count {
+                try decoder.restore(checkpoint)
+                stateTokens = checkpointTokens; stateLogits.removeAll(); reused = checkpointTokens.count
+            } else { discardConversation() }
+        }
+        // A rendered next turn may replace the no-thinking generation prelude.
+        // Keep one rewind point BEFORE the last assistant header, and still
+        // compare exact token IDs on every request before trusting it.
+        var checkpointLength = 0
+        if reusePromptPrefix, let header = prompt.renderedText.range(of: "<|im_start|>assistant", options: .backwards) {
+            let prefix = try tokenizer.tokenize(String(prompt.renderedText[..<header.lowerBound]),
+                parseSpecial: true, maximumTokens: contextTokens)
+            checkpointLength = zip(prefix, prompt.tokenIDs).prefix { $0.0 == $0.1 }.count
+            if checkpointLength >= prompt.tokenIDs.count { checkpointLength = 0 }
+        }
+        var logits = stateLogits, generated: [Int] = [], text = Qwen4ExpTokenText(), outputBytes = 0
         func progress(_ completed: Int) throws -> Progress {
             Progress(promptTokensCompleted: completed, promptTokensTotal: prompt.tokenIDs.count,
                 generatedTokens: generated.count, elapsedSeconds: ProcessInfo.processInfo.systemUptime - started,
-                ioBytesRead: try ioBytes(), footprintBytes: ProcessFootprint.current()?.footprintBytes ?? peak)
+                ioBytesRead: try ioBytes(), footprintBytes: ProcessFootprint.current()?.footprintBytes ?? peak,
+                reusedPromptTokens: reused)
         }
-        var completedPrompt = 0, prefillSeconds = 0.0, prefillIO: UInt64?
+        var completedPrompt = reused, prefillSeconds = 0.0, prefillIO: UInt64?
+        var prefillProjections: GGUFProjectionStatistics?
         var reason = StopReason.tokenLimit, decodeSeconds = 0.0, decodePasses = 0
         var interruptedDecodeSeconds = 0.0, pendingForwardStart: Double?
         do {
-            for (i, id) in prompt.tokenIDs.enumerated() {
+            if reused > 0 { try onEvent(.prefill(progress(reused))) }
+            for (i, id) in prompt.tokenIDs.enumerated().dropFirst(reused) {
                 try check()
                 try autoreleasepool {
                     if i + 1 == prompt.tokenIDs.count {
                         logits = try decoder.logits(for: UInt64(id), cancellationRequested: cancellationRequested).asArray(Float.self)
                     } else { try decoder.consume(UInt64(id), cancellationRequested: cancellationRequested) }
                 }
+                stateTokens.append(id); stateLogits = i + 1 == prompt.tokenIDs.count ? logits : []
                 completedPrompt = i + 1
+                if completedPrompt == checkpointLength, let checkpoint = try decoder.checkpoint() {
+                    prefixCheckpoint = checkpoint; checkpointTokens = stateTokens
+                }
                 try onEvent(.prefill(progress(i + 1)))
             }
             prefillSeconds = ProcessInfo.processInfo.systemUptime - started
             prefillIO = try ioBytes()
+            prefillProjections = decoder.projectionStatistics
             for step in 0..<maximumNewTokens {
                 try check()
                 let id = try Qwen4ExpGreedyToken.select(logits)
@@ -190,6 +246,7 @@ public final class Qwen4ExpTextGeneration {
                     let begin = ProcessInfo.processInfo.systemUptime
                     pendingForwardStart = begin
                     logits = try autoreleasepool { try decoder.logits(for: UInt64(id), cancellationRequested: cancellationRequested).asArray(Float.self) }
+                    stateTokens.append(id); stateLogits = logits
                     decodeSeconds += ProcessInfo.processInfo.systemUptime - begin; decodePasses += 1
                     pendingForwardStart = nil
                 }
@@ -202,6 +259,9 @@ public final class Qwen4ExpTextGeneration {
             if let pendingForwardStart {
                 interruptedDecodeSeconds = ProcessInfo.processInfo.systemUptime - pendingForwardStart
             }
+            if let checkpoint = prefixCheckpoint {
+                try decoder.restore(checkpoint); stateTokens = checkpointTokens; stateLogits.removeAll()
+            } else { discardConversation() }
         }
         let trailing = text.finish()
         if !trailing.isEmpty { try onEvent(.trailingText(trailing)) }
@@ -213,19 +273,27 @@ public final class Qwen4ExpTextGeneration {
             throw GGUFError.invalid("raw cache accounting or lease fault")
         }
         let totalIO = try ioBytes(), promptIO = prefillIO ?? totalIO
-        return Summary(modelSHA256: artifact.manifest.sha256, promptTokenIDs: prompt.tokenIDs,
+        let finalProjections = decoder.projectionStatistics
+        let prefillWork = prefillProjections ?? finalProjections
+        let result = Summary(modelSHA256: artifact.manifest.sha256, promptTokenIDs: prompt.tokenIDs,
             generatedTokenIDs: generated, stopReason: reason, prefillSeconds: prefillSeconds,
             decodeForwardSeconds: decodeSeconds, decodeForwardPasses: decodePasses,
             elapsedSeconds: ProcessInfo.processInfo.systemUptime - started, ioBytesRead: totalIO,
-            projections: try decoder.projectionStatistics.subtracting(baselineProjections),
+            projections: try finalProjections.subtracting(baselineProjections),
             rawCacheHits: cache.cacheHitCount - baselineCache.cacheHitCount,
             rawCacheMisses: cache.cacheMissCount - baselineCache.cacheMissCount,
             rawCacheEvictions: cache.cacheEvictionCount - baselineCache.cacheEvictionCount,
             rawCacheCapacityBytes: cache.budgetBytes, rawCacheLifetimePeakBytes: cache.peakInUseBytes,
             maximumObservedFootprintBytes: peak, processLifetimePeakFootprintBytes: lifetimePeak,
             residentWeightCache: decoder.residentCacheStatistics,
-            promptOutputProjectionsSkipped: min(completedPrompt, max(0, prompt.tokenIDs.count - 1)),
+            promptOutputProjectionsSkipped: min(completedPrompt - reused, max(0, prompt.tokenIDs.count - reused - 1)),
             prefillIOBytesRead: promptIO, decodeIOBytesRead: totalIO - promptIO,
-            promptTokensCompleted: completedPrompt, interruptedDecodeForwardSeconds: interruptedDecodeSeconds)
+            promptTokensCompleted: completedPrompt, interruptedDecodeForwardSeconds: interruptedDecodeSeconds,
+            reusedPromptTokens: reused, evaluatedPromptTokens: completedPrompt - reused,
+            prefixCheckpointPayloadBytes: prefixCheckpoint?.payloadBytes,
+            prefillProjections: try prefillWork.subtracting(baselineProjections),
+            decodeProjections: try finalProjections.subtracting(prefillWork))
+        retainState = reusePromptPrefix
+        return result
     }
 }

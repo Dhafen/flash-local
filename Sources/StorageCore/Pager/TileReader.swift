@@ -212,6 +212,17 @@ public final class TileReader: @unchecked Sendable {
 
     // MARK: - Request side
 
+    /// Advisory lookahead for a serial consumer. Do not queue reads for bytes
+    /// already retained by the pool: schedule() deliberately has no cache
+    /// policy, and queuing such a duplicate can strand an undelivered slot.
+    /// A skipped entry may be evicted; acquire() then reads it urgently.
+    public func prefetch(_ regions: [RegionDescriptor]) throws {
+        for region in regions { try validate(region) }
+        // Never take the pool's lock while holding the reader's monitor.
+        let missing = regions.filter { !pool.isCached($0.identity) }
+        try schedule(missing)
+    }
+
     /// Queue regions for background filling, in the given order.
     public func schedule(_ regions: [RegionDescriptor]) throws {
         for region in regions { try validate(region) }

@@ -48,12 +48,15 @@ struct REAMRootView: View {
         .tint(MRColor.tierPinned)
         .task { model.prepare() }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .background { model.stop() }
+            if phase == .background { model.releaseInferenceResources() }
             else if phase == .active { model.refreshStorage() }
         }
         #if os(iOS)
         .onChange(of: model.isBusy, initial: true) { _, value in UIApplication.shared.isIdleTimerDisabled = value }
-        .onDisappear { UIApplication.shared.isIdleTimerDisabled = false; model.stop() }
+        .onDisappear { UIApplication.shared.isIdleTimerDisabled = false; model.releaseInferenceResources() }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)) { _ in
+            model.releaseInferenceResources()
+        }
         #endif
     }
 }

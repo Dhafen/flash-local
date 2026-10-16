@@ -3,6 +3,8 @@ import GGUFCore
 import MLX
 import StorageCore
 
+public enum GGUFLinearEvaluation: Sendable { case perTile, boundedBatch }
+
 /// A single reusable FP32 tile. Serialises access across callers; the eager
 /// MLX copy is charged separately in the run report.
 public final class GGUFLinearScratch {
@@ -35,6 +37,7 @@ public struct GGUFLinearReport: Sendable, Codable {
     public let execution: GGUFLinearExecution?
     public let packedWeightCopyBytes: UInt64?
     public let residentWeightBytesReused: UInt64?
+    public var evaluationBatches: Int? = nil
 }
 
 public enum GGUFStreamedLinear {
@@ -43,7 +46,8 @@ public enum GGUFStreamedLinear {
     /// evaluated together, irrespective of model size or expert count.
     public static func runExperts(
         _ x: MLXArray, tensor: GGUFTensor, experts: [UInt64], payloadOffset: UInt64,
-        sourceID: UInt64, tileRows: Int, reader: TileReader
+        sourceID: UInt64, tileRows: Int, reader: TileReader,
+        evaluation: GGUFLinearEvaluation = .boundedBatch
     ) throws -> (output: MLXArray, report: GGUFLinearReport) {
         guard tensor.dimensions.count == 3, !experts.isEmpty, experts.count <= 64,
               let columns = Int(exactly: tensor.dimensions[0]),
@@ -61,13 +65,29 @@ public enum GGUFStreamedLinear {
         var outputs: [MLXArray] = []
         var logicalBytes: UInt64 = 0
         var ioSeconds = 0.0, copySeconds = 0.0, computeSeconds = 0.0
+        var pending: [MLXArray] = [], pendingBytes = 0, peakBatchBytes = 0, batches = 0
+        func flush() {
+            guard !pending.isEmpty else { return }
+            let begin = MonotonicClock.now()
+            MLX.eval(pending)
+            batches += 1
+            computeSeconds += MonotonicClock.seconds(since: begin)
+            pending.removeAll(keepingCapacity: true); pendingBytes = 0
+        }
         for tile in 0..<count {
             let first = tile * tileRows, n = min(tileRows, rows - first)
-            var packed: [MLXArray] = []
-            for expert in experts {
-                let region = try tensor.region(sourceID: sourceID,
+            let packedBytes = n * Int(tensor.rowBytes) * experts.count
+            if pendingBytes + packedBytes > 16 << 20 { flush() }
+            let regions = try experts.map { expert in
+                try tensor.region(sourceID: sourceID,
                     regionID: (expert << 32) | (UInt64(1) << 31) | UInt64(tile),
                     payloadOffset: payloadOffset, rows: UInt64(first)..<UInt64(first+n), expert: expert)
+            }
+            // Schedule only the selected experts, in consumption order. The
+            // reader's fixed read-ahead window bounds filled/in-flight slots.
+            try reader.prefetch(regions)
+            var packed: [MLXArray] = []
+            for region in regions {
                 let ioStart = MonotonicClock.now()
                 let lease = try reader.acquire(region)
                 ioSeconds += MonotonicClock.seconds(since: ioStart)
@@ -82,18 +102,21 @@ public enum GGUFStreamedLinear {
             let computeStart = MonotonicClock.now()
             let output = try GGUFPackedLinear.run(activations, packed: concatenated(packed),
                 type: tensor.quantization, rows: n, columns: columns, stackedWeights: true)
-            output.eval()
             computeSeconds += MonotonicClock.seconds(since: computeStart)
-            outputs.append(output)
+            outputs.append(output); pending.append(output); pendingBytes += packedBytes
+            peakBatchBytes = max(peakBatchBytes, pendingBytes)
+            if evaluation == .perTile { flush() }
         }
+        flush()
         let output = outputs.count == 1 ? outputs[0] : concatenated(outputs, axis: -1)
         output.eval()
         return (output, GGUFLinearReport(tiles: count * experts.count, logicalWeightBytes: logicalBytes,
-            scratchBytes: 0, peakCopiedWeightBytes: min(rows, tileRows) * Int(tensor.rowBytes) * experts.count * 2,
+            scratchBytes: 0, peakCopiedWeightBytes: peakBatchBytes * 2,
             boundedOutputBytes: rows * experts.count * 4 * 2,
             wallSeconds: MonotonicClock.seconds(since: started), waitOnIOSeconds: ioSeconds,
             dequantizeAndCopySeconds: copySeconds, computeSeconds: computeSeconds,
-            execution: .packedMetal, packedWeightCopyBytes: logicalBytes, residentWeightBytesReused: 0))
+            execution: .packedMetal, packedWeightCopyBytes: logicalBytes, residentWeightBytesReused: 0,
+            evaluationBatches: batches))
     }
 
     /// Compute x W^T for a matrix or one selected expert. The reader must own
@@ -106,7 +129,8 @@ public enum GGUFStreamedLinear {
         tileRows: Int, reader: TileReader, scratch: GGUFLinearScratch,
         maximumOutputBytes: Int = 16 * 1024 * 1024,
         execution: GGUFLinearExecution = .packedMetal,
-        packedCache: GGUFPackedTileCache? = nil
+        packedCache: GGUFPackedTileCache? = nil,
+        evaluation: GGUFLinearEvaluation = .boundedBatch
     ) throws -> (output: MLXArray, report: GGUFLinearReport) {
         guard tensor.dimensions.count == 2 || tensor.dimensions.count == 3,
               let columns = Int(exactly: tensor.dimensions[0]),
@@ -119,6 +143,7 @@ public enum GGUFStreamedLinear {
         let outputElements = rows.multipliedReportingOverflow(by: x.shape[0])
         guard !tileElements.overflow,
               execution == .packedMetal || tileElements.partialValue <= scratch.elements,
+              execution != .packedMetal || tensor.rowBytes <= UInt64((4 << 20) / min(rows, tileRows)),
               !outputElements.overflow, outputElements.partialValue <= maximumOutputBytes / 4 else {
             throw GGUFError.limit("linear scratch or output")
         }
@@ -139,7 +164,30 @@ public enum GGUFStreamedLinear {
         var logicalBytes: UInt64 = 0
         var copiedBytes: UInt64 = 0, reusedBytes: UInt64 = 0
         var waitSeconds = 0.0, decodeSeconds = 0.0, computeSeconds = 0.0
+        var pending: [MLXArray] = [], pendingBytes = 0, peakBatchBytes = 0, batches = 0
+        func flush() {
+            guard !pending.isEmpty else { return }
+            let begin = MonotonicClock.now()
+            MLX.eval(pending)
+            batches += 1
+            computeSeconds += MonotonicClock.seconds(since: begin)
+            pending.removeAll(keepingCapacity: true); pendingBytes = 0
+        }
         for tile in 0..<tileCount {
+            let batchTileBytes = min(tileRows, rows - tile * tileRows) * Int(tensor.rowBytes)
+            if execution == .packedMetal, pendingBytes + batchTileBytes > 16 << 20 { flush() }
+            // Overlap cold reads with the current GPU tile. Resident weights
+            // need no raw-slot prefetch and must not generate duplicate I/O.
+            if execution == .packedMetal {
+                var upcoming: [RegionDescriptor] = []
+                for ahead in tile..<min(tileCount, tile + reader.configuration.readAhead) {
+                    let first = ahead * tileRows, n = min(tileRows, rows - first)
+                    let region = try tensor.region(sourceID: sourceID, regionID: firstRegionID + UInt64(ahead),
+                        payloadOffset: payloadOffset, rows: UInt64(first)..<UInt64(first+n), expert: expert)
+                    if try packedCache?.contains(region) != true { upcoming.append(region) }
+                }
+                try reader.prefetch(upcoming)
+            }
             let start = tile * tileRows, count = min(tileRows, rows - start)
             let region = try tensor.region(sourceID: sourceID, regionID: firstRegionID + UInt64(tile),
                 payloadOffset: payloadOffset, rows: UInt64(start)..<UInt64(start + count), expert: expert)
@@ -173,22 +221,28 @@ public enum GGUFStreamedLinear {
                 output = try GGUFPackedLinear.run(activations, packed: weights, type: tensor.quantization,
                     rows: count, columns: columns)
             } else { output = matmul(activations, weights.T) }
-            output.eval() // do not retain unevaluated graphs across row tiles
+            if execution == .dequantized { output.eval(); batches += 1 }
             computeSeconds += MonotonicClock.seconds(since: computeStart)
             outputs.append(output)
+            if execution == .packedMetal {
+                pending.append(output); pendingBytes += region.length
+                peakBatchBytes = max(peakBatchBytes, pendingBytes)
+                if evaluation == .perTile { flush() }
+            }
             logicalBytes += UInt64(region.length)
         }
+        flush() // at most 16 MiB of packed tile operands await evaluation
         let output = outputs.count == 1 ? outputs[0] : concatenated(outputs, axis: -1)
         output.eval()
         return (output, GGUFLinearReport(tiles: tileCount, logicalWeightBytes: logicalBytes,
             scratchBytes: scratch.byteCount,
             peakCopiedWeightBytes: execution == .packedMetal
-                ? Int(try tensor.region(sourceID: sourceID, regionID: firstRegionID,
-                    payloadOffset: payloadOffset, rows: 0..<UInt64(min(rows, tileRows)), expert: expert).length)
+                ? peakBatchBytes
                 : tileElements.partialValue * 4,
             boundedOutputBytes: outputElements.partialValue * 4 * 2,
             wallSeconds: MonotonicClock.seconds(since: started), waitOnIOSeconds: waitSeconds,
             dequantizeAndCopySeconds: decodeSeconds, computeSeconds: computeSeconds,
-            execution: execution, packedWeightCopyBytes: copiedBytes, residentWeightBytesReused: reusedBytes))
+            execution: execution, packedWeightCopyBytes: copiedBytes, residentWeightBytesReused: reusedBytes,
+            evaluationBatches: batches))
     }
 }

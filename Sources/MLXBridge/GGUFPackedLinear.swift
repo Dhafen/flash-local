@@ -44,6 +44,12 @@ public final class GGUFPackedTileCache {
             entries: entries.count, hits: hits, reusedPayloadBytes: reused)
     }
 
+    func contains(_ region: RegionDescriptor) throws -> Bool {
+        guard let entry = entries[region.identity] else { return false }
+        guard entry.region == region else { throw GGUFError.invalid("resident cache identity changed range") }
+        return true
+    }
+
     func lookup(_ region: RegionDescriptor) throws -> MLXArray? {
         guard let entry = entries[region.identity] else { return nil }
         guard entry.region == region else { throw GGUFError.invalid("resident cache identity changed range") }

@@ -43,6 +43,51 @@ struct REAMRunSettings: Sendable {
         maximumNewTokens: 128, rawCacheBytes: 64 << 20, residentCacheBytes: 4_250_000_000)
 }
 
+/// One off-main owner for the tokenizer, weights and recurrent/KV prefix. An
+/// actor prevents two sessions or an eviction from running MLX concurrently.
+private actor REAMInferenceSession {
+    private var engine: Qwen4ExpTextGeneration?
+    private var owner: VerifiedGGUFArtifact?
+
+    func release() { engine = nil; owner = nil }
+    func clearConversation() {
+        do { try engine?.resetConversation() } catch { release() }
+    }
+
+    func generate(artifact: VerifiedGGUFArtifact, settings: REAMRunSettings,
+                  messages: [Qwen35ChatMessage], cancellation: REAMCancellation,
+                  events: AsyncThrowingStream<Qwen4ExpTextGeneration.Event, Error>.Continuation)
+        -> Result<Qwen4ExpTextGeneration.Summary, Error> {
+        let result = Result {
+            try autoreleasepool {
+                if owner !== artifact {
+                    release() // release the old allocation BEFORE creating another engine
+                    engine = try Qwen4ExpTextGeneration(artifact: artifact, contextTokens: settings.contextTokens,
+                        budgetBytes: settings.budgetBytes, rawCacheBytes: settings.rawCacheBytes,
+                        residentCacheBytes: settings.residentCacheBytes)
+                    owner = artifact
+                }
+                var lastProgress = 0.0
+                return try engine!.generate(messages: messages, maximumNewTokens: settings.maximumNewTokens,
+                    reusePromptPrefix: true, cancellationRequested: { cancellation.requested() || Task.isCancelled },
+                    captureCancelledSummary: true) { event in
+                        if case .prefill(let p) = event {
+                            let now = ProcessInfo.processInfo.systemUptime
+                            guard now - lastProgress >= 0.2 || p.promptTokensCompleted == p.promptTokensTotal else { return }
+                            lastProgress = now
+                        }
+                        if case .dropped = events.yield(event) {
+                            if case .prefill = event { return }
+                            throw REAMPresentationError.streamFull
+                        }
+                    }
+            }
+        }
+        if case .failure = result { release() }
+        return result
+    }
+}
+
 /// Saved only by an explicit action. No report is uploaded. Token IDs preserve
 /// the exact test input/output for later local reference comparisons.
 struct REAMRunReport: Codable, Sendable {
@@ -123,6 +168,7 @@ final class REAMAppModel {
     var budgetBytes: UInt64 { settings.budgetBytes }
     var maximumNewTokens: Int { settings.maximumNewTokens }
     @ObservationIgnored private var artifact: VerifiedGGUFArtifact?
+    @ObservationIgnored private let inferenceSession = REAMInferenceSession()
     @ObservationIgnored private var operation: Task<Void, Never>?
     @ObservationIgnored private var cancelWorker: (() -> Void)?
     @ObservationIgnored private var cancellation: REAMCancellation?
@@ -169,6 +215,7 @@ final class REAMAppModel {
         scan()
         if !hasFile { artifact = nil }
         if let artifact { do { try artifact.assertUnchanged() } catch { self.artifact = nil } }
+        if artifact == nil { releaseInferenceResources() }
         if hasFile && artifact == nil { verify() }
     }
     private func begin(_ activity: Activity, status: String) -> (UUID, REAMCancellation) {
@@ -184,8 +231,13 @@ final class REAMAppModel {
     }
     func stop() {
         guard isBusy else { return }
-        activity = .stopping; status = "Stoppar och frigör arbetsminnet…"
+        activity = .stopping; status = "Stoppar arbetet…"
         cancellation?.cancel(); cancelWorker?()
+    }
+    func releaseInferenceResources() {
+        stop()
+        let session = inferenceSession
+        Task { await session.release() }
     }
     nonisolated private static func preflight(_ artifact: VerifiedGGUFArtifact, settings: REAMRunSettings) throws -> VerifiedGGUFArtifact {
         try autoreleasepool {
@@ -201,9 +253,10 @@ final class REAMAppModel {
         guard !isBusy, !isPreview else { return }
         artifact = nil
         let (id, flag) = begin(.verifying, status: "Verifierar hela modellfilens SHA-256…")
-        let root = root, manifest = source.manifest, settings = settings
+        let root = root, manifest = source.manifest, settings = settings, session = inferenceSession
         let worker = Task.detached(priority: .utility) {
-            try Self.preflight(VerifiedGGUFArtifact.verify(insideRoot: root, manifest: manifest,
+            await session.release()
+            return try Self.preflight(VerifiedGGUFArtifact.verify(insideRoot: root, manifest: manifest,
                 cancellationRequested: { flag.requested() }), settings: settings)
         }
         cancelWorker = { worker.cancel() }
@@ -216,10 +269,11 @@ final class REAMAppModel {
     func download() {
         guard !isBusy, !isPreview else { return }
         let (id, flag) = begin(.downloading, status: "Hämtar modellen till intern lagring…")
-        let root = root, source = source, settings = settings
+        let root = root, source = source, settings = settings, session = inferenceSession
         let channel = AsyncStream<GGUFModelTransfer.Progress>.makeStream(bufferingPolicy: .bufferingNewest(1))
         let worker = Task.detached(priority: .utility) { () -> Result<VerifiedGGUFArtifact, Error> in
             defer { channel.continuation.finish() }
+            await session.release()
             do {
                 let value = try await GGUFModelTransfer().download(insideRoot: root, source: source,
                     cancellationRequested: { flag.requested() }, onProgress: { _ = channel.continuation.yield($0) })
@@ -263,35 +317,18 @@ final class REAMAppModel {
         let input = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !input.isEmpty, input.utf8.count <= 262144 else { return }
         draft = ""; messages.append(.init(role: .user, text: input))
-        let prompt = messages.map { Qwen35ChatMessage(role: $0.role, content: $0.text) }
+        let prompt = messages.filter { !($0.role == .assistant && $0.interrupted && $0.text.isEmpty) }
+            .map { Qwen35ChatMessage(role: $0.role, content: $0.text) }
         messages.append(.init(role: .assistant, text: "", interrupted: true))
         let responseID = messages.last!.id
         let (id, flag) = begin(.generating, status: "Förbereder lokal generering…")
         generationProgress = nil; summary = nil; lastMeasurementURL = nil; save()
-        let context = contextTokens, budget = budgetBytes, limit = maximumNewTokens, cache = settings.rawCacheBytes
-        let residentCache = settings.residentCacheBytes
+        let session = inferenceSession, settings = settings
         let channel = AsyncThrowingStream<Qwen4ExpTextGeneration.Event, Error>.makeStream(bufferingPolicy: .bufferingOldest(32))
         channel.continuation.onTermination = { if case .cancelled = $0 { flag.cancel() } }
         let worker = Task.detached(priority: .userInitiated) { () -> Result<Qwen4ExpTextGeneration.Summary, Error> in
-            let result = Result {
-                try autoreleasepool {
-                    let engine = try Qwen4ExpTextGeneration(artifact: artifact, contextTokens: context, budgetBytes: budget,
-                        rawCacheBytes: cache, residentCacheBytes: residentCache)
-                    var lastProgress = 0.0
-                    return try engine.generate(messages: prompt, maximumNewTokens: limit,
-                        cancellationRequested: { flag.requested() || Task.isCancelled }, captureCancelledSummary: true) { event in
-                            if case .prefill(let p) = event {
-                                let now = ProcessInfo.processInfo.systemUptime
-                                guard now - lastProgress >= 0.2 || p.promptTokensCompleted == p.promptTokensTotal else { return }
-                                lastProgress = now
-                            }
-                            if case .dropped = channel.continuation.yield(event) {
-                                if case .prefill = event { return }
-                                throw REAMPresentationError.streamFull
-                            }
-                        }
-                }
-            }
+            let result = await session.generate(artifact: artifact, settings: settings, messages: prompt,
+                cancellation: flag, events: channel.continuation)
             switch result { case .success: channel.continuation.finish(); case .failure(let error): channel.continuation.finish(throwing: error) }
             return result
         }
@@ -303,7 +340,10 @@ final class REAMAppModel {
                     switch event {
                     case .prefill(let p):
                         generationProgress = p
-                        if activity != .stopping { status = "Läser prompt: \(p.promptTokensCompleted)/\(p.promptTokensTotal) token" }
+                        if activity != .stopping {
+                            status = "Läser prompt: \(p.promptTokensCompleted)/\(p.promptTokensTotal) token"
+                                + (p.reusedPromptTokens > 0 ? " · \(p.reusedPromptTokens) återanvända" : "")
+                        }
                     case .token(_, let text, let p):
                         generationProgress = p; messages[index].text += text
                         if activity != .stopping { status = "Genererar lokalt…" }
@@ -329,6 +369,9 @@ final class REAMAppModel {
     }
     func clearMessages() {
         guard !isBusy else { return }; messages.removeAll(); summary = nil; generationProgress = nil; lastMeasurementURL = nil; save()
+        let (id, _) = begin(.resetting, status: "Rensar samtalets modellminne…")
+        let session = inferenceSession
+        operation = Task { await session.clearConversation(); finish(id) }
     }
     func saveMeasurement() {
         guard !isBusy, !isPreview, let summary else { return }
@@ -358,12 +401,13 @@ final class REAMAppModel {
         guard canRunNumerics, let artifact else { return }
         let (id, flag) = begin(.checkingNumerics, status: "Startar kort lokal numerikjämförelse…")
         // A cancelled retry must not erase a previously observed mismatch.
-        let budget = budgetBytes, cache = settings.rawCacheBytes
+        let budget = budgetBytes, cache = settings.rawCacheBytes, session = inferenceSession
         let directory = root.deletingLastPathComponent().appendingPathComponent("Diagnostics", isDirectory: true)
         typealias Update = (Qwen4ExpLocalParity.Phase, Int, Int)
         let channel = AsyncStream<Update>.makeStream(bufferingPolicy: .bufferingNewest(1))
         let worker = Task.detached(priority: .userInitiated) { () -> Result<(Qwen4ExpLocalParity.Report, URL), Error> in
             defer { channel.continuation.finish() }
+            await session.release() // the CPU diagnostic must never coexist with retained MLX weights
             return Result {
                 let report = try Qwen4ExpLocalParity.run(artifact: artifact,
                     messages: [.init(role: .user, content: "Hi")], budgetBytes: budget, rawCacheBytes: cache,

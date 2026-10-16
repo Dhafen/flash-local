@@ -48,10 +48,23 @@ final class Qwen4ExpDecoderParityTests: XCTestCase {
         let head = try XCTUnwrap(artifact.index.tensors["output.weight"])
         let savedBytes = full.projectionStatistics.logicalWeightBytes - lean.projectionStatistics.logicalWeightBytes
         XCTAssertGreaterThanOrEqual(savedBytes, UInt64(prefix.count) * head.byteCount)
+        let checkpoint = try XCTUnwrap(lean.checkpoint())
+        XCTAssertGreaterThan(checkpoint.payloadBytes, 0)
+        XCTAssertNil(try lean.checkpoint(maximumBytes: 0))
+        XCTAssertThrowsError(try full.restore(checkpoint), "A checkpoint cannot cross decoder instances")
+        var remaining: [[Float]] = []
         for token in manifest.tokens.dropFirst(prefix.count) {
             let expected = try full.logits(for: token).asArray(Float.self)
             let actual = try lean.logits(for: token).asArray(Float.self)
+            remaining.append(actual)
             for (a,b) in zip(expected,actual) { XCTAssertEqual(a,b,accuracy:1e-7) }
+        }
+        XCTAssertThrowsError(try lean.logits(for: manifest.tokens[0], cancellationRequested: { true }))
+        try lean.restore(checkpoint)
+        XCTAssertEqual(lean.position, prefix.count)
+        for (token, expected) in zip(manifest.tokens.dropFirst(prefix.count), remaining) {
+            let actual = try lean.logits(for: token).asArray(Float.self)
+            for (a,b) in zip(expected, actual) { XCTAssertEqual(a,b,accuracy:1e-7) }
         }
         XCTAssertGreaterThan(lean.residentCacheStatistics.hits, 0)
         XCTAssertLessThanOrEqual(lean.residentCacheStatistics.residentPayloadBytes, 4 << 20)

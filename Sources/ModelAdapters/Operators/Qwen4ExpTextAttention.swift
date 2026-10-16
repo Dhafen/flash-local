@@ -13,6 +13,25 @@ public enum Qwen4ExpTextAttention {
         public private(set) var count = 0
         private var keys: [MLXArray] = []
         private var values: [MLXArray] = []
+        private let checkpointIdentity = UUID()
+
+        /// Evaluated immutable arrays share storage until append replaces the
+        /// final chunk. This is never an in-place mutation of saved KV data.
+        public struct Checkpoint {
+            fileprivate let owner: UUID
+            fileprivate let count: Int
+            fileprivate let keys: [MLXArray]
+            fileprivate let values: [MLXArray]
+        }
+
+        public func checkpoint() -> Checkpoint {
+            Checkpoint(owner: checkpointIdentity, count: count, keys: keys, values: values)
+        }
+
+        public func restore(_ checkpoint: Checkpoint) throws {
+            guard checkpoint.owner == checkpointIdentity else { throw GGUFError.invalid("KV checkpoint owner") }
+            keys = checkpoint.keys; values = checkpoint.values; count = checkpoint.count
+        }
 
         /// FP16 K and V have an exact maximum storage cost. App/graph/allocator
         /// reserves are additional and belong to the complete memory plan.

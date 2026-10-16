@@ -1,6 +1,7 @@
 import Foundation
 import MinirunKit
 import ModelAdapters
+import StorageCore
 import XCTest
 @testable import MinirunRunners
 
@@ -102,6 +103,44 @@ final class Qwen4ExpTextGenerationParityTests: XCTestCase {
         XCTAssertTrue(prefix.generatedTokenIDs.isEmpty)
         XCTAssertEqual(prefix.decodeIOBytesRead, 0)
         XCTAssertNil(prefix.decodeTokensPerSecond)
+        let cached = try Qwen4ExpTextGeneration(artifact: artifact, contextTokens: manifest.contextTokens,
+            budgetBytes: 5_500_000_000, rawCacheBytes: 2 << 20, residentCacheBytes: 1 << 20)
+        var firstText = ""
+        let first = try cached.generate(messages: manifest.messages, maximumNewTokens: manifest.maximumNewTokens,
+            reusePromptPrefix: true) { event in
+                if case .token(_, let delta, _) = event { firstText += delta }
+                if case .trailingText(let delta) = event { firstText += delta }
+            }
+        XCTAssertEqual(first.generatedTokenIDs, reference.generatedTokenIDs)
+        XCTAssertEqual(first.reusedPromptTokens, 0)
+        XCTAssertGreaterThan(try XCTUnwrap(first.prefixCheckpointPayloadBytes), 0)
+        let followup = manifest.messages + [.init(role: .assistant, content: firstText), .init(role: .user, content: "Next")]
+        let warm = try cached.generate(messages: followup, maximumNewTokens: 2, reusePromptPrefix: true) { _ in }
+        let cold = try engine.generate(messages: followup, maximumNewTokens: 2) { _ in }
+        XCTAssertEqual(warm.promptTokenIDs, cold.promptTokenIDs)
+        XCTAssertEqual(warm.generatedTokenIDs, cold.generatedTokenIDs)
+        XCTAssertGreaterThan(try XCTUnwrap(warm.reusedPromptTokens), 0)
+        XCTAssertLessThan(try XCTUnwrap(warm.evaluatedPromptTokens), try XCTUnwrap(cold.evaluatedPromptTokens))
+        XCTAssertLessThan(warm.projections.logicalWeightBytes, cold.projections.logicalWeightBytes)
+        XCTAssertEqual((warm.prefillProjections?.calls ?? 0) + (warm.decodeProjections?.calls ?? 0), warm.projections.calls)
+        var stopWarm = false
+        let stoppedWarm = try cached.generate(messages: followup, maximumNewTokens: 2, reusePromptPrefix: true,
+            cancellationRequested: { stopWarm }, captureCancelledSummary: true) { event in
+                if case .prefill = event { stopWarm = true }
+            }
+        XCTAssertEqual(stoppedWarm.stopReason, .cancelled)
+        let retry = try cached.generate(messages: followup, maximumNewTokens: 2, reusePromptPrefix: true) { _ in }
+        XCTAssertEqual(retry.generatedTokenIDs, cold.generatedTokenIDs)
+        let changed = [Qwen35ChatMessage(role: .user, content: "Changed")]
+        let diverged = try cached.generate(messages: changed, maximumNewTokens: 2, reusePromptPrefix: true) { _ in }
+        let changedCold = try engine.generate(messages: changed, maximumNewTokens: 2) { _ in }
+        XCTAssertEqual(diverged.reusedPromptTokens, 0)
+        XCTAssertEqual(diverged.generatedTokenIDs, changedCold.generatedTokenIDs)
+        try cached.resetConversation()
+        let cleared = try cached.generate(messages: manifest.messages, maximumNewTokens: 2, reusePromptPrefix: true) { _ in }
+        XCTAssertEqual(cleared.reusedPromptTokens, 0)
+        XCTAssertEqual(cleared.generatedTokenIDs, Array(reference.generatedTokenIDs.prefix(2)))
+        print("QWEN4EXP_PREFIX_REUSE syntheticOnly=true physicalPhone=false source=\(BuildInfo.gitRevision) exactTokenIDs=true reused=\(warm.reusedPromptTokens ?? 0) evaluated=\(warm.evaluatedPromptTokens ?? 0) cold=\(cold.evaluatedPromptTokens ?? 0) warmPrefillSeconds=\(warm.prefillSeconds) coldPrefillSeconds=\(cold.prefillSeconds) cancelledRetry=true divergedReset=true")
         XCTAssertThrowsError(try engine.generate(messages: manifest.messages, maximumNewTokens: 0) { _ in })
         print("QWEN4EXP_TEXT_SESSION_PARITY prompt=\(summary.promptTokenIDs.count) generated=\(ids.count) winnerMargin=\(reference.minimumWinnerMargin) exactTokenIDs=true")
     }

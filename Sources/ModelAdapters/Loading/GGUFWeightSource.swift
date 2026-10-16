@@ -24,6 +24,7 @@ public struct GGUFProjectionStatistics: Codable, Equatable, Sendable {
     public private(set) var packedMetalCalls: UInt64? = 0
     public private(set) var packedWeightCopyBytes: UInt64? = 0
     public private(set) var residentWeightBytesReused: UInt64? = 0
+    public private(set) var evaluationBatches: UInt64? = 0
 
     mutating func record(_ report: GGUFLinearReport, roundingSeconds: Double = 0, rounded: Bool = false) throws {
         func add(_ a: UInt64, _ b: UInt64) throws -> UInt64 {
@@ -36,6 +37,7 @@ public struct GGUFProjectionStatistics: Codable, Equatable, Sendable {
         packedMetalCalls = try add(packedMetalCalls ?? 0, report.execution == .packedMetal ? 1 : 0)
         packedWeightCopyBytes = try add(packedWeightCopyBytes ?? 0, report.packedWeightCopyBytes ?? 0)
         residentWeightBytesReused = try add(residentWeightBytesReused ?? 0, report.residentWeightBytesReused ?? 0)
+        evaluationBatches = try add(evaluationBatches ?? 0, UInt64(report.evaluationBatches ?? 0))
         if rounded { activationRoundingCalls = try add(activationRoundingCalls, 1) }
         activationRoundingSeconds += roundingSeconds
         wallSeconds += report.wallSeconds + roundingSeconds; waitOnIOSeconds += report.waitOnIOSeconds
@@ -68,6 +70,10 @@ public struct GGUFProjectionStatistics: Codable, Equatable, Sendable {
         value.packedMetalCalls = (packedMetalCalls ?? 0) - (earlier.packedMetalCalls ?? 0)
         value.packedWeightCopyBytes = (packedWeightCopyBytes ?? 0) - (earlier.packedWeightCopyBytes ?? 0)
         value.residentWeightBytesReused = (residentWeightBytesReused ?? 0) - (earlier.residentWeightBytesReused ?? 0)
+        guard (evaluationBatches ?? 0) >= (earlier.evaluationBatches ?? 0) else {
+            throw GGUFError.invalid("evaluation batch counter went backwards")
+        }
+        value.evaluationBatches = (evaluationBatches ?? 0) - (earlier.evaluationBatches ?? 0)
         return value
     }
 }
@@ -128,9 +134,13 @@ public final class GGUFWeightSource {
             }
         }
         packedCache = try GGUFPackedTileCache(capacityBytes: residentCacheBytes, admittedSources: admitted)
+        // Leave a spare slot for an urgent cache miss after an advisory
+        // lookahead hit is evicted. Production overlaps up to three reads;
+        // small two-slot fixtures retain the conservative one-read window.
+        let lookahead = min(3, slots - 1)
         reader = try TileReader(owningFileDescriptor: artifact.duplicateForReading(),
             path: artifact.manifest.fileName, pool: pool,
-            configuration: .init(queueDepth: 2, readAhead: 1, noCache: noCache, slotAcquireTimeout: 120))
+            configuration: .init(queueDepth: lookahead, readAhead: lookahead, noCache: noCache, slotAcquireTimeout: 120))
     }
 
     deinit { shutdown() }

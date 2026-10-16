@@ -53,6 +53,7 @@ final class REAMAppModelTests: XCTestCase {
         XCTAssertFalse(model.isBusy); XCTAssertTrue(model.canChat)
         XCTAssertTrue(try XCTUnwrap(model.messages.last).interrupted)
         model.clearMessages()
+        await model.waitUntilIdle()
         model.draft = fixture.messages[0].content; model.send()
         await model.waitUntilIdle()
         XCTAssertNil(model.error)
@@ -89,6 +90,11 @@ final class REAMAppModelTests: XCTestCase {
         #if os(macOS)
         XCTAssertEqual(report.platform, "macOS", "A hosted Mac test must not label itself an iPhone measurement")
         #endif
+        model.draft = "Next"; model.send(); await model.waitUntilIdle()
+        XCTAssertNil(model.error)
+        XCTAssertGreaterThan(try XCTUnwrap(model.summary?.reusedPromptTokens), 0,
+                             "The app must keep one engine and enable exact prefix reuse between turns")
+        let beforeDiagnostic = model.messages.map(\.text)
         model.checkNumerics(); await model.waitUntilIdle()
         XCTAssertNil(model.error)
         let parityURL = try XCTUnwrap(model.lastNumericsURL)
@@ -98,7 +104,7 @@ final class REAMAppModelTests: XCTestCase {
         XCTAssertEqual(parity.modelSHA256, fixture.sha256)
         XCTAssertNil(parity.modelProvenance)
         XCTAssertEqual(parity.positions.count, reference.promptTokenIDs.count)
-        XCTAssertEqual(model.messages.map(\.text), saved.map(\.text), "A diagnostic must not invent chat turns")
+        XCTAssertEqual(model.messages.map(\.text), beforeDiagnostic, "A diagnostic must not invent chat turns")
         try FileManager.default.removeItem(at: localFile)
         model.refreshStorage()
         XCTAssertFalse(model.canChat)
@@ -144,7 +150,7 @@ final class REAMAppModelTests: XCTestCase {
         XCTAssertNil(model.summary)
     }
 
-    func testRestoresAndExplicitlyClearsOnlyItsOwnChatFile() throws {
+    func testRestoresAndExplicitlyClearsOnlyItsOwnChatFile() async throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: folder) }
@@ -157,6 +163,7 @@ final class REAMAppModelTests: XCTestCase {
         XCTAssertEqual(model.messages.map(\.text), original.map(\.text))
         XCTAssertTrue(model.messages.last!.interrupted)
         model.clearMessages()
+        await model.waitUntilIdle()
         XCTAssertTrue(model.messages.isEmpty)
         XCTAssertTrue(try JSONDecoder().decode([REAMMessage].self, from: Data(contentsOf: file)).isEmpty)
     }

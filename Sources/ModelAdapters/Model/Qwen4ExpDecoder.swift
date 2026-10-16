@@ -143,6 +143,58 @@ public final class Qwen4ExpDecoder {
     private var pleHistories: [Int: MLXArray] = [:]
     private var previousTokens: [UInt64] = []
     private var requiresReset = false
+    private let checkpointIdentity = UUID()
+
+    /// One executor-confined, opaque snapshot. All tensors are already eager
+    /// and subsequent steps replace them, so recurrent/KV/PLE state can rewind
+    /// together without recomputing an otherwise identical history prefix.
+    public final class Checkpoint {
+        public let payloadBytes: UInt64
+        fileprivate let owner: UUID
+        fileprivate let position: Int
+        fileprivate let attention: [Int: Qwen4ExpTextAttention.Cache.Checkpoint]
+        fileprivate let recurrent: [Int: MLXArray]
+        fileprivate let convolution: [Int: MLXArray]
+        fileprivate let ple: [Int: MLXArray]
+        fileprivate let previousTokens: [UInt64]
+        fileprivate init(owner: UUID, position: Int, payloadBytes: UInt64,
+                         attention: [Int: Qwen4ExpTextAttention.Cache.Checkpoint],
+                         recurrent: [Int: MLXArray], convolution: [Int: MLXArray],
+                         ple: [Int: MLXArray], previousTokens: [UInt64]) {
+            self.owner = owner; self.position = position; self.payloadBytes = payloadBytes
+            self.attention = attention; self.recurrent = recurrent; self.convolution = convolution
+            self.ple = ple; self.previousTokens = previousTokens
+        }
+    }
+
+    /// The payload allowance is charged INSIDE the existing working reserve,
+    /// leaving at least 512 MiB for app/graph/transient work. If state grows
+    /// beyond it, reuse is unavailable; context is never silently truncated.
+    public func checkpoint(maximumBytes: UInt64 = 256 << 20) throws -> Checkpoint? {
+        guard !requiresReset, memoryPlan.reservedWorkingBytes >= 512 << 20,
+              maximumBytes <= memoryPlan.reservedWorkingBytes - (512 << 20) else {
+            throw GGUFError.limit("prefix checkpoint admission")
+        }
+        var bytes = UInt64(attentionCaches.values.reduce(0) { $0 + $1.allocatedBytes })
+        for tensor in Array(recurrentStates.values) + Array(convolutionHistories.values) + Array(pleHistories.values) {
+            bytes += UInt64(tensor.nbytes)
+        }
+        guard bytes <= maximumBytes else { return nil }
+        return Checkpoint(owner: checkpointIdentity, position: position, payloadBytes: bytes,
+            attention: attentionCaches.mapValues { $0.checkpoint() }, recurrent: recurrentStates,
+            convolution: convolutionHistories, ple: pleHistories, previousTokens: previousTokens)
+    }
+
+    public func restore(_ checkpoint: Checkpoint) throws {
+        guard checkpoint.owner == checkpointIdentity, Set(checkpoint.attention.keys) == Set(attentionCaches.keys) else {
+            throw GGUFError.invalid("decoder checkpoint owner/layout")
+        }
+        try weights.artifact.assertUnchanged()
+        for (layer, state) in checkpoint.attention { try attentionCaches[layer]!.restore(state) }
+        recurrentStates = checkpoint.recurrent; convolutionHistories = checkpoint.convolution
+        pleHistories = checkpoint.ple; previousTokens = checkpoint.previousTokens
+        position = checkpoint.position; requiresReset = false
+    }
 
     public init(artifact: VerifiedGGUFArtifact, contextTokens: Int,
                 budgetBytes: UInt64, workingReserveBytes: UInt64 = 1_000_000_000,
