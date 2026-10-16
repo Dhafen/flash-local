@@ -135,7 +135,7 @@ public enum Qwen4ExpPLE {
 
 /// Admission arithmetic, not a claim about measured process footprint. Every
 /// caller must pay for app/graph/Metal reserve and sample the live footprint.
-public struct Qwen4ExpMemoryPlan: Sendable, Equatable {
+public struct GGUFDecoderMemoryPlan: Sendable, Equatable {
     public let contextTokens: Int
     public let kvBytes: UInt64
     public let recurrentMatrixBytes: UInt64
@@ -145,7 +145,22 @@ public struct Qwen4ExpMemoryPlan: Sendable, Equatable {
 
     public init(config: Qwen4ExpConfig, contextTokens: Int, budgetBytes: UInt64,
                 reservedWorkingBytes: UInt64) throws {
-        guard contextTokens > 0, contextTokens <= config.contextLimit,
+        try self.init(contextTokens: contextTokens, maximumContextTokens: config.contextLimit,
+            denseAttentionLayers: config.denseAttentionLayers, keyValueHeads: config.keyValueHeads,
+            keyLength: config.keyLength, valueLength: config.valueLength,
+            recurrentLayers: config.recurrentLayers, recurrentHeads: config.recurrentHeads,
+            recurrentStateSize: config.recurrentStateSize, budgetBytes: budgetBytes,
+            reservedWorkingBytes: reservedWorkingBytes)
+    }
+
+    public init(contextTokens: Int, maximumContextTokens: Int, denseAttentionLayers: Int,
+                keyValueHeads: Int, keyLength: Int, valueLength: Int, recurrentLayers: Int,
+                recurrentHeads: Int, recurrentStateSize: Int, budgetBytes: UInt64,
+                reservedWorkingBytes: UInt64) throws {
+        guard contextTokens > 0, contextTokens <= maximumContextTokens,
+              (0...256).contains(denseAttentionLayers), (0...256).contains(recurrentLayers),
+              [keyValueHeads, keyLength, valueLength, recurrentHeads, recurrentStateSize]
+                .allSatisfy({ (1...65536).contains($0) }),
               budgetBytes <= 5_500_000_000, reservedWorkingBytes >= 512 * 1024 * 1024 else {
             throw GGUFError.invalid("context, budget, or working reserve")
         }
@@ -156,10 +171,10 @@ public struct Qwen4ExpMemoryPlan: Sendable, Equatable {
                 return result.partialValue
             }
         }
-        kvBytes = try product([UInt64(config.denseAttentionLayers), UInt64(contextTokens),
-            UInt64(config.keyValueHeads), UInt64(config.keyLength) + UInt64(config.valueLength), 2])
-        recurrentMatrixBytes = try product([UInt64(config.recurrentLayers), UInt64(config.recurrentHeads),
-            UInt64(config.recurrentStateSize), UInt64(config.recurrentStateSize), 4])
+        kvBytes = try product([UInt64(denseAttentionLayers), UInt64(contextTokens),
+            UInt64(keyValueHeads), UInt64(keyLength) + UInt64(valueLength), 2])
+        recurrentMatrixBytes = try product([UInt64(recurrentLayers), UInt64(recurrentHeads),
+            UInt64(recurrentStateSize), UInt64(recurrentStateSize), 4])
         var floor = kvBytes
         for bytes in [recurrentMatrixBytes, reservedWorkingBytes] {
             let result = floor.addingReportingOverflow(bytes)
@@ -173,3 +188,6 @@ public struct Qwen4ExpMemoryPlan: Sendable, Equatable {
         cacheBytes = budgetBytes - floor
     }
 }
+
+/// Source compatibility for the original REAM adapter.
+public typealias Qwen4ExpMemoryPlan = GGUFDecoderMemoryPlan

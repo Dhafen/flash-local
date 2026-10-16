@@ -22,15 +22,22 @@ final class Qwen4ExpTextGenerationParityTests: XCTestCase {
         let minimumWinnerMargin: Double
     }
     func testCompleteTextSessionMatchesPinnedCPUReferenceAndRecoversAfterCancellation() throws {
+        try checkCompleteTextSession(family: "qwen4exp")
+    }
+    func testOrnithTextSessionMatchesPinnedCPUReferenceAndReusesExactPrefixes() throws {
+        try checkCompleteTextSession(family: "ornith")
+        print("ORNITH_TEXT_SESSION exactPromptIDs=true exactGeneratedIDs=true prefixReuse=true syntheticOnly=true")
+    }
+    private func checkCompleteTextSession(family: String) throws {
         let env = ProcessInfo.processInfo.environment
         guard let path = env["GGUF_HEADER_FIXTURE"] ?? env["TEST_RUNNER_GGUF_HEADER_FIXTURE"] else {
             throw XCTSkip("Set GGUF_HEADER_FIXTURE and run the synthetic text-session reference")
         }
         let folder = URL(fileURLWithPath: path).deletingLastPathComponent()
-        let result = folder.appendingPathComponent("qwen4exp-session-reference.json")
+        let result = folder.appendingPathComponent("\(family)-session-reference.json")
         guard FileManager.default.fileExists(atPath: result.path) else { throw XCTSkip("Run scripts/run_synthetic_reference.py") }
         let manifest = try JSONDecoder().decode(Manifest.self,
-            from: Data(contentsOf: folder.appendingPathComponent("synthetic-qwen4exp-chat.json")))
+            from: Data(contentsOf: folder.appendingPathComponent("synthetic-\(family)-chat.json")))
         let reference = try JSONDecoder().decode(Reference.self, from: Data(contentsOf: result))
         let expected = try GGUFModelManifest(fileName: manifest.fileName,
             fileByteCount: manifest.fileByteCount, sha256: manifest.sha256)
@@ -140,8 +147,9 @@ final class Qwen4ExpTextGenerationParityTests: XCTestCase {
         let cleared = try cached.generate(messages: manifest.messages, maximumNewTokens: 2, reusePromptPrefix: true) { _ in }
         XCTAssertEqual(cleared.reusedPromptTokens, 0)
         XCTAssertEqual(cleared.generatedTokenIDs, Array(reference.generatedTokenIDs.prefix(2)))
-        print("QWEN4EXP_PREFIX_REUSE syntheticOnly=true physicalPhone=false source=\(BuildInfo.gitRevision) exactTokenIDs=true reused=\(warm.reusedPromptTokens ?? 0) evaluated=\(warm.evaluatedPromptTokens ?? 0) cold=\(cold.evaluatedPromptTokens ?? 0) warmPrefillSeconds=\(warm.prefillSeconds) coldPrefillSeconds=\(cold.prefillSeconds) cancelledRetry=true divergedReset=true")
+        let marker = family == "ornith" ? "ORNITH" : "QWEN4EXP"
+        print("\(marker)_PREFIX_REUSE syntheticOnly=true physicalPhone=false source=\(BuildInfo.gitRevision) exactTokenIDs=true reused=\(warm.reusedPromptTokens ?? 0) evaluated=\(warm.evaluatedPromptTokens ?? 0) cold=\(cold.evaluatedPromptTokens ?? 0) warmPrefillSeconds=\(warm.prefillSeconds) coldPrefillSeconds=\(cold.prefillSeconds) cancelledRetry=true divergedReset=true")
         XCTAssertThrowsError(try engine.generate(messages: manifest.messages, maximumNewTokens: 0) { _ in })
-        print("QWEN4EXP_TEXT_SESSION_PARITY prompt=\(summary.promptTokenIDs.count) generated=\(ids.count) winnerMargin=\(reference.minimumWinnerMargin) exactTokenIDs=true")
+        print("\(marker)_TEXT_SESSION_PARITY prompt=\(summary.promptTokenIDs.count) generated=\(ids.count) winnerMargin=\(reference.minimumWinnerMargin) exactTokenIDs=true")
     }
 }

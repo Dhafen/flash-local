@@ -1,0 +1,96 @@
+import Foundation
+import GGUFCore
+import MLX
+import MinirunKit
+import StorageCore
+import XCTest
+@testable import ModelAdapters
+
+final class Qwen35MoEDecoderParityTests: XCTestCase {
+    private struct Manifest: Decodable {
+        let fileName: String
+        let fileByteCount: UInt64
+        let sha256: String
+        let tokens: [UInt64]
+        let contextTokens: Int
+    }
+    private struct Reference: Decodable { let tokens: [UInt64]; let logits: [[Float]] }
+    private func folder() throws -> URL {
+        let env = ProcessInfo.processInfo.environment
+        guard let path = env["GGUF_HEADER_FIXTURE"] ?? env["TEST_RUNNER_GGUF_HEADER_FIXTURE"] else {
+            throw XCTSkip("Run the pinned synthetic CPU reference first")
+        }
+        return URL(fileURLWithPath: path).deletingLastPathComponent()
+    }
+    private func artifact(mixed: Bool) throws -> (VerifiedGGUFArtifact, Manifest, Reference) {
+        let folder = try folder(), suffix = mixed ? "-mixed" : ""
+        let manifest = try JSONDecoder().decode(Manifest.self,
+            from: Data(contentsOf: folder.appendingPathComponent("synthetic-ornith\(suffix).json")))
+        XCTAssertLessThan(manifest.fileByteCount, 32 << 20, "Only generated random weights may run in CI")
+        let reference = try JSONDecoder().decode(Reference.self,
+            from: Data(contentsOf: folder.appendingPathComponent("llama-ornith\(suffix)-reference-logits.json")))
+        let artifact = try VerifiedGGUFArtifact.verify(insideRoot: folder,
+            manifest: GGUFModelManifest(fileName: manifest.fileName, fileByteCount: manifest.fileByteCount, sha256: manifest.sha256))
+        return (artifact, manifest, reference)
+    }
+    func testOrnithFP32AndMixedGraphsMatchPinnedCPUReference() throws {
+        for mixed in [false, true] {
+            let (artifact, manifest, reference) = try artifact(mixed: mixed)
+            let decoder = try Qwen35MoEDecoder(artifact: artifact, contextTokens: manifest.contextTokens,
+                budgetBytes: 5_500_000_000, rawCacheBytes: 2 << 20)
+            XCTAssertEqual(decoder.layout.layers, 4); XCTAssertEqual(decoder.layout.mtpLayers, 1)
+            XCTAssertEqual(reference.tokens, manifest.tokens)
+            XCTAssertEqual(reference.logits.count, manifest.tokens.count)
+            for (position, token) in manifest.tokens.enumerated() {
+                let actual = try decoder.logits(for: token).asArray(Float.self), expected = reference.logits[position]
+                XCTAssertEqual(actual.count, expected.count)
+                XCTAssertTrue(expected.contains { abs($0) > 1e-6 })
+                let maximum = zip(actual, expected).map { abs($0.0 - $0.1) }.max() ?? .infinity
+                let squared = zip(actual, expected).reduce(0.0) { $0 + pow(Double($1.0) - Double($1.1), 2) }
+                let norm = expected.reduce(0.0) { $0 + Double($1) * Double($1) }
+                let relative = sqrt(squared / max(norm, 1e-20))
+                print("ORNITH_LOGIT_PARITY mixed=\(mixed) position=\(position) maxAbs=\(maximum) relativeL2=\(relative) syntheticOnly=true")
+                XCTAssertLessThanOrEqual(maximum, 0.01)
+                XCTAssertLessThanOrEqual(relative, 1e-3)
+            }
+            XCTAssertEqual(decoder.position, 5)
+            XCTAssertGreaterThan(decoder.readStatistics.bytesRead, 0)
+        }
+    }
+    func testOrnithCheckpointHeadElisionAndFailedStepRecovery() throws {
+        let (artifact, manifest, _) = try artifact(mixed: true)
+        let full = try Qwen35MoEDecoder(artifact: artifact, contextTokens: manifest.contextTokens,
+            budgetBytes: 5_500_000_000, rawCacheBytes: 2 << 20)
+        let lean = try Qwen35MoEDecoder(artifact: artifact, contextTokens: manifest.contextTokens,
+            budgetBytes: 5_500_000_000, rawCacheBytes: 2 << 20, residentCacheBytes: 4 << 20)
+        for token in manifest.tokens.prefix(3) { _ = try full.logits(for: token); try lean.consume(token) }
+        let checkpoint = try XCTUnwrap(lean.checkpoint())
+        XCTAssertGreaterThan(checkpoint.payloadBytes, 0)
+        XCTAssertNil(try lean.checkpoint(maximumBytes: 0))
+        XCTAssertThrowsError(try full.restore(checkpoint))
+        var following: [[Float]] = []
+        for token in manifest.tokens.dropFirst(3) {
+            let expected = try full.logits(for: token).asArray(Float.self)
+            let actual = try lean.logits(for: token).asArray(Float.self)
+            following.append(actual)
+            for (a, b) in zip(expected, actual) { XCTAssertEqual(a, b, accuracy: 1e-7) }
+        }
+        XCTAssertLessThan(lean.projectionStatistics.logicalWeightBytes, full.projectionStatistics.logicalWeightBytes)
+        XCTAssertThrowsError(try lean.logits(for: 1, cancellationRequested: { true }))
+        XCTAssertThrowsError(try lean.logits(for: 1))
+        try lean.restore(checkpoint)
+        for (token, expected) in zip(manifest.tokens.dropFirst(3), following) {
+            let actual = try lean.logits(for: token).asArray(Float.self)
+            for (a, b) in zip(expected, actual) { XCTAssertEqual(a, b, accuracy: 1e-7) }
+        }
+        lean.reset()
+        let ioBefore = lean.readStatistics.bytesRead
+        lean.footprintSnapshot = { nil }
+        XCTAssertThrowsError(try lean.logits(for: 1))
+        XCTAssertEqual(lean.readStatistics.bytesRead, ioBefore)
+        lean.footprintSnapshot = { ProcessFootprint.current() }
+        XCTAssertThrowsError(try lean.logits(for: 1), "Lost telemetry must not silently repair failed state")
+        lean.reset(); _ = try lean.logits(for: 1)
+        XCTAssertEqual(lean.position, 1)
+    }
+}

@@ -119,7 +119,9 @@ flr_context * flr_create(int descriptor, int32_t context_tokens, flr_abort_callb
         if (!value->model || aborted(value.get())) { reference_error = "CPU model load failed or governor stopped it"; return nullptr; }
         char architecture[32] = {};
         llama_model_meta_val_str(value->model, "general.architecture", architecture, sizeof(architecture));
-        if (std::string(architecture) != "qwen4exp") { reference_error = "CPU diagnostic requires qwen4exp"; return nullptr; }
+        if (std::string(architecture) != "qwen4exp" && std::string(architecture) != "qwen35moe") {
+            reference_error = "CPU diagnostic requires a registered qwen4exp/qwen35moe graph"; return nullptr;
+        }
         value->vocabulary = llama_vocab_n_tokens(llama_model_get_vocab(value->model));
         if (value->vocabulary < 1 || value->vocabulary > 300000) { reference_error = "CPU vocabulary exceeds output bound"; return nullptr; }
         auto cp = llama_context_default_params();

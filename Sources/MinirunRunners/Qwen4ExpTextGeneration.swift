@@ -111,12 +111,12 @@ public final class Qwen4ExpTextGeneration {
     }
     private let artifact: VerifiedGGUFArtifact
     private let tokenizer: CanonicalQwen35Tokenizer
-    private let decoder: Qwen4ExpDecoder
+    private let decoder: GGUFStreamedDecoder
     private let contextTokens: Int
     private var running = false
     private var stateTokens: [Int] = []
     private var stateLogits: [Float] = []
-    private var prefixCheckpoint: Qwen4ExpDecoder.Checkpoint?
+    private var prefixCheckpoint: GGUFStreamedDecoder.Checkpoint?
     private var checkpointTokens: [Int] = []
 
     private func discardConversation() {
@@ -138,9 +138,9 @@ public final class Qwen4ExpTextGeneration {
         }
         self.artifact = artifact; self.contextTokens = contextTokens
         tokenizer = try CanonicalQwen35Tokenizer(artifact: artifact)
-        decoder = try Qwen4ExpDecoder(artifact: artifact, contextTokens: contextTokens,
+        decoder = try GGUFStreamedDecoder(artifact: artifact, contextTokens: contextTokens,
             budgetBytes: budgetBytes, rawCacheBytes: rawCacheBytes, residentCacheBytes: residentCacheBytes)
-        guard decoder.layout.vocabularySize == tokenizer.vocabularySize else {
+        guard decoder.vocabularySize == tokenizer.vocabularySize else {
             throw GGUFError.invalid("tokenizer and model vocabulary sizes disagree")
         }
     }

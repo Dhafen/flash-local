@@ -159,6 +159,7 @@ jobs:
         if: github.event_name != 'workflow_dispatch' || !inputs.provisioning_only
         run: |
           python3 scripts/fetch_ream_metadata.py
+          python3 scripts/fetch_ornith_metadata.py
           python3 scripts/make_engram_test_fixture.py
           python3 scripts/make_qwen4exp_test_model.py
           export GGUF_HEADER_FIXTURE="$GITHUB_WORKSPACE/.test-fixtures/ream.header"
@@ -173,12 +174,15 @@ jobs:
             -only-testing:MinirunKitTests/VerifiedGGUFArtifactTests \
             -only-testing:MinirunKitTests/GGUFModelTransferTests \
             -skip-testing:ModelAdaptersTests/Qwen4ExpDecoderParityTests \
+            -skip-testing:ModelAdaptersTests/Qwen35MoEDecoderParityTests \
             -skip-testing:ModelAdaptersTests/PublishedQwen35TokenizerParityTests \
             -skip-testing:ModelAdaptersTests/CanonicalQwen35TokenizerParityTests \
             -skip-testing:ModelAdaptersTests/Qwen4ExpCPUReferenceTests \
             -resultBundlePath streaming-tests.xcresult 2>&1 | tee streaming-tests.log | tail -60
           if grep -E 'PublishedGGUFTests.*skipped' streaming-tests.log; then exit 1; fi
           if grep -E 'PublishedQwen4ExpLayoutTests.*skipped' streaming-tests.log; then exit 1; fi
+          if grep -E 'PublishedOrnithLayoutTests.*skipped' streaming-tests.log; then exit 1; fi
+          grep -E 'testPinnedOrnithHeaderValidatesTheCompleteTextTrunk.*passed' streaming-tests.log
           grep 'REAM_URLSESSION_RANGE bytes=8 exact206=true sameETag=true closed=true noTensorPayload=true' streaming-tests.log
 
       - name: Synthetic full-graph logits against pinned CPU llama.cpp
@@ -189,6 +193,7 @@ jobs:
           export TEST_RUNNER_GGUF_HEADER_FIXTURE="$GGUF_HEADER_FIXTURE"
           xcodebuild test -scheme minirun-Package $XCODEBUILD_FLAGS -destination 'platform=macOS' \
             -only-testing:ModelAdaptersTests/Qwen4ExpDecoderParityTests \
+            -only-testing:ModelAdaptersTests/Qwen35MoEDecoderParityTests \
             -only-testing:ModelAdaptersTests/PublishedQwen35TokenizerParityTests \
             -only-testing:ModelAdaptersTests/CanonicalQwen35TokenizerParityTests \
             -only-testing:MinirunRunnersTests/Qwen4ExpTextGenerationParityTests \
@@ -196,6 +201,8 @@ jobs:
             -only-testing:MinirunRunnersTests/Qwen4ExpLocalParityTests \
             -resultBundlePath parity-tests.xcresult 2>&1 | tee parity-tests.log | tail -80
           if grep -E 'Qwen4ExpDecoderParityTests.*skipped' parity-tests.log; then exit 1; fi
+          if grep -E 'Qwen35MoEDecoderParityTests.*skipped' parity-tests.log; then exit 1; fi
+          grep 'ORNITH_TEXT_SESSION exactPromptIDs=true exactGeneratedIDs=true prefixReuse=true syntheticOnly=true' parity-tests.log
           grep -E 'testCompleteMixedQuantizedGraphMatchesPinnedLlamaCPPLogits.*passed' parity-tests.log
           if grep -E 'PublishedQwen35TokenizerParityTests.*skipped' parity-tests.log; then exit 1; fi
           if grep -E 'CanonicalQwen35TokenizerParityTests.*skipped' parity-tests.log; then exit 1; fi
@@ -365,6 +372,7 @@ jobs:
             .work/runtime/build-manifest.json
             .test-fixtures/*reference*.json
             .test-fixtures/synthetic-qwen4exp*.json
+            .test-fixtures/synthetic-ornith*.json
           include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 14

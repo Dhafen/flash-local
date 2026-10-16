@@ -12,9 +12,9 @@ import struct
 from fetch_ream_metadata import HEADER_SHA256
 
 
-def metadata_prefix(header):
+def metadata_prefix(header, expected_sha256=HEADER_SHA256):
     """Return exact KV boundary and chat template without retaining vocab arrays."""
-    if hashlib.sha256(header).hexdigest() != HEADER_SHA256:
+    if hashlib.sha256(header).hexdigest() != expected_sha256:
         raise RuntimeError("Tokenizer source header hash mismatch")
     position = 24
 

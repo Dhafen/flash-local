@@ -86,6 +86,30 @@ def main():
             run([build / "flash-local-session-reference", chat,
                  root / ".test-fixtures/synthetic-qwen4exp-chat.json",
                  root / ".test-fixtures/qwen4exp-session-reference.json"])
+            # A separate actual qwen35moe graph: ordinary residual/norm blocks,
+            # SiLU GDN, shared/routed experts, text MRoPE and an unused MTP block.
+            run(["python3", root / "scripts/make_qwen4exp_test_model.py", "--ornith"])
+            run([build / "flash-local-reference", root / ".test-fixtures/synthetic-ornith.gguf",
+                 root / ".test-fixtures/llama-ornith-reference-logits.json"])
+            run(["python3", root / "scripts/make_qwen4exp_test_model.py", "--ornith", "--mixed"])
+            ornith_mixed = root / ".test-fixtures/synthetic-ornith-mixed.gguf"
+            run([build / "flash-local-mixed-fixture",
+                 root / ".test-fixtures/synthetic-ornith-mixed-source.gguf", ornith_mixed, "--ornith"])
+            if ornith_mixed.stat().st_size > 32 << 20:
+                raise RuntimeError("Ornith reference accepts only the generated random fixture")
+            manifest = json.loads((root / ".test-fixtures/synthetic-ornith-mixed-source.json").read_text())
+            manifest.update(fileName=ornith_mixed.name, fileByteCount=ornith_mixed.stat().st_size,
+                            sha256=hashlib.sha256(ornith_mixed.read_bytes()).hexdigest())
+            (root / ".test-fixtures/synthetic-ornith-mixed.json").write_text(json.dumps(manifest, indent=2) + "\n")
+            run([build / "flash-local-reference", ornith_mixed,
+                 root / ".test-fixtures/llama-ornith-mixed-reference-logits.json"])
+            run(["python3", root / "scripts/make_qwen4exp_test_model.py", "--ornith", "--chat"])
+            ornith_chat = root / ".test-fixtures/synthetic-ornith-chat.gguf"
+            if ornith_chat.stat().st_size > 1_000_000:
+                raise RuntimeError("Only the tiny random Ornith text fixture may run")
+            run([build / "flash-local-session-reference", ornith_chat,
+                 root / ".test-fixtures/synthetic-ornith-chat.json",
+                 root / ".test-fixtures/ornith-session-reference.json"])
         except Exception:
             output.flush()
             print(log.read_text(encoding="utf-8", errors="replace")[-18000:])

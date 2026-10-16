@@ -93,9 +93,9 @@ public enum Qwen4ExpLocalParity {
                            budgetBytes: UInt64 = 4_000_000_000, rawCacheBytes: Int = 64 << 20,
                            cancellationRequested: @escaping @Sendable () -> Bool = { false },
                            onProgress: (Phase, Int, Int) -> Void = { _, _, _ in }) throws -> Report {
-        let layout = try Qwen4ExpDecoder.Layout(index: artifact.index)
-        guard (1...32).contains(tokenIDs.count), tokenIDs.allSatisfy({ (0..<layout.vocabularySize).contains($0) }),
-              UInt64(layout.vocabularySize) * UInt64(tokenIDs.count) * 4 <= 64 << 20,
+        let vocabularySize = try GGUFStreamedDecoder.vocabularySize(index: artifact.index)
+        guard (1...32).contains(tokenIDs.count), tokenIDs.allSatisfy({ (0..<vocabularySize).contains($0) }),
+              UInt64(vocabularySize) * UInt64(tokenIDs.count) * 4 <= 64 << 20,
               budgetBytes <= 5_500_000_000 else { throw GGUFError.limit("short local parity input/output bound") }
         let reference = try cpuPass(artifact: artifact, tokens: tokenIDs, budget: budgetBytes,
             cancelled: cancellationRequested, progress: onProgress)
@@ -131,7 +131,7 @@ public enum Qwen4ExpLocalParity {
             if cancelled() { throw CancellationError() }
             let started = ProcessInfo.processInfo.systemUptime
             progress(.streamedMLX, 0, tokens.count)
-            let decoder = try Qwen4ExpDecoder(artifact: artifact, contextTokens: 128,
+            let decoder = try GGUFStreamedDecoder(artifact: artifact, contextTokens: 128,
                 budgetBytes: budget, rawCacheBytes: rawCacheBytes)
             var peak: UInt64 = 0, positions: [Position] = []
             decoder.onFootprintObservation = { peak = max(peak, $0.footprintBytes) }

@@ -58,7 +58,7 @@ public final class Qwen4ExpCPUReference {
         guard (16...128).contains(contextTokens), budgetBytes <= 5_500_000_000 else {
             throw GGUFError.limit("short CPU reference context or memory budget")
         }
-        _ = try Qwen4ExpDecoder.Layout(index: artifact.index)
+        _ = try GGUFStreamedDecoder.vocabularySize(index: artifact.index)
         let governor = Governor(budget: budgetBytes, cancelled: cancellationRequested)
         self.artifact = artifact; self.governor = governor
         try artifact.assertUnchanged()

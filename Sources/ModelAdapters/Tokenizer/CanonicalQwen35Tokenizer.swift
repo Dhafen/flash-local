@@ -12,6 +12,7 @@ import MinirunKit
 /// separate flr_* CPU diagnostic API is not invoked by this tokenizer.
 public final class CanonicalQwen35Tokenizer {
     public static let supportedTemplateSHA256 = "c3cf9e34abf4f9e36c2d72165aa9c132d3e2a725b6c2586aaa3a8af9d7a81041"
+    public static let supportedOrnithTemplateSHA256 = "f55f52930aa8bf44ab5cb85f99370fcc3c56e9a85640b812086d5330bce5d86b"
     public struct ChatPrompt: Equatable, Sendable {
         public let renderedText: String
         public let tokenIDs: [Int]
@@ -79,8 +80,10 @@ public final class CanonicalQwen35Tokenizer {
 
     public func chat(_ messages: [Qwen35ChatMessage], maximumTokens: Int) throws -> ChatPrompt {
         try artifact.assertUnchanged()
+        let expectedTemplate = artifact.index.metadata["general.architecture"]?.text == "qwen35moe"
+            ? Self.supportedOrnithTemplateSHA256 : Self.supportedTemplateSHA256
         guard let template = artifact.index.metadata["tokenizer.chat_template"]?.text,
-              SHA256.hash(data: Data(template.utf8)).map({ String(format: "%02x", $0) }).joined() == Self.supportedTemplateSHA256 else {
+              SHA256.hash(data: Data(template.utf8)).map({ String(format: "%02x", $0) }).joined() == expectedTemplate else {
             throw GGUFError.unsupported("GGUF chat template differs from the pinned no-thinking text-chat contract")
         }
         guard !messages.isEmpty, messages.count <= 4096 else { throw GGUFError.limit("chat message count") }
