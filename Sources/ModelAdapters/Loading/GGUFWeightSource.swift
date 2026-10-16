@@ -26,6 +26,7 @@ public struct GGUFProjectionStatistics: Codable, Equatable, Sendable {
     public private(set) var residentWeightBytesReused: UInt64? = 0
     public private(set) var evaluationBatches: UInt64? = 0
     public private(set) var canonicalCPUKVCalls: UInt64? = 0
+    public private(set) var pairedProjectionBatches: UInt64? = 0
 
     mutating func record(_ report: GGUFLinearReport, roundingSeconds: Double = 0, rounded: Bool = false) throws {
         func add(_ a: UInt64, _ b: UInt64) throws -> UInt64 {
@@ -33,10 +34,15 @@ public struct GGUFProjectionStatistics: Codable, Equatable, Sendable {
             guard !value.overflow else { throw GGUFError.limit("projection counter overflow") }
             return value.partialValue
         }
-        calls = try add(calls, 1); tiles = try add(tiles, UInt64(report.tiles))
+        let count = report.logicalProjectionCount ?? 1
+        guard (1...2).contains(count), count == 1 || report.execution == .packedMetal else {
+            throw GGUFError.invalid("logical projection count")
+        }
+        calls = try add(calls, UInt64(count)); tiles = try add(tiles, UInt64(report.tiles))
         logicalWeightBytes = try add(logicalWeightBytes, report.logicalWeightBytes)
-        packedMetalCalls = try add(packedMetalCalls ?? 0, report.execution == .packedMetal ? 1 : 0)
-        canonicalCPUKVCalls = try add(canonicalCPUKVCalls ?? 0, report.execution == .canonicalCPUKV ? 1 : 0)
+        packedMetalCalls = try add(packedMetalCalls ?? 0, report.execution == .packedMetal ? UInt64(count) : 0)
+        canonicalCPUKVCalls = try add(canonicalCPUKVCalls ?? 0, report.execution == .canonicalCPUKV ? UInt64(count) : 0)
+        pairedProjectionBatches = try add(pairedProjectionBatches ?? 0, count == 2 ? 1 : 0)
         packedWeightCopyBytes = try add(packedWeightCopyBytes ?? 0, report.packedWeightCopyBytes ?? 0)
         residentWeightBytesReused = try add(residentWeightBytesReused ?? 0, report.residentWeightBytesReused ?? 0)
         evaluationBatches = try add(evaluationBatches ?? 0, UInt64(report.evaluationBatches ?? 0))
@@ -67,11 +73,13 @@ public struct GGUFProjectionStatistics: Codable, Equatable, Sendable {
         value.activationRoundingSeconds = activationRoundingSeconds - earlier.activationRoundingSeconds
         for (a, b) in [(packedMetalCalls, earlier.packedMetalCalls), (packedWeightCopyBytes, earlier.packedWeightCopyBytes),
                        (residentWeightBytesReused, earlier.residentWeightBytesReused),
-                       (canonicalCPUKVCalls, earlier.canonicalCPUKVCalls)] {
+                       (canonicalCPUKVCalls, earlier.canonicalCPUKVCalls),
+                       (pairedProjectionBatches, earlier.pairedProjectionBatches)] {
             guard (a ?? 0) >= (b ?? 0) else { throw GGUFError.invalid("packed projection counters went backwards") }
         }
         value.packedMetalCalls = (packedMetalCalls ?? 0) - (earlier.packedMetalCalls ?? 0)
         value.canonicalCPUKVCalls = (canonicalCPUKVCalls ?? 0) - (earlier.canonicalCPUKVCalls ?? 0)
+        value.pairedProjectionBatches = (pairedProjectionBatches ?? 0) - (earlier.pairedProjectionBatches ?? 0)
         value.packedWeightCopyBytes = (packedWeightCopyBytes ?? 0) - (earlier.packedWeightCopyBytes ?? 0)
         value.residentWeightBytesReused = (residentWeightBytesReused ?? 0) - (earlier.residentWeightBytesReused ?? 0)
         guard (evaluationBatches ?? 0) >= (earlier.evaluationBatches ?? 0) else {
@@ -217,6 +225,43 @@ public final class GGUFWeightSource {
         try artifact.assertUnchanged()
         try projectionStatistics.record(result.report, roundingSeconds: roundingSeconds, rounded: tensor.quantization != .f32)
         return result.output
+    }
+
+    /// Fuse eligible gate/up rows without changing weights or row reductions.
+    /// Different formats, oversized pairs and the independent dequantized
+    /// control retain the existing separate execution path.
+    func linearPair(_ x: MLXArray, left leftName: String, right rightName: String,
+                    experts: [UInt64]? = nil, enabled: Bool = true) throws -> (MLXArray, MLXArray) {
+        try artifact.assertUnchanged()
+        guard !closed, let left = artifact.index.tensors[leftName], let right = artifact.index.tensors[rightName] else {
+            throw GGUFError.invalid("paired projection tensors or closed source")
+        }
+        let selected = experts?.count ?? 1
+        let maximumBytes = experts == nil ? 4 << 20 : 16 << 20
+        if enabled, execution == .packedMetal, leftName != rightName,
+           left.dimensions == right.dimensions, left.dimensions.count == (experts == nil ? 2 : 3),
+           left.quantization == right.quantization, selected > 0, selected <= 64,
+           let columns = Int(exactly: left.dimensions[0]), let rows = Int(exactly: left.dimensions[1]),
+           (1...4096).contains(rows), left.rowBytes <= UInt64(maximumBytes / selected / 2 / rows),
+           left.rowBytes <= UInt64(tileBytes / rows),
+           x.ndim == 2, x.shape[1] == columns, x.shape[0] > 0,
+           experts == nil || x.shape[0] == 1 || x.shape[0] == selected {
+            let started = MonotonicClock.now()
+            let activations = try canonicalActivations(x, type: left.quantization, columns: columns).asType(.float32)
+            let rounding = left.quantization == .f32 ? 0 : MonotonicClock.seconds(since: started)
+            let input = experts == nil ? activations : broadcast(activations, to: [selected, columns])
+            let result = try GGUFStreamedLinear.runPair(input, left: left, right: right, experts: experts,
+                payloadOffset: artifact.index.payloadOffset, sourceIDs: (sourceIDs[leftName]!, sourceIDs[rightName]!),
+                maximumRegionBytes: tileBytes, reader: reader, packedCache: packedCache)
+            try artifact.assertUnchanged()
+            try projectionStatistics.record(result.report, roundingSeconds: rounding, rounded: left.quantization != .f32)
+            return (result.left, result.right)
+        }
+        if let experts {
+            return (try linearExperts(x, tensor: leftName, experts: experts),
+                    try linearExperts(x, tensor: rightName, experts: experts))
+        }
+        return (try linear(x, tensor: leftName), try linear(x, tensor: rightName))
     }
 
     /// A small CPU projection stabilizes K/V values before the FP16 cache.

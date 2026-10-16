@@ -184,6 +184,7 @@ jobs:
           if grep -E 'PublishedOrnithLayoutTests.*skipped' streaming-tests.log; then exit 1; fi
           grep -E 'testPinnedOrnithHeaderValidatesTheCompleteTextTrunk.*passed' streaming-tests.log
           grep 'REAM_URLSESSION_RANGE bytes=8 exact206=true sameETag=true closed=true noTensorPayload=true' streaming-tests.log
+          grep 'GGUF_PAIRED_PROJECTION_BENCH ' streaming-tests.log
 
       - name: Synthetic full-graph logits against pinned CPU llama.cpp
         if: github.event_name != 'workflow_dispatch' || !inputs.provisioning_only
@@ -203,6 +204,8 @@ jobs:
           if grep -E 'Qwen4ExpDecoderParityTests.*skipped' parity-tests.log; then exit 1; fi
           if grep -E 'Qwen35MoEDecoderParityTests.*skipped' parity-tests.log; then exit 1; fi
           grep 'ORNITH_TEXT_SESSION exactPromptIDs=true exactGeneratedIDs=true prefixReuse=true syntheticOnly=true' parity-tests.log
+          grep 'ORNITH_PAIRED_GRAPH mixed=false exactLogitBits=true logicalWorkUnchanged=true fewerEvaluations=true syntheticOnly=true' parity-tests.log
+          grep 'ORNITH_PAIRED_GRAPH mixed=true exactLogitBits=true logicalWorkUnchanged=true fewerEvaluations=true syntheticOnly=true' parity-tests.log
           grep -E 'testCompleteMixedQuantizedGraphMatchesPinnedLlamaCPPLogits.*passed' parity-tests.log
           if grep -E 'PublishedQwen35TokenizerParityTests.*skipped' parity-tests.log; then exit 1; fi
           if grep -E 'CanonicalQwen35TokenizerParityTests.*skipped' parity-tests.log; then exit 1; fi

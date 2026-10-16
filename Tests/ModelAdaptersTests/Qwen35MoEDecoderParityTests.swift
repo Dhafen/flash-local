@@ -187,6 +187,30 @@ final class Qwen35MoEDecoderParityTests: XCTestCase {
             }
         }
     }
+    func testPairedAndSeparateGateUpMatchEverySyntheticGraphLogitBitForBit() throws {
+        for mixed in [false, true] {
+            let (artifact, manifest, _) = try artifact(mixed: mixed)
+            let paired = try Qwen35MoEDecoder(artifact: artifact, contextTokens: manifest.contextTokens,
+                budgetBytes: 5_500_000_000, rawCacheBytes: 2 << 20, residentCacheBytes: 16 << 20)
+            let control = try Qwen35MoEDecoder(artifact: artifact, contextTokens: manifest.contextTokens,
+                budgetBytes: 5_500_000_000, rawCacheBytes: 2 << 20, residentCacheBytes: 16 << 20,
+                pairGateUpProjections: false)
+            for token in manifest.tokens {
+                let a = try paired.logits(for: token).asArray(Float.self)
+                let b = try control.logits(for: token).asArray(Float.self)
+                XCTAssertEqual(a.map(\.bitPattern), b.map(\.bitPattern))
+            }
+            XCTAssertGreaterThan(paired.projectionStatistics.pairedProjectionBatches ?? 0, 0)
+            XCTAssertEqual(control.projectionStatistics.pairedProjectionBatches, 0)
+            XCTAssertEqual(paired.projectionStatistics.calls, control.projectionStatistics.calls)
+            XCTAssertEqual(paired.projectionStatistics.logicalWeightBytes, control.projectionStatistics.logicalWeightBytes)
+            XCTAssertLessThan(paired.projectionStatistics.evaluationBatches ?? UInt64.max,
+                              control.projectionStatistics.evaluationBatches ?? 0)
+            XCTAssertLessThanOrEqual(paired.residentCacheStatistics.residentPayloadBytes, 16 << 20)
+            print("ORNITH_PAIRED_GRAPH mixed=\(mixed) exactLogitBits=true logicalWorkUnchanged=true fewerEvaluations=true syntheticOnly=true")
+        }
+    }
+
     func testOrnithCheckpointHeadElisionAndFailedStepRecovery() throws {
         let (artifact, manifest, _) = try artifact(mixed: true)
         let full = try Qwen35MoEDecoder(artifact: artifact, contextTokens: manifest.contextTokens,

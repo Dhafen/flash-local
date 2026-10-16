@@ -22,6 +22,7 @@ public final class Qwen35MoEDecoder {
     }
     #endif
     private let weights: GGUFWeightSource
+    private let pairGateUpProjections: Bool
     private var attentionCaches: [Int: Qwen4ExpTextAttention.Cache] = [:]
     private var recurrentStates: [Int: MLXArray] = [:]
     private var convolutionHistories: [Int: MLXArray] = [:]
@@ -45,7 +46,9 @@ public final class Qwen35MoEDecoder {
 
     public init(artifact: VerifiedGGUFArtifact, contextTokens: Int, budgetBytes: UInt64,
                 workingReserveBytes: UInt64 = 1_000_000_000, rawCacheBytes: Int = 64 << 20,
-                residentCacheBytes: Int = 0, execution: GGUFLinearExecution = .packedMetal) throws {
+                residentCacheBytes: Int = 0, execution: GGUFLinearExecution = .packedMetal,
+                pairGateUpProjections: Bool = true) throws {
+        self.pairGateUpProjections = pairGateUpProjections
         layout = try Qwen35MoEConfig(index: artifact.index)
         memoryPlan = try layout.memoryPlan(contextTokens: contextTokens, budgetBytes: budgetBytes,
             reservedWorkingBytes: workingReserveBytes)
@@ -222,8 +225,8 @@ public final class Qwen35MoEDecoder {
         let selected = try Qwen4ExpRouting.select(logits: weights.linear(input, tensor: p + "ffn_gate_inp.weight"), topK: c.expertsPerToken)
         let experts = selected.ids[0].map { UInt64($0) }
         try check(cancelled)
-        let gate = try weights.linearExperts(input, tensor: p + "ffn_gate_exps.weight", experts: experts)
-        let up = try weights.linearExperts(input, tensor: p + "ffn_up_exps.weight", experts: experts)
+        let (gate, up) = try weights.linearPair(input, left: p + "ffn_gate_exps.weight",
+            right: p + "ffn_up_exps.weight", experts: experts, enabled: pairGateUpProjections)
         let down = try weights.linearExperts(K3Activation.silu(gate) * up, tensor: p + "ffn_down_exps.weight", experts: experts)
         var routed = MLXArray.zeros([1, c.hiddenSize], dtype: .float32)
         for slot in experts.indices { routed = routed + down[slot..<(slot+1)] * selected.weights[0, slot] }
@@ -231,8 +234,8 @@ public final class Qwen35MoEDecoder {
         #if DEBUG
         observe("ffn_moe_out-\(layer)", routed)
         #endif
-        let sharedGate = try weights.linear(input, tensor: p + "ffn_gate_shexp.weight")
-        let sharedUp = try weights.linear(input, tensor: p + "ffn_up_shexp.weight")
+        let (sharedGate, sharedUp) = try weights.linearPair(input, left: p + "ffn_gate_shexp.weight",
+            right: p + "ffn_up_shexp.weight", enabled: pairGateUpProjections)
         let shared = try weights.linear(K3Activation.silu(sharedGate) * sharedUp, tensor: p + "ffn_down_shexp.weight")
         let scalar = try sigmoid(sum(input * weights.smallTensor(p + "ffn_gate_inp_shexp.weight"), axis: -1, keepDims: true))
         let gatedShared = shared * scalar

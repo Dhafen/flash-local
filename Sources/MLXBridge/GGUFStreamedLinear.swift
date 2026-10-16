@@ -38,21 +38,100 @@ public struct GGUFLinearReport: Sendable, Codable {
     public let packedWeightCopyBytes: UInt64?
     public let residentWeightBytesReused: UInt64?
     public var evaluationBatches: Int? = nil
+    /// A paired gate/up dispatch still performs two logical projections.
+    public var logicalProjectionCount: Int? = nil
 
     public init(tiles: Int, logicalWeightBytes: UInt64, scratchBytes: Int, peakCopiedWeightBytes: Int,
                 boundedOutputBytes: Int, wallSeconds: Double, waitOnIOSeconds: Double,
                 dequantizeAndCopySeconds: Double, computeSeconds: Double, execution: GGUFLinearExecution? = nil,
-                packedWeightCopyBytes: UInt64? = nil, residentWeightBytesReused: UInt64? = nil, evaluationBatches: Int? = nil) {
+                packedWeightCopyBytes: UInt64? = nil, residentWeightBytesReused: UInt64? = nil, evaluationBatches: Int? = nil,
+                logicalProjectionCount: Int? = nil) {
         self.tiles = tiles; self.logicalWeightBytes = logicalWeightBytes; self.scratchBytes = scratchBytes
         self.peakCopiedWeightBytes = peakCopiedWeightBytes; self.boundedOutputBytes = boundedOutputBytes
         self.wallSeconds = wallSeconds; self.waitOnIOSeconds = waitOnIOSeconds
         self.dequantizeAndCopySeconds = dequantizeAndCopySeconds; self.computeSeconds = computeSeconds
         self.execution = execution; self.packedWeightCopyBytes = packedWeightCopyBytes
         self.residentWeightBytesReused = residentWeightBytesReused; self.evaluationBatches = evaluationBatches
+        self.logicalProjectionCount = logicalProjectionCount
     }
 }
 
 public enum GGUFStreamedLinear {
+    /// Two equal-format matrices share the unchanged row-dot kernel. Expert
+    /// rows are interleaved as [left(e0), right(e0), left(e1), right(e1), ...].
+    /// The complete pair fits one bounded dispatch: <=16 MiB for experts or
+    /// <=4 MiB for dense weights, and <=32 MiB while assembling the operands.
+    public static func runPair(
+        _ x: MLXArray, left: GGUFTensor, right: GGUFTensor, experts: [UInt64]? = nil,
+        payloadOffset: UInt64, sourceIDs: (UInt64, UInt64), maximumRegionBytes: Int,
+        reader: TileReader, packedCache: GGUFPackedTileCache? = nil
+    ) throws -> (left: MLXArray, right: MLXArray, report: GGUFLinearReport) {
+        let selected = experts ?? [0]
+        let dimensions = experts == nil ? 2 : 3
+        let maximumBytes = experts == nil ? 4 << 20 : 16 << 20
+        guard left.dimensions == right.dimensions, left.dimensions.count == dimensions,
+              left.quantization == right.quantization, left.name != right.name, sourceIDs.0 != sourceIDs.1,
+              let columns = Int(exactly: left.dimensions[0]), let rows = Int(exactly: left.dimensions[1]),
+              (1...65536).contains(columns), (1...4096).contains(rows),
+              (1...(4 << 20)).contains(maximumRegionBytes), !selected.isEmpty, selected.count <= 64,
+              Set(selected).count == selected.count,
+              left.rowBytes > 0, left.rowBytes == right.rowBytes,
+              left.rowBytes <= UInt64(maximumBytes / selected.count / 2 / rows),
+              left.rowBytes <= UInt64(maximumRegionBytes / rows),
+              x.dtype == .float32, x.ndim == 2, x.shape[1] == columns, x.shape[0] > 0,
+              experts == nil || (x.shape[0] == selected.count && selected.allSatisfy({
+                  $0 < left.dimensions[2] && $0 <= UInt64(UInt32.max)
+              })), rows <= (16 << 20) / 8 / x.shape[0] else {
+            throw GGUFError.limit("paired packed projection shape or staging bound")
+        }
+        let started = MonotonicClock.now(), matrixBytes = rows * Int(left.rowBytes)
+        let packedBytes = matrixBytes * selected.count * 2
+        let regions = try selected.flatMap { expert -> [RegionDescriptor] in
+            let regionID = experts == nil ? UInt64(0) : (expert << 32) | (UInt64(1) << 31)
+            return try [
+                left.region(sourceID: sourceIDs.0, regionID: regionID, payloadOffset: payloadOffset,
+                    rows: 0..<UInt64(rows), expert: experts == nil ? nil : expert),
+                right.region(sourceID: sourceIDs.1, regionID: regionID, payloadOffset: payloadOffset,
+                    rows: 0..<UInt64(rows), expert: experts == nil ? nil : expert)
+            ]
+        }
+        // Keep all selected hits alive before a cold peer can evict them.
+        let lookupStarted = MonotonicClock.now()
+        let retained = try regions.map { try packedCache?.lookup($0) }
+        var ioSeconds = MonotonicClock.seconds(since: lookupStarted)
+        let cold = zip(regions, retained).compactMap { pair -> RegionDescriptor? in
+            guard case .none = pair.1 else { return nil }; return pair.0
+        }
+        try reader.prefetch(cold)
+        var packed: [MLXArray] = [], copied: UInt64 = 0, reused: UInt64 = 0, copySeconds = 0.0
+        for (region, cached) in zip(regions, retained) {
+            if let cached { packed.append(cached); reused += UInt64(region.length); continue }
+            let ioStarted = MonotonicClock.now()
+            let lease = try reader.acquire(region)
+            ioSeconds += MonotonicClock.seconds(since: ioStarted)
+            let copyStarted = MonotonicClock.now()
+            do {
+                defer { lease.release() }
+                let owned = MLXArray(lease.contents.bindMemory(to: UInt8.self), [region.length])
+                try packedCache?.insert(owned, region: region)
+                packed.append(owned); copied += UInt64(region.length)
+            }
+            copySeconds += MonotonicClock.seconds(since: copyStarted)
+        }
+        let computeStarted = MonotonicClock.now()
+        let output = try GGUFPackedLinear.run(x, packed: concatenated(packed), type: left.quantization,
+            rows: rows * 2, columns: columns, stackedWeights: experts != nil)
+        output.eval()
+        let computeSeconds = MonotonicClock.seconds(since: computeStarted)
+        return (output[0..., 0..<rows], output[0..., rows..<(rows * 2)],
+            GGUFLinearReport(tiles: regions.count, logicalWeightBytes: UInt64(packedBytes), scratchBytes: 0,
+                peakCopiedWeightBytes: packedBytes * 2, boundedOutputBytes: x.shape[0] * rows * 2 * 4 * 2,
+                wallSeconds: MonotonicClock.seconds(since: started), waitOnIOSeconds: ioSeconds,
+                dequantizeAndCopySeconds: copySeconds, computeSeconds: computeSeconds,
+                execution: .packedMetal, packedWeightCopyBytes: copied, residentWeightBytesReused: reused,
+                evaluationBatches: 1, logicalProjectionCount: 2))
+    }
+
     /// Selected experts share a dispatch, not weights or activations. A packed
     /// tile contains only the router's choices; at most 16 MiB is copied and
     /// evaluated together, irrespective of model size or expert count.

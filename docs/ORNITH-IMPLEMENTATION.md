@@ -112,12 +112,62 @@ Apple GET timeout before upload; it was never delivered. The client now
 retries bounded read failures, including a timeout during TLS response reading,
 while uncertain writes never repeat. Thirty-two local Python tests pass.
 
-No Ornith phone speed, peak RAM, offline proof, full trained-model numerical
-agreement or quality against Qwen3.8-27B is established yet. Publisher coding
+One short user-provided Ornith phone measurement is recorded below. Offline
+proof, full trained-model numerical agreement and quality against Qwen3.8-27B
+are not established. Publisher coding
 and agent benchmarks use different harnesses, thinking and context policies
 from this initial greedy non-thinking app; those scores cannot be assigned to
 the phone app. Structured tools/thinking history and the authenticated LAN
 server remain future work after the text runtime passes physical validation.
+
+## Phone performance and paired projections
+
+The user supplied a build-80 report from the physical iPhone at
+2026-10-16T17:46:39Z, with the pinned Ornith artifact hash and reported revision
+`c17b9cdc6aef-dirty`. CI's delivery seal binds build 80 to the full source
+`c17b9cdc6aefd6c5471b69c1c321e7bbe00807a4`; the report itself is not independent
+attestation. Only aggregates are retained in project notes, without conversation
+content or token arrays.
+
+| Measurement | Observed in this report |
+| --- | ---: |
+| Completed decode forwards | 16 in 10.719 s, 1.493 forwards/s |
+| Prompt work | 14 evaluated tokens in 16.105 s; zero reused |
+| Total generation elapsed | 26.841 s |
+| Maximum sampled process footprint | 3,872,035,488 bytes |
+| Decode reader bytes | 2,534,213,632; 158,388,352 per forward |
+| Decode projection compute / I/O wait | 5.144 s / 1.711 s |
+| Decode logical packed weights reused | 29,076,611,072 of 31,531,335,680 bytes |
+| Decode evaluation batches | 7,600; 475 per forward |
+
+Compute timing includes the bounded CPU K/V path and command/evaluation work;
+it is not an isolated GPU clock. The two projection categories do not account
+for the entire generation. Reader bytes are not physical controller I/O. The
+92.2% byte reuse includes dense matrices, not just routed experts. The 3.5 GB
+cache is active and this short run fits the configured 5.5 GB budget, but the
+sample does not prove a worst-case bound or longer-context performance. The
+previous REAM trial used a different model, context/history and runtime; its
+0.211 forwards/s is not a controlled optimization benchmark against this run.
+
+The next implementation pairs eligible routed and shared gate/up matrices in
+one dispatch of the existing packed row-dot kernel. It keeps the same dot
+reduction and canonical activation rounding, while rounding shared inputs once
+and removing one evaluation barrier per eligible pair. All eighty main-trunk
+pairs in the official header have equal shapes and quantization. This is a
+layout/dispatch change, without changing or redownloading the model weights.
+Different formats, oversized pairs and the independent dequantized control use
+the existing separate path. Logical projection and byte counts remain
+comparable; the optional `pairedProjectionBatches` reports actual pair use.
+
+Expert pair staging is limited to 16 MiB packed / 32 MiB while assembling;
+dense pairs are limited to 4 MiB packed. Both selected cache hits are retained
+before cold admission, and existing source/region identities remain compatible.
+Tests require independent expected products, original versus paired logit bits,
+cache/poisoned-slot correctness and bounds before I/O. A primary-shape synthetic
+Q4_K benchmark includes reader and assembly costs with warmup and three samples
+for streamed and resident cases. Those pending host results cannot establish a
+phone speed gain. The initial phone baseline is build 80; this optimization is
+not part of that already delivered build.
 
 ## First physical measurement
 
@@ -144,5 +194,5 @@ is not automatically changed by that manual test; record the actual phone
 conditions separately. The information menu's short numerical diagnostic
 compares local CPU and streamed logits for the same verified artifact, prompt
 IDs and positions. Passing those positions does not certify every context or
-task. Longer-context and paired capability tests follow only after this basic
-run is usable; there are no phone results to publish yet.
+task. Longer-context and paired capability tests follow the short baseline;
+neither has been completed by the initial phone measurement.

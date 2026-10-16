@@ -14,16 +14,18 @@ final class GGUFWeightSourceTests: XCTestCase {
         func put(_ value: UInt64, _ count: Int) {
             for i in 0..<count { header.append(UInt8(truncatingIfNeeded: value >> (i * 8))) }
         }
-        put(3, 4); put(3, 8); put(0, 8)
-        for (name, dimensions, offset) in [("experts", [UInt64(4), 5, 3], UInt64(0)),
-                                          ("embedding", [4, 3], 256), ("norm", [4], 320)] {
+        put(3, 4); put(5, 8); put(0, 8)
+        let tensors: [(String, [UInt64], UInt64, UInt64)] = [
+            ("experts", [4, 5, 3], 0, 0), ("embedding", [4, 3], 256, 0), ("norm", [4], 320, 0),
+            ("embedding_peer", [4, 3], 352, 0), ("half_peer", [4, 3], 416, 1)]
+        for (name, dimensions, offset, type) in tensors {
             let bytes = Data(name.utf8); put(UInt64(bytes.count), 8); header.append(bytes)
             put(UInt64(dimensions.count), 4)
             for dimension in dimensions { put(dimension, 8) }
-            put(0, 4); put(offset, 8)
+            put(type, 4); put(offset, 8)
         }
         header.append(Data(repeating: 0, count: ((header.count + 31) / 32 * 32) - header.count))
-        var payload = Data(count: 336)
+        var payload = Data(count: 440)
         func store(_ value: Float, offset: Int) {
             var bits = value.bitPattern.littleEndian
             withUnsafeBytes(of: &bits) { payload.replaceSubrange(offset..<(offset + 4), with: $0) }
@@ -31,6 +33,11 @@ final class GGUFWeightSourceTests: XCTestCase {
         for i in 0..<60 { store(Float(i), offset: i * 4) }
         for i in 0..<12 { store(Float(i + 1), offset: 256 + i * 4) }
         for i in 0..<4 { store(Float(i + 1), offset: 320 + i * 4) }
+        for i in 0..<12 {
+            store(Float(i + 21), offset: 352 + i * 4)
+            var half = Float16(i + 41).bitPattern.littleEndian
+            withUnsafeBytes(of: &half) { payload.replaceSubrange((416 + i * 2)..<(418 + i * 2), with: $0) }
+        }
         header.append(payload)
         let manifest = try GGUFModelManifest(fileName: "model.fixture", fileByteCount: UInt64(header.count),
                                              sha256: FileDigestComputer.sha256(of: header))
@@ -77,7 +84,66 @@ final class GGUFWeightSourceTests: XCTestCase {
         let old = try JSONDecoder().decode(GGUFProjectionStatistics.self, from: report)
         XCTAssertNil(old.packedMetalCalls)
         XCTAssertNil(old.canonicalCPUKVCalls)
+        XCTAssertNil(old.pairedProjectionBatches)
         XCTAssertEqual(old.calls, 1)
+    }
+
+    func testDensePairCountsLogicalWorkOncePerMatrixAndReusesTheExistingCache() throws {
+        try withSource(residentCacheBytes: 96) { source in
+            let x = MLXArray([Float(1), 2, 3, 4], [1, 4])
+            let first = try source.linearPair(x, left: "embedding", right: "embedding_peer")
+            XCTAssertEqual(first.0.asArray(Float.self), [30,70,110])
+            XCTAssertEqual(first.1.asArray(Float.self), [230,270,310])
+            let initial = source.projectionStatistics
+            XCTAssertEqual(initial.calls, 2)
+            XCTAssertEqual(initial.packedMetalCalls, 2)
+            XCTAssertEqual(initial.pairedProjectionBatches, 1)
+            XCTAssertEqual(initial.evaluationBatches, 1)
+            let io = source.readStatistics.bytesRead
+            let again = try source.linearPair(x, left: "embedding", right: "embedding_peer")
+            XCTAssertEqual(again.0.asArray(Float.self).map(\.bitPattern), first.0.asArray(Float.self).map(\.bitPattern))
+            XCTAssertEqual(again.1.asArray(Float.self).map(\.bitPattern), first.1.asArray(Float.self).map(\.bitPattern))
+            XCTAssertEqual(source.readStatistics.bytesRead, io)
+            let work = try source.projectionStatistics.subtracting(initial)
+            XCTAssertEqual(work.calls, 2); XCTAssertEqual(work.pairedProjectionBatches, 1)
+            XCTAssertEqual(work.logicalWeightBytes, 96)
+            XCTAssertEqual(work.residentWeightBytesReused, 96)
+            XCTAssertEqual(work.packedWeightCopyBytes, 0)
+            let before = source.projectionStatistics
+            let control = try source.linearPair(x, left: "embedding", right: "embedding_peer", enabled: false)
+            XCTAssertEqual(control.0.asArray(Float.self), first.0.asArray(Float.self))
+            XCTAssertEqual(control.1.asArray(Float.self), first.1.asArray(Float.self))
+            let separate = try source.projectionStatistics.subtracting(before)
+            XCTAssertEqual(separate.calls, 2); XCTAssertEqual(separate.pairedProjectionBatches, 0)
+            XCTAssertEqual(separate.evaluationBatches, 2)
+            XCTAssertEqual(try JSONDecoder().decode(GGUFProjectionStatistics.self,
+                from: JSONEncoder().encode(source.projectionStatistics)), source.projectionStatistics)
+            XCTAssertThrowsError(try initial.subtracting(source.projectionStatistics))
+            source.shutdown()
+            XCTAssertEqual(first.0.asArray(Float.self), [30,70,110])
+            XCTAssertThrowsError(try source.linearPair(x, left: "embedding", right: "embedding_peer"))
+        }
+    }
+
+    func testPairDifferentFormatsAndRepeatedTensorsKeepTheSeparatePath() throws {
+        try withSource { source in
+            let x = MLXArray([Float(1), 2, 3, 4], [1, 4])
+            let left = try source.linear(x, tensor: "embedding").asArray(Float.self)
+            let right = try source.linear(x, tensor: "half_peer").asArray(Float.self)
+            let before = source.projectionStatistics
+            let pair = try source.linearPair(x, left: "embedding", right: "half_peer")
+            XCTAssertEqual(pair.0.asArray(Float.self), left)
+            XCTAssertEqual(pair.1.asArray(Float.self), right)
+            let work = try source.projectionStatistics.subtracting(before)
+            XCTAssertEqual(work.calls, 2); XCTAssertEqual(work.pairedProjectionBatches, 0)
+            XCTAssertEqual(work.activationRoundingCalls, 1)
+            let repeated = try source.linearPair(x, left: "embedding", right: "embedding")
+            XCTAssertEqual(repeated.0.asArray(Float.self), left)
+            XCTAssertEqual(repeated.1.asArray(Float.self), left)
+            let io = source.readStatistics.bytesRead
+            XCTAssertThrowsError(try source.linearPair(x, left: "absent", right: "embedding"))
+            XCTAssertEqual(source.readStatistics.bytesRead, io)
+        }
     }
 
     func testSmallCanonicalKVProjectionSharesProtectedCacheAndRejectsOtherShapes() throws {
