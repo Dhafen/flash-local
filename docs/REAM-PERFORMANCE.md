@@ -7,7 +7,13 @@ process footprint. These are a single screen observation, not a measured
 decode rate, peak RAM or physical NAND traffic. The reader total also includes
 prompt processing. No captured conversation is stored in this repository.
 
-## Changes under validation
+## Implemented in TestFlight 0.1.0 (63)
+
+App source `ddfa752` passed the complete delivery pipeline in
+[run 38877522212](https://github.com/Dhafen/flash-local/actions/runs/38877522212).
+Apple confirms availability to the configured private internal tester.
+Phone performance remains to be measured; the implementation below is not
+an observed speedup on the user's iPhone.
 
 - Fused Metal GGUF dequantization/dot products preserve F32, F16, BF16, Q4_0,
   Q5_0, Q8_0, Q4_K and Q6_K layouts. The original CPU-dequantize/FP32-matmul
@@ -36,7 +42,7 @@ contains 43,902,566,400 expert bytes, 7,875,448,490 token/PLE table bytes and
 4,326,571,520 other weight bytes. The Q8_0 output head alone is 675,430,400
 bytes. These are tensor byte arithmetic, not measured I/O or useful speed.
 
-The candidate app policy is 1,024 context, at most 5,500,000,000 total process
+The build 63 app policy is 1,024 context, at most 5,500,000,000 total process
 bytes, 4,250,000,000 admitted packed payload bytes and 64 MiB raw slots.
 KV, recurrent state, a 1,000,000,000-byte working reserve and both caches must
 fit the decoder's admission plan. Live footprint/OS-headroom checks remain
@@ -64,6 +70,27 @@ timing is a resident packed Metal projection. Both omit file I/O and canonical
 activation rounding. This separates the kernel/copy tradeoff from storage
 and must not be presented as an end-to-end phone speedup. Debug test timings
 also do not establish Release performance. CI runs no trained model inference.
+
+Run 38877522212 at `ddfa752` measured these Debug host medians (three samples,
+macOS 26.6.2 build 25G83, 7,516,192,768 bytes physical host memory):
+
+| Synthetic format | CPU dequantize/copy/FP32 matmul | Resident packed Metal |
+| --- | ---: | ---: |
+| Q4_K | 8.412 ms | 3.815 ms |
+| Q5_0 | 4.949 ms | 1.167 ms |
+| Q8_0 | 4.884 ms | 1.073 ms |
+
+These exclude storage and activation rounding and have visible host timing
+noise; they do not predict phone tokens/s. The complete mixed-quant fixture
+matched all vocabulary logits over five positions with maximum absolute
+error `5.9604645e-8` and maximum relative L2 `3.287112445836717e-7` against the
+pinned CPU reference, with unchanged thresholds `0.01` / `0.001`. Complete
+chat prompt/generated IDs also matched, including cancellation/reset and
+partial-report checks. The run passed 563 app tests and 473 package tests
+(nine explicit environment-specific skips), plus the separate storage/kernel
+and full-graph gates. All twelve Mac/iOS light/dark missing/explicit-preview/
+About captures were visually inspected. These are synthetic/Simulator/host
+checks; full trained-model and physical-phone verification remain separate.
 
 Physical follow-up needs the same short input on the same model and phone,
 time to first output, decode forward tokens/s, prompt/decode reader bytes,

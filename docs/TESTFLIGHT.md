@@ -1,5 +1,32 @@
 # Private internal TestFlight delivery
 
+Version **0.1.0 (63)** from app source
+`ddfa7526d8291f7a4b705b985a36da025240626f` is available to the configured own
+internal tester. [Full run 38877522212](https://github.com/Dhafen/flash-local/actions/runs/38877522212)
+concluded **success**, including the test gates, Simulator review, device
+Release archive, actual Apple distribution export and upload/availability
+confirmation. A subsequent read-only Apple audit reconfirmed `VALID`,
+`INTERNAL_ONLY`, `IN_BETA_TESTING`, exactly the configured private group and
+unchanged sole account-holder membership. No public link, additional tester
+or automatic access to all builds was enabled.
+
+The unsigned arm64 device app was 28,234,349 bytes without model payload.
+Both memory entitlements and the privacy manifest were verified in the
+Apple-signed export. The final IPA SHA-256 is
+`925affddeb1645bbb549fe34c257c76ef99ea10593621259e325b2ba9d954b1e`.
+The archive report intentionally describes the unsigned intermediate; the
+export seal confirms signing, and the separate delivery report confirms
+upload and availability. Those stages must not be conflated.
+
+This update contains the [first performance revision](REAM-PERFORMANCE.md)
+and keeps the same model filename/hash. Update through TestFlight without
+uninstalling the app or downloading another model copy. The user reports
+very slow text generation on physical iPhone with the previous build 56.
+Build 63 phone speed/peak RAM and trained-model numerical/offline/long-context
+proof remain outstanding; TestFlight availability does not establish them.
+
+## Previous delivery: build 56
+
 Version **0.1.0 (56)** from app source `5b602d2` was built, signed and uploaded
 by run `38791263363`. All preceding test/build gates passed. The exported Apple
 signature and App Store profile contained both increased-memory-limit and
@@ -16,9 +43,6 @@ confirmed `IN_BETA_TESTING`, exactly the configured group, and unchanged sole
 account-holder membership. The original CI conclusion remains failure; the
 separately recorded API recovery is the delivery evidence. No other testers,
 public links or automatic access to all builds were enabled.
-
-Installation and inference on the user's physical iPhone remain unverified.
-TestFlight availability does not prove the model, memory or context goals.
 
 Apple requires the app record to be created on its website, not through the
 apps REST resource:
