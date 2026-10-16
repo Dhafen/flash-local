@@ -72,7 +72,7 @@ public final class GGUFPackedTileCache {
         return true
     }
 
-    func lookup(_ region: RegionDescriptor) throws -> MLXArray? {
+    public func lookup(_ region: RegionDescriptor) throws -> MLXArray? {
         guard let entry = entries[region.identity] else { return nil }
         guard entry.region == region else { throw GGUFError.invalid("resident cache identity changed range") }
         let nextHits = hits.addingReportingOverflow(1)
@@ -86,7 +86,7 @@ public final class GGUFPackedTileCache {
         return entry.array
     }
 
-    func insert(_ array: MLXArray, region: RegionDescriptor) throws {
+    public func insert(_ array: MLXArray, region: RegionDescriptor) throws {
         let evictable = evictableSources.contains(region.identity.sourceID)
         guard admittedSources.contains(region.identity.sourceID) || evictable else { return }
         guard array.dtype == .uint8, array.size == region.length,
