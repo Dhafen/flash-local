@@ -10,10 +10,10 @@ public enum GGUFLinearExecution: String, Codable, Sendable {
     case packedMetal, dequantized
 }
 
-/// A fixed admission list prevents a sequential sweep of cold expert weights
-/// from evicting the dense matrices used at every position. Payload capacity is
-/// explicit; allocator overhead is additionally covered by the process reserve
-/// and live footprint checks in the runner. Confined to its weight executor.
+/// Protected dense admission plus an optional bounded LRU for routed experts.
+/// Both share the stated payload ceiling; experts cannot evict dense entries.
+/// LRU links contain identities rather than strong node cycles. Allocator
+/// overhead is covered by the working reserve and live footprint checks.
 public final class GGUFPackedTileCache {
     public struct Statistics: Codable, Equatable, Sendable {
         public let capacityBytes: Int
@@ -21,27 +21,49 @@ public final class GGUFPackedTileCache {
         public let entries: Int
         public let hits: UInt64
         public let reusedPayloadBytes: UInt64
+        public var evictableCapacityBytes: Int? = nil
+        public var evictablePayloadBytes: Int? = nil
+        public var evictableHits: UInt64? = nil
+        public var evictions: UInt64? = nil
     }
-    private struct Entry {
+    private final class Entry {
         let region: RegionDescriptor
         let array: MLXArray
+        var previous: RegionIdentity?
+        var next: RegionIdentity?
+        init(region: RegionDescriptor, array: MLXArray) { self.region = region; self.array = array }
     }
     public let capacityBytes: Int
     private let admittedSources: Set<UInt64>
+    private let evictableSources: Set<UInt64>
+    private let evictableCapacityBytes: Int
     private var entries: [RegionIdentity: Entry] = [:]
     private var bytes = 0
     private var hits: UInt64 = 0
     private var reused: UInt64 = 0
+    private var evictableBytes = 0
+    private var evictableHits: UInt64 = 0
+    private var evictions: UInt64 = 0
+    private var oldest: RegionIdentity?
+    private var newest: RegionIdentity?
 
-    public init(capacityBytes: Int, admittedSources: Set<UInt64>) throws {
+    public init(capacityBytes: Int, admittedSources: Set<UInt64>,
+                evictableSources: Set<UInt64> = [], evictableCapacityBytes: Int = 0) throws {
         guard capacityBytes >= 0, capacityBytes <= 4_500_000_000,
-              admittedSources.count <= 4096 else { throw GGUFError.limit("resident packed cache") }
+              admittedSources.count <= 4096, evictableSources.count <= 4096,
+              admittedSources.isDisjoint(with: evictableSources),
+              evictableCapacityBytes >= 0, evictableCapacityBytes <= capacityBytes else {
+            throw GGUFError.limit("resident packed cache")
+        }
         self.capacityBytes = capacityBytes; self.admittedSources = admittedSources
+        self.evictableSources = evictableSources; self.evictableCapacityBytes = evictableCapacityBytes
     }
 
     public var statistics: Statistics {
         Statistics(capacityBytes: capacityBytes, residentPayloadBytes: bytes,
-            entries: entries.count, hits: hits, reusedPayloadBytes: reused)
+            entries: entries.count, hits: hits, reusedPayloadBytes: reused,
+            evictableCapacityBytes: evictableCapacityBytes, evictablePayloadBytes: evictableBytes,
+            evictableHits: evictableHits, evictions: evictions)
     }
 
     func contains(_ region: RegionDescriptor) throws -> Bool {
@@ -57,19 +79,59 @@ public final class GGUFPackedTileCache {
         let nextReused = reused.addingReportingOverflow(UInt64(region.length))
         guard !nextHits.overflow, !nextReused.overflow else { throw GGUFError.limit("resident cache counters") }
         hits = nextHits.partialValue; reused = nextReused.partialValue
+        if evictableSources.contains(region.identity.sourceID) {
+            evictableHits += 1 // bounded above by the checked total hit counter
+            unlink(entry); appendNewest(entry)
+        }
         return entry.array
     }
 
     func insert(_ array: MLXArray, region: RegionDescriptor) throws {
-        guard admittedSources.contains(region.identity.sourceID) else { return }
+        let evictable = evictableSources.contains(region.identity.sourceID)
+        guard admittedSources.contains(region.identity.sourceID) || evictable else { return }
         guard array.dtype == .uint8, array.size == region.length,
-              region.length <= capacityBytes - bytes, entries.count < 16384,
               entries[region.identity] == nil else { throw GGUFError.limit("resident packed tile admission") }
-        entries[region.identity] = Entry(region: region, array: array)
+        if evictable && region.length > evictableCapacityBytes { return }
+        while region.length > capacityBytes - bytes || entries.count >= 16384 ||
+            (evictable && region.length > evictableCapacityBytes - evictableBytes) {
+            if oldest == nil {
+                if evictable { return } // protected dense payload always takes precedence
+                throw GGUFError.limit("resident packed tile admission")
+            }
+            try evictOldest()
+        }
+        let entry = Entry(region: region, array: array)
+        entries[region.identity] = entry
         bytes += region.length
+        if evictable { evictableBytes += region.length; appendNewest(entry) }
     }
 
-    public func clear() { entries.removeAll(); bytes = 0 }
+    private func unlink(_ entry: Entry) {
+        if let previous = entry.previous { entries[previous]?.next = entry.next }
+        else { oldest = entry.next }
+        if let next = entry.next { entries[next]?.previous = entry.previous }
+        else { newest = entry.previous }
+        entry.previous = nil; entry.next = nil
+    }
+    private func appendNewest(_ entry: Entry) {
+        entry.previous = newest; entry.next = nil
+        if let newest { entries[newest]?.next = entry.region.identity }
+        else { oldest = entry.region.identity }
+        newest = entry.region.identity
+    }
+    private func evictOldest() throws {
+        guard let oldest, let entry = entries[oldest], evictableSources.contains(oldest.sourceID) else {
+            throw GGUFError.invalid("evictable cache LRU accounting")
+        }
+        let next = evictions.addingReportingOverflow(1)
+        guard !next.overflow else { throw GGUFError.limit("resident cache eviction counter") }
+        unlink(entry); entries.removeValue(forKey: oldest)
+        bytes -= entry.region.length; evictableBytes -= entry.region.length
+        evictions = next.partialValue
+    }
+    public func clear() {
+        entries.removeAll(); bytes = 0; evictableBytes = 0; oldest = nil; newest = nil
+    }
 }
 
 /// Fused GGML dequantization and FP32 dot product: one SIMD group per row.

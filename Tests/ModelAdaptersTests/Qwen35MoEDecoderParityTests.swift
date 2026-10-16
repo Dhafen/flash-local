@@ -62,7 +62,7 @@ final class Qwen35MoEDecoderParityTests: XCTestCase {
         let full = try Qwen35MoEDecoder(artifact: artifact, contextTokens: manifest.contextTokens,
             budgetBytes: 5_500_000_000, rawCacheBytes: 2 << 20)
         let lean = try Qwen35MoEDecoder(artifact: artifact, contextTokens: manifest.contextTokens,
-            budgetBytes: 5_500_000_000, rawCacheBytes: 2 << 20, residentCacheBytes: 4 << 20)
+            budgetBytes: 5_500_000_000, rawCacheBytes: 2 << 20, residentCacheBytes: 16 << 20)
         for token in manifest.tokens.prefix(3) { _ = try full.logits(for: token); try lean.consume(token) }
         let checkpoint = try XCTUnwrap(lean.checkpoint())
         XCTAssertGreaterThan(checkpoint.payloadBytes, 0)
@@ -76,6 +76,9 @@ final class Qwen35MoEDecoderParityTests: XCTestCase {
             for (a, b) in zip(expected, actual) { XCTAssertEqual(a, b, accuracy: 1e-7) }
         }
         XCTAssertLessThan(lean.projectionStatistics.logicalWeightBytes, full.projectionStatistics.logicalWeightBytes)
+        XCTAssertGreaterThan(lean.residentCacheStatistics.evictableHits ?? 0, 0)
+        XCTAssertGreaterThan(lean.residentCacheStatistics.evictablePayloadBytes ?? 0, 0)
+        XCTAssertLessThanOrEqual(lean.residentCacheStatistics.residentPayloadBytes, 16 << 20)
         XCTAssertThrowsError(try lean.logits(for: 1, cancellationRequested: { true }))
         XCTAssertThrowsError(try lean.logits(for: 1))
         try lean.restore(checkpoint)

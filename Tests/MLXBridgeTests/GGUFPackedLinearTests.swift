@@ -99,6 +99,33 @@ final class GGUFPackedLinearTests: XCTestCase {
         cache.clear(); XCTAssertEqual(cache.statistics.residentPayloadBytes, 0)
     }
 
+    func testExpertLRUTouchesHitsWithoutEvictingProtectedDensePayload() throws {
+        let cache = try GGUFPackedTileCache(capacityBytes: 12, admittedSources: [1],
+            evictableSources: [2], evictableCapacityBytes: 8)
+        func region(_ source: UInt64, _ index: UInt64) -> RegionDescriptor {
+            .init(identity: .init(sourceID: source, index: index), offset: index * 4, length: 4)
+        }
+        let dense = region(1, 0), a = region(2, 1), b = region(2, 2), c = region(2, 3)
+        let bytes = MLXArray([UInt8(1), 2, 3, 4])
+        try cache.insert(bytes, region: dense); try cache.insert(bytes, region: a); try cache.insert(bytes, region: b)
+        XCTAssertNotNil(try cache.lookup(a)) // a is newer than b
+        try cache.insert(bytes, region: c)
+        XCTAssertNil(try cache.lookup(b))
+        XCTAssertEqual(try cache.lookup(dense)?.asArray(UInt8.self), [1, 2, 3, 4])
+        XCTAssertNotNil(try cache.lookup(a)); XCTAssertNotNil(try cache.lookup(c))
+        XCTAssertEqual(cache.statistics.residentPayloadBytes, 12)
+        XCTAssertEqual(cache.statistics.evictablePayloadBytes, 8)
+        XCTAssertEqual(cache.statistics.evictions, 1)
+        XCTAssertThrowsError(try cache.lookup(.init(identity: a.identity, offset: 99, length: 4)))
+        cache.clear()
+        XCTAssertEqual(cache.statistics.residentPayloadBytes, 0)
+        XCTAssertEqual(cache.statistics.evictablePayloadBytes, 0)
+        try cache.insert(bytes, region: c)
+        XCTAssertEqual(try cache.lookup(c)?.asArray(UInt8.self), [1, 2, 3, 4])
+        XCTAssertThrowsError(try GGUFPackedTileCache(capacityBytes: 12, admittedSources: [1],
+            evictableSources: [1], evictableCapacityBytes: 8))
+    }
+
     /// Synthetic hosted-device evidence only. Timings are observations, never
     /// a speed assertion or a claim about an iPhone's flash/thermal behavior.
     func testReproduciblePackedVersusFP32ProjectionBenchmark() throws {

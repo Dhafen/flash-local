@@ -48,6 +48,16 @@ not proof that 4K or 65K has been physically tested. The memory arithmetic for
 65,536 positions is 1,342,177,280 KV bytes plus 62,914,560 recurrent-matrix bytes;
 that arithmetic is not measured RAM and requires a different cache allowance.
 
+Whole eligible dense matrices receive protected admission first. The unused
+part of the same 3.5 GB allowance admits selected expert tiles through an
+identity-linked O(1) LRU. Expert churn cannot evict protected dense entries.
+The original REAM policy leaves this LRU disabled. Reports expose the
+evictable capacity, payload, hits and evictions; copied pending groups keep
+their existing 32 MiB bound. Synthetic tests check byte-exact reuse, LRU order,
+poisoned released slots, independent products, zero warm reader bytes and
+full-graph agreement with/without this cache. Host timings do not establish
+phone throughput or cache hit rates.
+
 The app defaults to Ornith and has a model picker. Switching releases the old
 engine first, then restores that model's separate saved chat. It does not
 remove an installed artifact or resume an unrelated download. Empty interrupted

@@ -100,7 +100,8 @@ public final class GGUFWeightSource {
 
     public init(artifact: VerifiedGGUFArtifact, rawCacheBytes: Int,
                 tileBytes: Int = 1 << 20, noCache: Bool = true,
-                execution: GGUFLinearExecution = .packedMetal, residentCacheBytes: Int = 0) throws {
+                execution: GGUFLinearExecution = .packedMetal, residentCacheBytes: Int = 0,
+                cacheSelectedExperts: Bool = false) throws {
         guard (4096...(4 << 20)).contains(tileBytes), rawCacheBytes >= tileBytes * 2,
               rawCacheBytes <= 1_000_000_000, residentCacheBytes >= 0,
               residentCacheBytes <= 4_500_000_000 else { throw GGUFError.limit("weight cache") }
@@ -133,7 +134,12 @@ public final class GGUFWeightSource {
                 admitted.insert(sourceIDs[tensor.name]!); remaining -= Int(tensor.byteCount)
             }
         }
-        packedCache = try GGUFPackedTileCache(capacityBytes: residentCacheBytes, admittedSources: admitted)
+        let stableSourceIDs = sourceIDs
+        let expertSources = cacheSelectedExperts
+            ? Set(artifact.index.tensors.values.filter { $0.dimensions.count == 3 }.map { stableSourceIDs[$0.name]! })
+            : Set<UInt64>()
+        packedCache = try GGUFPackedTileCache(capacityBytes: residentCacheBytes, admittedSources: admitted,
+            evictableSources: expertSources, evictableCapacityBytes: cacheSelectedExperts ? remaining : 0)
         // Leave a spare slot for an urgent cache miss after an advisory
         // lookahead hit is evicted. Production overlaps up to three reads;
         // small two-slot fixtures retain the conservative one-read window.
@@ -202,7 +208,7 @@ public final class GGUFWeightSource {
         let roundingSeconds = tensor.quantization == .f32 ? 0 : MonotonicClock.seconds(since: roundingStart)
         let result = try GGUFStreamedLinear.runExperts(broadcast(activations, to: [experts.count, columns]),
             tensor: tensor, experts: experts, payloadOffset: artifact.index.payloadOffset,
-            sourceID: sourceIDs[name]!, tileRows: rows, reader: reader)
+            sourceID: sourceIDs[name]!, tileRows: rows, reader: reader, packedCache: packedCache)
         try artifact.assertUnchanged()
         try projectionStatistics.record(result.report, roundingSeconds: roundingSeconds, rounded: tensor.quantization != .f32)
         return result.output

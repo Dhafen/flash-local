@@ -47,7 +47,8 @@ public enum GGUFStreamedLinear {
     public static func runExperts(
         _ x: MLXArray, tensor: GGUFTensor, experts: [UInt64], payloadOffset: UInt64,
         sourceID: UInt64, tileRows: Int, reader: TileReader,
-        evaluation: GGUFLinearEvaluation = .boundedBatch
+        evaluation: GGUFLinearEvaluation = .boundedBatch,
+        packedCache: GGUFPackedTileCache? = nil
     ) throws -> (output: MLXArray, report: GGUFLinearReport) {
         guard tensor.dimensions.count == 3, !experts.isEmpty, experts.count <= 64,
               let columns = Int(exactly: tensor.dimensions[0]),
@@ -64,6 +65,7 @@ public enum GGUFStreamedLinear {
         let activations = x.asType(.float32); activations.eval()
         var outputs: [MLXArray] = []
         var logicalBytes: UInt64 = 0
+        var copiedBytes: UInt64 = 0, reusedBytes: UInt64 = 0
         var ioSeconds = 0.0, copySeconds = 0.0, computeSeconds = 0.0
         var pending: [MLXArray] = [], pendingBytes = 0, peakBatchBytes = 0, batches = 0
         func flush() {
@@ -85,16 +87,29 @@ public enum GGUFStreamedLinear {
             }
             // Schedule only the selected experts, in consumption order. The
             // reader's fixed read-ahead window bounds filled/in-flight slots.
-            try reader.prefetch(regions)
+            // Retain/touch every selected cached operand before admitting cold
+            // peers, so eviction cannot discard a hit later in this group.
+            let retained = try regions.map { try packedCache?.lookup($0) }
+            let cold: [RegionDescriptor] = zip(regions, retained).compactMap { pair in
+                guard case .none = pair.1 else { return nil }
+                return pair.0
+            }
+            try reader.prefetch(cold)
             var packed: [MLXArray] = []
-            for region in regions {
+            for (region, cached) in zip(regions, retained) {
+                if let cached {
+                    packed.append(cached); reusedBytes += UInt64(region.length)
+                    logicalBytes += UInt64(region.length); continue
+                }
                 let ioStart = MonotonicClock.now()
                 let lease = try reader.acquire(region)
                 ioSeconds += MonotonicClock.seconds(since: ioStart)
                 let copyStart = MonotonicClock.now()
                 do {
                     defer { lease.release() }
-                    packed.append(MLXArray(lease.contents.bindMemory(to: UInt8.self), [region.length]))
+                    let owned = MLXArray(lease.contents.bindMemory(to: UInt8.self), [region.length])
+                    try packedCache?.insert(owned, region: region)
+                    packed.append(owned); copiedBytes += UInt64(region.length)
                 }
                 copySeconds += MonotonicClock.seconds(since: copyStart)
                 logicalBytes += UInt64(region.length)
@@ -115,7 +130,7 @@ public enum GGUFStreamedLinear {
             boundedOutputBytes: rows * experts.count * 4 * 2,
             wallSeconds: MonotonicClock.seconds(since: started), waitOnIOSeconds: ioSeconds,
             dequantizeAndCopySeconds: copySeconds, computeSeconds: computeSeconds,
-            execution: .packedMetal, packedWeightCopyBytes: logicalBytes, residentWeightBytesReused: 0,
+            execution: .packedMetal, packedWeightCopyBytes: copiedBytes, residentWeightBytesReused: reusedBytes,
             evaluationBatches: batches))
     }
 

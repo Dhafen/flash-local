@@ -52,7 +52,7 @@ public final class Qwen35MoEDecoder {
         }
         weights = try GGUFWeightSource(artifact: artifact, rawCacheBytes: rawCacheBytes,
             tileBytes: min(4 << 20, rawCacheBytes / 2), execution: execution,
-            residentCacheBytes: residentCacheBytes)
+            residentCacheBytes: residentCacheBytes, cacheSelectedExperts: true)
         for layer in 0..<layout.layers where (layer + 1) % layout.attentionInterval == 0 {
             attentionCaches[layer] = try Qwen4ExpTextAttention.Cache(keyValueHeads: layout.keyValueHeads,
                 headDimension: layout.keyLength, contextLimit: contextTokens,

@@ -50,6 +50,58 @@ final class GGUFStreamedLinearTests: XCTestCase {
         }
     }
 
+    func testSelectedExpertLRUReuseAndChurnStayWithinTheSharedPayloadBudget() throws {
+        try withExpertMatrix { index, reader, pool in
+            let tensor = try XCTUnwrap(index.tensors["experts"])
+            let cache = try GGUFPackedTileCache(capacityBytes: 192, admittedSources: [999],
+                evictableSources: [1], evictableCapacityBytes: 160)
+            let dense = RegionDescriptor(identity: .init(sourceID: 999, index: 0), offset: 0, length: 32)
+            try cache.insert(MLXArray([UInt8](repeating: 7, count: 32)), region: dense)
+            let x = MLXArray.ones([2, 4], dtype: .float32)
+            func run(_ experts: [UInt64], cache: GGUFPackedTileCache?) throws -> (output: MLXArray, report: GGUFLinearReport) {
+                try GGUFStreamedLinear.runExperts(x, tensor: tensor, experts: experts,
+                    payloadOffset: index.payloadOffset, sourceID: 1, tileRows: 3,
+                    reader: reader, packedCache: cache)
+            }
+            let first = try run([0, 1], cache: cache)
+            XCTAssertEqual(first.output.asArray(Float.self), [6,22,38,54,70,86,102,118,134,150])
+            XCTAssertEqual(first.report.packedWeightCopyBytes, 160)
+            let second = try run([1, 2], cache: cache)
+            XCTAssertEqual(second.output.asArray(Float.self), [86,102,118,134,150,166,182,198,214,230])
+            XCTAssertEqual(second.report.residentWeightBytesReused, 80)
+            XCTAssertEqual(second.report.packedWeightCopyBytes, 80)
+            XCTAssertGreaterThan(cache.statistics.evictions ?? 0, 0)
+            XCTAssertEqual(cache.statistics.evictablePayloadBytes, 160)
+            XCTAssertEqual(cache.statistics.residentPayloadBytes, 192)
+            XCTAssertEqual(try cache.lookup(dense)?.asArray(UInt8.self), [UInt8](repeating: 7, count: 32))
+            var cold: [Double] = [], hot: [Double] = []
+            for sample in -1..<3 {
+                let io = reader.statistics.bytesRead, begin = MonotonicClock.now()
+                let streamed = try run([1, 2], cache: nil)
+                let coldSeconds = MonotonicClock.seconds(since: begin)
+                XCTAssertEqual(reader.statistics.bytesRead - io, 160)
+                let ioWarm = reader.statistics.bytesRead, warmBegin = MonotonicClock.now()
+                let resident = try run([1, 2], cache: cache)
+                let hotSeconds = MonotonicClock.seconds(since: warmBegin)
+                XCTAssertEqual(resident.output.asArray(Float.self), streamed.output.asArray(Float.self))
+                XCTAssertEqual(reader.statistics.bytesRead - ioWarm, 0)
+                XCTAssertEqual(resident.report.packedWeightCopyBytes, 0)
+                XCTAssertEqual(resident.report.residentWeightBytesReused, 160)
+                XCTAssertLessThanOrEqual(cache.statistics.residentPayloadBytes, 192)
+                if sample >= 0 { cold.append(coldSeconds); hot.append(hotSeconds) }
+            }
+            XCTAssertEqual(pool.census.inUse, 0)
+            let record: [String: Any] = ["syntheticOnly":true, "physicalPhone":false,
+                "sourceRevision":BuildInfo.gitRevision, "os":ProcessInfo.processInfo.operatingSystemVersionString,
+                "physicalMemoryBytes":ProcessInfo.processInfo.physicalMemory,
+                "shape":[3,5,4], "selectedExperts":[1,2], "rawRetention":false,
+                "totalCachePayloadBytes":192, "evictablePayloadBytes":160,
+                "coldReaderBytes":160, "hotReaderBytes":0, "warmup":1,
+                "samples":["streamedSeconds":cold,"residentSeconds":hot]]
+            print("GGUF_EXPERT_LRU_BENCH " + String(decoding: try JSONSerialization.data(withJSONObject: record, options: .sortedKeys), as: UTF8.self))
+        }
+    }
+
     func testPackedBatchReducesEvaluationBarriersWithoutChangingSelectedExpertProducts() throws {
         try withExpertMatrix { index, reader, pool in
             let tensor = try XCTUnwrap(index.tensors["experts"])
