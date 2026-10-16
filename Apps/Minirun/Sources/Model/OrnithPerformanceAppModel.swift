@@ -19,7 +19,7 @@ private actor PerformanceAppRunner {
         let engine = try OrnithPerformanceEngine(install: install, plan: plan, contextTokens: 8192)
         self.engine = engine
         session = OrnithPerformanceSession(engine: engine, codec: codec)
-        return engine.memoryPlan
+        return await engine.memoryPlan
     }
     func generate(_ messages: [OrnithChatMessage], cancellation: PerformanceCancellation,
                   onDelta: @escaping @Sendable (String) async -> Void) async throws -> OrnithGenerationResult {
