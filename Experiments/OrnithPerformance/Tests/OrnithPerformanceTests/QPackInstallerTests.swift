@@ -44,8 +44,9 @@ final class QPackInstallerTests: XCTestCase {
         let plan = try fixture.plan()
         let root = temporary()
         defer { try? FileManager.default.removeItem(at: root) }
+        let prefixWindows = plan.source.sourceHeaders[0].count / 4093 + 5
         let first = try QPackInstaller(plan: plan, privateRoot: root,
-            source: FixtureByteSource(fixture, failAfterRanges: 7), windowBytes: 4093)
+            source: FixtureByteSource(fixture, failAfterRanges: prefixWindows), windowBytes: 4093)
         do { _ = try await first.install(); XCTFail("interruption expected") }
         catch FixtureByteSource.Failure.interrupted { }
         let firstFinal = await first.finalDirectory
@@ -54,7 +55,8 @@ final class QPackInstallerTests: XCTestCase {
         let resumed = try QPackInstaller(plan: plan, privateRoot: root, source: resumedSource, windowBytes: 4093)
         let result = try await resumed.install()
         let requests = await resumedSource.requests.compactMap(\.range)
-        XCTAssertEqual(requests.first?.lowerBound, 7 * 4093)
+        XCTAssertEqual(requests.first?.lowerBound, prefixWindows * 4093)
+        XCTAssertGreaterThan(prefixWindows * 4093, plan.source.sourceHeaders[0].count)
         XCTAssertEqual(result.verifiedSourceBytes, fixture.manifest.shards[0].byteCount)
     }
 

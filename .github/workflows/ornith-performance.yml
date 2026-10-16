@@ -44,19 +44,34 @@ jobs:
           printf '%s\n' "$scheme" > scheme-used.txt
           xcodebuild test -scheme "$scheme" -destination 'platform=macOS' \
             -skipPackagePluginValidation -skipMacroValidation \
+            -skip-testing:SwiftletCoreTests/SwiftletSessionTests \
             -resultBundlePath swiftlet-tests.xcresult 2>&1 | tee swiftlet-tests.log | tail -70
           test "$(grep -c 'ORNITH_KV_PLACEMENT model=' swiftlet-tests.log)" -eq 3
           grep 'ORNITH_EXPERT_IO returnedBytesCounted=true hotHitsReadZero=true' swiftlet-tests.log
+          # Run the semaphore/deadline lifecycle probes without concurrent
+          # Metal compilation. They still execute and remain required gates.
+          xcodebuild test -scheme "$scheme" -destination 'platform=macOS' \
+            -skipPackagePluginValidation -skipMacroValidation -parallel-testing-enabled NO \
+            -only-testing:SwiftletCoreTests/SwiftletSessionTests \
+            -resultBundlePath swiftlet-session-tests.xcresult 2>&1 | tee swiftlet-session-tests.log | tail -70
+      - name: Pinned Python tokenizer oracle (metadata only)
+        run: |
+          python3 -m venv .work/tokenizer-oracle
+          .work/tokenizer-oracle/bin/python -m pip install -q -r Experiments/OrnithPerformance/reference-requirements.txt
+          .work/tokenizer-oracle/bin/python scripts/prepare_ornith_mlx_tokenizer.py --output .test-fixtures/ornith-mlx-tokenizer
       - name: Ornith metadata, placement and memory admission
         id: experiment
         if: always() && steps.core.outcome != 'skipped'
         continue-on-error: true
+        env:
+          ORNITH_MLX_TOKENIZER_FIXTURE: ${{ github.workspace }}/.test-fixtures/ornith-mlx-tokenizer
         working-directory: Experiments/OrnithPerformance
         run: |
           xcodebuild test -scheme OrnithPerformance -destination 'platform=macOS' \
             -skipPackagePluginValidation -skipMacroValidation \
             -resultBundlePath experiment-tests.xcresult 2>&1 | tee experiment-tests.log | tail -70
           grep 'ORNITH_QPACK_SOURCE layers=40 experts=256 topK=8 tensors=1757' experiment-tests.log
+          grep 'ORNITH_MLX_TOKENIZER_PARITY cases=12 exactTokenIDs=true exactDecodedText=true' experiment-tests.log
       - name: Compile experiment for iOS Simulator
         if: always() && steps.core.outcome != 'skipped'
         working-directory: Experiments/OrnithPerformance
@@ -70,11 +85,13 @@ jobs:
           name: ornith-performance-text
           path: |
             .work/swiftlet-validation/swiftlet-tests.log
+            .work/swiftlet-validation/swiftlet-session-tests.log
             .work/swiftlet-validation/schemes.json
             .work/swiftlet-validation/scheme-used.txt
             Experiments/OrnithPerformance/experiment-tests.log
             Experiments/OrnithPerformance/experiment-ios.log
             Experiments/OrnithPerformance/Package.resolved
+            .test-fixtures/ornith-mlx-tokenizer/reference.json
           retention-days: 7
       - name: Require both numerical and experiment gates
         if: always()
