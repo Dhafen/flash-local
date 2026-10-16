@@ -39,6 +39,14 @@ artifact's unscaled base and dimensions; visual inputs, alternative recurrent
 layouts and RoPE scaling are refused. MTP weights are verified with the whole
 file but not executed. There is no speculative/draft-model path.
 
+RMS rows use the pinned CPU operation's Float32 squares, Float64 sum and
+Float32 mean/scale/products, bounded to 65,536 elements. This explicitly pays
+for a small CPU/GPU transfer to avoid a GPU reduction/rsqrt ULP difference
+being amplified by activation quantization or FP16 KV rounding. Tests compare
+these rows bit for bit against CPU checkpoint inputs and record a transfer-
+inclusive synthetic benchmark. Projection weights remain streamed; this does
+not introduce a CPU whole-model inference path. Full graph gates still apply.
+
 `GGUFStreamedDecoder` dispatches explicitly by architecture; the existing chat,
 prefix checkpoints, cancellation, packed projections and bounded I/O are shared.
 The first Ornith app policy is 4,096 context tokens, up to 512 new tokens,

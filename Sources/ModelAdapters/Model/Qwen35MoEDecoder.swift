@@ -132,16 +132,22 @@ public final class Qwen35MoEDecoder {
             for layer in 0..<c.layers {
                 try check(cancellationRequested)
                 let p = "blk.\(layer)."
-                let normalized = try K3Norm.rms(hidden, weight: weights.smallTensor(p + "attn_norm.weight"), eps: c.epsilon)
+                let normalized = try Qwen35CPUAlignedNorm.rms(hidden, weight: weights.smallTensor(p + "attn_norm.weight"), eps: c.epsilon)
                 #if DEBUG
                 observe("attn_norm-\(layer)", normalized)
                 #endif
                 let mixed: MLXArray
                 if let cache = attentionCaches[layer] {
+                    let query = try weights.linear(normalized, tensor: p + "attn_q.weight")
+                    let key = try weights.linear(normalized, tensor: p + "attn_k.weight")
+                    let value = try weights.linear(normalized, tensor: p + "attn_v.weight")
+                    #if DEBUG
+                    observe("Qcur_full-\(layer)", query)
+                    observe("Kcur-\(layer)", key)
+                    observe("Vcur-\(layer)", value)
+                    #endif
                     let attention = try Qwen4ExpTextAttention.step(
-                        queryAndGate: weights.linear(normalized, tensor: p + "attn_q.weight"),
-                        key: weights.linear(normalized, tensor: p + "attn_k.weight"),
-                        value: weights.linear(normalized, tensor: p + "attn_v.weight"),
+                        queryAndGate: query, key: key, value: value,
                         queryNorm: weights.smallTensor(p + "attn_q_norm.weight"),
                         keyNorm: weights.smallTensor(p + "attn_k_norm.weight"), epsilon: c.epsilon,
                         rotaryDimensions: c.rotaryDimensions, ropeBase: c.ropeBase, cache: cache)
@@ -151,7 +157,7 @@ public final class Qwen35MoEDecoder {
                 #if DEBUG
                 observe("attn_residual-\(layer)", hidden)
                 #endif
-                let ffn = try K3Norm.rms(hidden, weight: weights.smallTensor(p + "post_attention_norm.weight"), eps: c.epsilon)
+                let ffn = try Qwen35CPUAlignedNorm.rms(hidden, weight: weights.smallTensor(p + "post_attention_norm.weight"), eps: c.epsilon)
                 #if DEBUG
                 observe("attn_post_norm-\(layer)", ffn)
                 #endif
@@ -163,7 +169,7 @@ public final class Qwen35MoEDecoder {
             }
             let logits: MLXArray?
             if calculateLogits {
-                let normalized = try K3Norm.rms(hidden, weight: weights.smallTensor("output_norm.weight"), eps: c.epsilon)
+                let normalized = try Qwen35CPUAlignedNorm.rms(hidden, weight: weights.smallTensor("output_norm.weight"), eps: c.epsilon)
                 #if DEBUG
                 if normalized.size <= 8192 { onParityCheckpoint?("result_norm", normalized.asArray(Float.self)) }
                 #endif
@@ -199,7 +205,7 @@ public final class Qwen35MoEDecoder {
         let step = try Qwen4ExpGDN.step(q: q, k: k, v: v, logDecay: decay, beta: beta, state: initial)
         let gate = try weights.linear(input, tensor: p + "attn_gate.weight").reshaped([c.recurrentHeads, dim])
         // Qwen3.5 uses SiLU here; REAM's sigmoid gate must not be reused.
-        let gated = try K3Norm.rms(step.output, weight: weights.smallTensor(p + "ssm_norm.weight"), eps: c.epsilon)
+        let gated = try Qwen35CPUAlignedNorm.rms(step.output, weight: weights.smallTensor(p + "ssm_norm.weight"), eps: c.epsilon)
             * K3Activation.silu(gate)
         #if DEBUG
         observe("final_output-\(layer)", gated)

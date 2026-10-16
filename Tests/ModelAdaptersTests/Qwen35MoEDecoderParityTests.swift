@@ -37,6 +37,34 @@ final class Qwen35MoEDecoderParityTests: XCTestCase {
             manifest: GGUFModelManifest(fileName: manifest.fileName, fileByteCount: manifest.fileByteCount, sha256: manifest.sha256))
         return (artifact, manifest, reference)
     }
+    func testCPUAlignedNormBoundsAndTransferBenchmark() throws {
+        let columns = 2048
+        let x = MLXArray((0..<(2 * columns)).map { Float(($0 * 17) % 109 - 54) / 32 }, [2, columns])
+        let gamma = MLXArray((0..<columns).map { 0.8 + Float($0 % 13) / 32 })
+        var aligned: [Double] = [], metal: [Double] = []
+        for sample in -1..<3 {
+            let start = MonotonicClock.now()
+            let a = try Qwen35CPUAlignedNorm.rms(x, weight: gamma, eps: 1e-6).asArray(Float.self)
+            let middle = MonotonicClock.now()
+            let b = K3Norm.rms(x, weight: gamma, eps: 1e-6).asArray(Float.self)
+            let end = MonotonicClock.now()
+            for (actual, other) in zip(a, b) { XCTAssertEqual(actual, other, accuracy: 1e-6) }
+            if sample >= 0 {
+                aligned.append(MonotonicClock.seconds(from: start, to: middle))
+                metal.append(MonotonicClock.seconds(from: middle, to: end))
+            }
+        }
+        XCTAssertThrowsError(try Qwen35CPUAlignedNorm.rms(x, weight: MLXArray.ones([1]), eps: 1e-6))
+        XCTAssertThrowsError(try Qwen35CPUAlignedNorm.rms(x, weight: gamma, eps: 0))
+        XCTAssertThrowsError(try Qwen35CPUAlignedNorm.rms(MLXArray([Float.nan]), weight: MLXArray.ones([1]), eps: 1e-6))
+        XCTAssertThrowsError(try Qwen35CPUAlignedNorm.rms(MLXArray.zeros([65537]), weight: MLXArray.ones([65537]), eps: 1e-6))
+        let record: [String: Any] = ["syntheticOnly":true, "physicalPhone":false,
+            "sourceRevision":BuildInfo.gitRevision, "os":ProcessInfo.processInfo.operatingSystemVersionString,
+            "physicalMemoryBytes":ProcessInfo.processInfo.physicalMemory, "shape":[2,columns],
+            "maximumElements":65536, "includesTransfers":true, "warmup":1,
+            "samples":["cpuAlignedSeconds":aligned,"metalSeconds":metal]]
+        print("ORNITH_NORM_BENCH " + String(decoding: try JSONSerialization.data(withJSONObject: record, options: .sortedKeys), as: UTF8.self))
+    }
     func testOrnithFP32AndMixedGraphsMatchPinnedCPUReference() throws {
         for mixed in [false, true] {
             let (artifact, manifest, reference) = try artifact(mixed: mixed)
@@ -76,6 +104,20 @@ final class Qwen35MoEDecoderParityTests: XCTestCase {
                         XCTAssertEqual(a, b, accuracy: 1e-7, "Checkpoint observer changed normal logits")
                     }
                     let expected = try XCTUnwrap(reference.checkpoints?[position])
+                    // Use the CPU's own observed input, not the streamed input,
+                    // to isolate reduction/rounding from upstream graph error.
+                    for layer in 0..<4 {
+                        let source = layer == 0 ? "model.input_embed" : "l_out-\(layer - 1)"
+                        for (inputName, normName, tensorName) in [
+                            (source, "attn_norm-\(layer)", "blk.\(layer).attn_norm.weight"),
+                            ("attn_residual-\(layer)", "attn_post_norm-\(layer)", "blk.\(layer).post_attention_norm.weight")
+                        ] {
+                            let input = try XCTUnwrap(expected[inputName]), target = try XCTUnwrap(expected[normName])
+                            let normalized = try Qwen35CPUAlignedNorm.rms(MLXArray(input, [1, input.count]),
+                                weight: probe.smallTensor(tensorName), eps: decoder.layout.epsilon).asArray(Float.self)
+                            XCTAssertEqual(normalized.map(\.bitPattern), target.map(\.bitPattern), "CPU norm arithmetic at \(normName)")
+                        }
+                    }
                     let required = ["model.input_embed", "l_out-0", "l_out-1", "l_out-2", "l_out-3", "result_norm"]
                     for name in required { XCTAssertNotNil(expected[name]); XCTAssertNotNil(observed[name]) }
                     for name in observed.keys.sorted() {
@@ -86,6 +128,11 @@ final class Qwen35MoEDecoderParityTests: XCTestCase {
                         let squared = zip(cpu, gpu).reduce(0.0) { $0 + pow(Double($1.0) - Double($1.1), 2) }
                         let norm = cpu.reduce(0.0) { $0 + Double($1) * Double($1) }
                         print("ORNITH_CHECKPOINT position=\(position) name=\(name) maxAbs=\(maximum) relativeL2=\(sqrt(squared / max(norm, 1e-20)))")
+                        if name.hasPrefix("Vcur-") {
+                            let a = cpu.map { Float16($0).bitPattern }, b = gpu.map { Float16($0).bitPattern }
+                            let changes = a.indices.filter { a[$0] != b[$0] }
+                            print("ORNITH_KV_ROUNDING position=\(position) name=\(name) changedHalfElements=\(changes.count) rawPairs=\(changes.prefix(8).map { [cpu[$0], gpu[$0]] })")
+                        }
                         let tensorName: String?
                         if name == "result_norm" { tensorName = "output.weight" }
                         else if name.hasPrefix("attn_norm-"), let layer = Int(name.dropFirst("attn_norm-".count)) {
