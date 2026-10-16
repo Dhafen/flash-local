@@ -16,6 +16,10 @@ public final class Qwen35MoEDecoder {
     var footprintSnapshot: () -> ProcessFootprint? = { ProcessFootprint.current() }
     #if DEBUG
     var onParityCheckpoint: ((String, [Float]) -> Void)?
+    private func observe(_ name: String, _ array: MLXArray) {
+        guard let observer = onParityCheckpoint, array.size <= 8192 else { return }
+        observer(name, array.asArray(Float.self))
+    }
     #endif
     private let weights: GGUFWeightSource
     private var attentionCaches: [Int: Qwen4ExpTextAttention.Cache] = [:]
@@ -122,10 +126,16 @@ public final class Qwen35MoEDecoder {
             try check(cancellationRequested)
             let c = layout
             var hidden = try weights.row(token, tensor: "token_embd.weight").reshaped([1, c.hiddenSize])
+            #if DEBUG
+            observe("model.input_embed", hidden)
+            #endif
             for layer in 0..<c.layers {
                 try check(cancellationRequested)
                 let p = "blk.\(layer)."
                 let normalized = try K3Norm.rms(hidden, weight: weights.smallTensor(p + "attn_norm.weight"), eps: c.epsilon)
+                #if DEBUG
+                observe("attn_norm-\(layer)", normalized)
+                #endif
                 let mixed: MLXArray
                 if let cache = attentionCaches[layer] {
                     let attention = try Qwen4ExpTextAttention.step(
@@ -138,7 +148,13 @@ public final class Qwen35MoEDecoder {
                     mixed = try weights.linear(attention, tensor: p + "attn_output.weight")
                 } else { mixed = try recurrent(normalized, layer: layer) }
                 hidden = hidden + mixed
+                #if DEBUG
+                observe("attn_residual-\(layer)", hidden)
+                #endif
                 let ffn = try K3Norm.rms(hidden, weight: weights.smallTensor(p + "post_attention_norm.weight"), eps: c.epsilon)
+                #if DEBUG
+                observe("attn_post_norm-\(layer)", ffn)
+                #endif
                 hidden = try hidden + moe(ffn, layer: layer, cancelled: cancellationRequested)
                 hidden.eval()
                 #if DEBUG
@@ -167,6 +183,9 @@ public final class Qwen35MoEDecoder {
         let keyWidth = c.recurrentKeyHeads * dim, valueWidth = c.recurrentHeads * dim
         let channels = 2 * keyWidth + valueWidth
         let qkv = try weights.linear(input, tensor: p + "attn_qkv.weight").reshaped([channels])
+        #if DEBUG
+        observe("linear_attn_qkv_mixed-\(layer)", qkv)
+        #endif
         let history = convolutionHistories[layer] ?? MLXArray.zeros([c.convolutionWidth - 1, channels], dtype: .float32)
         let conv = try Qwen4ExpGDN.convolutionStep(input: qkv,
             kernel: weights.smallTensor(p + "ssm_conv1d.weight").T, history: history)
@@ -182,7 +201,13 @@ public final class Qwen35MoEDecoder {
         // Qwen3.5 uses SiLU here; REAM's sigmoid gate must not be reused.
         let gated = try K3Norm.rms(step.output, weight: weights.smallTensor(p + "ssm_norm.weight"), eps: c.epsilon)
             * K3Activation.silu(gate)
+        #if DEBUG
+        observe("final_output-\(layer)", gated)
+        #endif
         let output = try weights.linear(gated.reshaped([1, valueWidth]), tensor: p + "ssm_out.weight")
+        #if DEBUG
+        observe("linear_attn_out-\(layer)", output)
+        #endif
         recurrentStates[layer] = step.state; convolutionHistories[layer] = conv.history
         return output
     }
@@ -198,12 +223,22 @@ public final class Qwen35MoEDecoder {
         var routed = MLXArray.zeros([1, c.hiddenSize], dtype: .float32)
         for slot in experts.indices { routed = routed + down[slot..<(slot+1)] * selected.weights[0, slot] }
         routed.eval()
+        #if DEBUG
+        observe("ffn_moe_out-\(layer)", routed)
+        #endif
         let sharedGate = try weights.linear(input, tensor: p + "ffn_gate_shexp.weight")
         let sharedUp = try weights.linear(input, tensor: p + "ffn_up_shexp.weight")
         let shared = try weights.linear(K3Activation.silu(sharedGate) * sharedUp, tensor: p + "ffn_down_shexp.weight")
         let scalar = try sigmoid(sum(input * weights.smallTensor(p + "ffn_gate_inp_shexp.weight"), axis: -1, keepDims: true))
-        let output = routed + shared * scalar
+        let gatedShared = shared * scalar
+        #if DEBUG
+        observe("ffn_shexp_gated-\(layer)", gatedShared)
+        #endif
+        let output = routed + gatedShared
         output.eval()
+        #if DEBUG
+        observe("ffn_out-\(layer)", output)
+        #endif
         return output
     }
 }

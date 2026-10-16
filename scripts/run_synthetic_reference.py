@@ -103,6 +103,19 @@ def main():
             (root / ".test-fixtures/synthetic-ornith-mixed.json").write_text(json.dumps(manifest, indent=2) + "\n")
             run([build / "flash-local-reference", ornith_mixed,
                  root / ".test-fixtures/llama-ornith-mixed-reference-logits.json"])
+            run([build / "flash-local-reference", ornith_mixed,
+                 root / ".test-fixtures/llama-ornith-mixed-reference-checkpoints.json", "--checkpoints"])
+            plain_path = root / ".test-fixtures/llama-ornith-mixed-reference-logits.json"
+            plain = json.loads(plain_path.read_text())
+            traced = json.loads((root / ".test-fixtures/llama-ornith-mixed-reference-checkpoints.json").read_text())
+            if plain['tokens'] != traced['tokens'] or [len(r) for r in plain['logits']] != [len(r) for r in traced['logits']]:
+                raise RuntimeError("Ornith CPU checkpoint shadow changed output shape")
+            trace_error = max(abs(a-b) for row, other in zip(plain['logits'], traced['logits']) for a,b in zip(row,other))
+            if trace_error > 1e-7:
+                raise RuntimeError(f"Ornith CPU checkpoint shadow perturbed logits: {trace_error}")
+            plain['checkpoints'] = traced['checkpoints']
+            plain['checkpointShadowMaximumAbsoluteError'] = trace_error
+            plain_path.write_text(json.dumps(plain, indent=2) + "\n")
             run(["python3", root / "scripts/make_qwen4exp_test_model.py", "--ornith", "--chat"])
             ornith_chat = root / ".test-fixtures/synthetic-ornith-chat.gguf"
             if ornith_chat.stat().st_size > 1_000_000:

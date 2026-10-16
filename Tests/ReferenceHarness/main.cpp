@@ -11,15 +11,24 @@
 
 struct Checkpoints {
     size_t position = 0;
+    bool ornith = false;
     std::vector<common_json> steps = std::vector<common_json>(5, common_json::object());
 };
 static bool checkpoint(ggml_tensor * tensor, bool ask, void * user) {
     const std::string name = ggml_get_name(tensor);
-    const bool selected = (name.rfind("l_last-", 0) == 0 || name == "result_norm") &&
+    auto & trace = *static_cast<Checkpoints *>(user);
+    bool stage = name.rfind("l_last-", 0) == 0 || name == "result_norm";
+    if (trace.ornith) {
+        for (const char * prefix : {"model.input_embed", "l_out-", "attn_norm-", "attn_residual-",
+                "attn_post_norm-", "ffn_out-", "linear_attn_qkv_mixed-", "final_output-",
+                "linear_attn_out-", "ffn_moe_out-", "ffn_shexp_gated-"}) {
+            stage = stage || name.rfind(prefix, 0) == 0;
+        }
+    }
+    const bool selected = stage &&
         tensor->type == GGML_TYPE_F32 && ggml_is_contiguous(tensor) && ggml_nelements(tensor) <= 8192;
     if (ask) return selected;
     if (!selected) return true;
-    auto & trace = *static_cast<Checkpoints *>(user);
     if (trace.position >= trace.steps.size()) return false;
     std::vector<float> values(ggml_nelements(tensor));
     ggml_backend_tensor_get(tensor, values.data(), 0, values.size() * sizeof(float));
@@ -42,6 +51,9 @@ int main(int argc, char ** argv) {
     mp.use_extra_bufts = false;
     llama_model * model = llama_model_load_from_file(argv[1], mp);
     if (!model) return 3;
+    char architecture[32] = {};
+    llama_model_meta_val_str(model, "general.architecture", architecture, sizeof(architecture));
+    trace.ornith = std::string(architecture) == "qwen35moe";
     auto cp = llama_context_default_params();
     cp.n_ctx = 32; cp.n_batch = 1; cp.n_ubatch = 1; cp.n_seq_max = 1;
     cp.n_threads = 2; cp.n_threads_batch = 2;
