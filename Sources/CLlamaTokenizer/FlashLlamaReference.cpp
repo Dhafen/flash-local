@@ -96,6 +96,53 @@ int32_t flr_round_linear_activations(uint32_t weight_type, const float * input,
     } catch (const std::exception & error) { reference_error = error.what(); return -3; }
 }
 
+int32_t flr_project_kv_rows(uint32_t weight_type, const void * weights, int32_t weight_bytes,
+    const float * input, int32_t columns, int32_t rows, float * output, int32_t capacity,
+    float * rounded, int32_t rounded_capacity, void * packed, int32_t packed_capacity) {
+    try {
+        switch (weight_type) {
+            case GGML_TYPE_F32: case GGML_TYPE_F16: case GGML_TYPE_BF16:
+            case GGML_TYPE_Q4_0: case GGML_TYPE_Q5_0: case GGML_TYPE_Q8_0:
+            case GGML_TYPE_Q4_K: case GGML_TYPE_Q6_K: break;
+            default: reference_error = "Unsupported small KV projection type"; return -1;
+        }
+        if (!weights || !input || !output || !rounded || !packed || columns < 1 || columns > 65536 ||
+            rows < 1 || rows > 1024 || capacity < rows || rounded_capacity < columns ||
+            weight_bytes < 1 || weight_bytes > (4 << 20) || packed_capacity < 1 || packed_capacity > 131072 ||
+            uintptr_t(weights) % 4 || uintptr_t(output) % alignof(float) ||
+            columns % ggml_blck_size(ggml_type(weight_type))) {
+            reference_error = "Small KV projection buffer/geometry bound"; return -2;
+        }
+        const size_t row_bytes = ggml_row_size(ggml_type(weight_type), columns);
+        if (row_bytes * size_t(rows) != size_t(weight_bytes)) {
+            reference_error = "Small KV projection weight byte count"; return -2;
+        }
+        const auto overlaps = [](const void * a, size_t an, const void * b, size_t bn) {
+            const uintptr_t x = uintptr_t(a), y = uintptr_t(b);
+            return x > UINTPTR_MAX - an || y > UINTPTR_MAX - bn || (x < y + bn && y < x + an);
+        };
+        const void * pointers[] = {weights, input, output, rounded, packed};
+        const size_t sizes[] = {size_t(weight_bytes), size_t(columns)*4, size_t(rows)*4,
+                               size_t(columns)*4, size_t(packed_capacity)};
+        for (int a = 0; a < 5; ++a) for (int b = a + 1; b < 5; ++b) if (overlaps(pointers[a], sizes[a], pointers[b], sizes[b])) {
+            reference_error = "Small KV projection buffers overlap"; return -2;
+        }
+        const int32_t code = flr_round_linear_activations(weight_type, input, columns, rounded,
+            rounded_capacity, packed, packed_capacity);
+        if (code != 0) return code;
+        std::call_once(backend_once, [] { llama_backend_init(); });
+        const auto * traits = ggml_get_type_traits_cpu(ggml_type(weight_type));
+        if (!traits->vec_dot) { reference_error = "Small KV projection CPU kernel unavailable"; return -1; }
+        const void * rhs = traits->vec_dot_type == GGML_TYPE_F32 ? static_cast<const void *>(rounded) : packed;
+        for (int32_t row = 0; row < rows; ++row) {
+            traits->vec_dot(columns, output + row, 0, static_cast<const uint8_t *>(weights) + size_t(row)*row_bytes,
+                            0, rhs, 0, 1);
+            if (!std::isfinite(output[row])) { reference_error = "Nonfinite small KV projection output"; return -2; }
+        }
+        return 0;
+    } catch (const std::exception & error) { reference_error = error.what(); return -3; }
+}
+
 flr_context * flr_create(int descriptor, int32_t context_tokens, flr_abort_callback callback, void * user) {
     try {
         if (!callback || context_tokens < 16 || context_tokens > 128) {

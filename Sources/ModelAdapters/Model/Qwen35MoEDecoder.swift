@@ -139,11 +139,10 @@ public final class Qwen35MoEDecoder {
                 let mixed: MLXArray
                 if let cache = attentionCaches[layer] {
                     let query = try weights.linear(normalized, tensor: p + "attn_q.weight")
-                    let key = try weights.linear(normalized, tensor: p + "attn_k.weight")
-                    let value = try weights.linear(normalized, tensor: p + "attn_v.weight")
+                    let key = try weights.linearCanonicalKV(normalized, tensor: p + "attn_k.weight")
+                    let value = try weights.linearCanonicalKV(normalized, tensor: p + "attn_v.weight")
                     #if DEBUG
                     observe("Qcur_full-\(layer)", query)
-                    observe("Kcur-\(layer)", key)
                     observe("Vcur-\(layer)", value)
                     #endif
                     let attention = try Qwen4ExpTextAttention.step(

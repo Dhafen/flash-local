@@ -88,6 +88,7 @@ final class Qwen35MoEDecoderParityTests: XCTestCase {
                 XCTAssertLessThanOrEqual(relative, 1e-3)
             }
             XCTAssertEqual(decoder.position, 5)
+            XCTAssertEqual(decoder.projectionStatistics.canonicalCPUKVCalls, 10)
             XCTAssertGreaterThan(decoder.readStatistics.bytesRead, 0)
             if mixed {
                 let probe = try GGUFWeightSource(artifact: artifact, rawCacheBytes: 2 << 20)
@@ -104,6 +105,35 @@ final class Qwen35MoEDecoderParityTests: XCTestCase {
                         XCTAssertEqual(a, b, accuracy: 1e-7, "Checkpoint observer changed normal logits")
                     }
                     let expected = try XCTUnwrap(reference.checkpoints?[position])
+                    let attentionInput = try XCTUnwrap(expected["attn_norm-3"])
+                    let projectedValue = try probe.linearCanonicalKV(MLXArray(attentionInput, [1, attentionInput.count]),
+                        tensor: "blk.3.attn_v.weight").asArray(Float.self)
+                    let cpuValue = try XCTUnwrap(expected["Vcur-3"])
+                    XCTAssertEqual(projectedValue.map(\.bitPattern), cpuValue.map(\.bitPattern), "Pinned small projection arithmetic")
+                    if position == 0 {
+                        let input = MLXArray(attentionInput, [1, attentionInput.count])
+                        var canonical: [Double] = [], metal: [Double] = []
+                        for sample in -1..<3 {
+                            let start = MonotonicClock.now()
+                            let a = try probe.linearCanonicalKV(input, tensor: "blk.3.attn_v.weight").asArray(Float.self)
+                            let middle = MonotonicClock.now()
+                            let b = try probe.linear(input, tensor: "blk.3.attn_v.weight").asArray(Float.self)
+                            let end = MonotonicClock.now()
+                            XCTAssertEqual(a.map(\.bitPattern), cpuValue.map(\.bitPattern))
+                            for (actual, other) in zip(a, b) { XCTAssertEqual(actual, other, accuracy: 1e-6) }
+                            if sample >= 0 {
+                                canonical.append(MonotonicClock.seconds(from: start, to: middle))
+                                metal.append(MonotonicClock.seconds(from: middle, to: end))
+                            }
+                        }
+                        let record: [String: Any] = ["syntheticOnly":true,"physicalPhone":false,
+                            "sourceRevision":BuildInfo.gitRevision,"os":ProcessInfo.processInfo.operatingSystemVersionString,
+                            "physicalMemoryBytes":ProcessInfo.processInfo.physicalMemory,"shape":[8,256],
+                            "maximumWeightBytes":4 << 20,"maximumOutputRows":1024,"warmup":1,
+                            "includesFileIOAndCopies":true,"residentPayloadBytes":0,
+                            "samples":["canonicalCPUSeconds":canonical,"packedMetalSeconds":metal]]
+                        print("ORNITH_KV_PROJECTION_BENCH " + String(decoding: try JSONSerialization.data(withJSONObject: record, options: .sortedKeys), as: UTF8.self))
+                    }
                     // Use the CPU's own observed input, not the streamed input,
                     // to isolate reduction/rounding from upstream graph error.
                     for layer in 0..<4 {

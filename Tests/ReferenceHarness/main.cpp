@@ -21,7 +21,7 @@ static bool checkpoint(ggml_tensor * tensor, bool ask, void * user) {
     if (trace.ornith) {
         for (const char * prefix : {"model.input_embed", "l_out-", "attn_norm-", "attn_residual-",
                 "attn_post_norm-", "ffn_out-", "linear_attn_qkv_mixed-", "final_output-",
-                "linear_attn_out-", "ffn_moe_out-", "ffn_shexp_gated-", "Qcur_full-", "Kcur-", "Vcur-"}) {
+                "linear_attn_out-", "ffn_moe_out-", "ffn_shexp_gated-", "Qcur_full-", "Vcur-"}) {
             stage = stage || name.rfind(prefix, 0) == 0;
         }
     }

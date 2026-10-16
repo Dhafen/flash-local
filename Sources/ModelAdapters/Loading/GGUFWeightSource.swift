@@ -25,6 +25,7 @@ public struct GGUFProjectionStatistics: Codable, Equatable, Sendable {
     public private(set) var packedWeightCopyBytes: UInt64? = 0
     public private(set) var residentWeightBytesReused: UInt64? = 0
     public private(set) var evaluationBatches: UInt64? = 0
+    public private(set) var canonicalCPUKVCalls: UInt64? = 0
 
     mutating func record(_ report: GGUFLinearReport, roundingSeconds: Double = 0, rounded: Bool = false) throws {
         func add(_ a: UInt64, _ b: UInt64) throws -> UInt64 {
@@ -35,6 +36,7 @@ public struct GGUFProjectionStatistics: Codable, Equatable, Sendable {
         calls = try add(calls, 1); tiles = try add(tiles, UInt64(report.tiles))
         logicalWeightBytes = try add(logicalWeightBytes, report.logicalWeightBytes)
         packedMetalCalls = try add(packedMetalCalls ?? 0, report.execution == .packedMetal ? 1 : 0)
+        canonicalCPUKVCalls = try add(canonicalCPUKVCalls ?? 0, report.execution == .canonicalCPUKV ? 1 : 0)
         packedWeightCopyBytes = try add(packedWeightCopyBytes ?? 0, report.packedWeightCopyBytes ?? 0)
         residentWeightBytesReused = try add(residentWeightBytesReused ?? 0, report.residentWeightBytesReused ?? 0)
         evaluationBatches = try add(evaluationBatches ?? 0, UInt64(report.evaluationBatches ?? 0))
@@ -64,10 +66,12 @@ public struct GGUFProjectionStatistics: Codable, Equatable, Sendable {
         value.activationRoundingCalls = activationRoundingCalls - earlier.activationRoundingCalls
         value.activationRoundingSeconds = activationRoundingSeconds - earlier.activationRoundingSeconds
         for (a, b) in [(packedMetalCalls, earlier.packedMetalCalls), (packedWeightCopyBytes, earlier.packedWeightCopyBytes),
-                       (residentWeightBytesReused, earlier.residentWeightBytesReused)] {
+                       (residentWeightBytesReused, earlier.residentWeightBytesReused),
+                       (canonicalCPUKVCalls, earlier.canonicalCPUKVCalls)] {
             guard (a ?? 0) >= (b ?? 0) else { throw GGUFError.invalid("packed projection counters went backwards") }
         }
         value.packedMetalCalls = (packedMetalCalls ?? 0) - (earlier.packedMetalCalls ?? 0)
+        value.canonicalCPUKVCalls = (canonicalCPUKVCalls ?? 0) - (earlier.canonicalCPUKVCalls ?? 0)
         value.packedWeightCopyBytes = (packedWeightCopyBytes ?? 0) - (earlier.packedWeightCopyBytes ?? 0)
         value.residentWeightBytesReused = (residentWeightBytesReused ?? 0) - (earlier.residentWeightBytesReused ?? 0)
         guard (evaluationBatches ?? 0) >= (earlier.evaluationBatches ?? 0) else {
@@ -102,7 +106,8 @@ public final class GGUFWeightSource {
                 tileBytes: Int = 1 << 20, noCache: Bool = true,
                 execution: GGUFLinearExecution = .packedMetal, residentCacheBytes: Int = 0,
                 cacheSelectedExperts: Bool = false) throws {
-        guard (4096...(4 << 20)).contains(tileBytes), rawCacheBytes >= tileBytes * 2,
+        guard execution != .canonicalCPUKV,
+              (4096...(4 << 20)).contains(tileBytes), rawCacheBytes >= tileBytes * 2,
               rawCacheBytes <= 1_000_000_000, residentCacheBytes >= 0,
               residentCacheBytes <= 4_500_000_000 else { throw GGUFError.limit("weight cache") }
         self.artifact = artifact
@@ -212,6 +217,67 @@ public final class GGUFWeightSource {
         try artifact.assertUnchanged()
         try projectionStatistics.record(result.report, roundingSeconds: roundingSeconds, rounded: tensor.quantization != .f32)
         return result.output
+    }
+
+    /// A small CPU projection stabilizes K/V values before the FP16 cache.
+    /// It uses the same verified reader and protected cache, and refuses a
+    /// matrix larger than one bounded tile; it cannot execute a full model.
+    func linearCanonicalKV(_ x: MLXArray, tensor name: String) throws -> MLXArray {
+        try artifact.assertUnchanged()
+        guard !closed, let tensor = artifact.index.tensors[name], tensor.dimensions.count == 2,
+              let columns = Int(exactly: tensor.dimensions[0]), let rows = Int(exactly: tensor.dimensions[1]),
+              x.ndim == 2, x.shape[0] == 1, x.shape[1] == columns,
+              (1...65536).contains(columns), (1...1024).contains(rows),
+              tensor.byteCount <= UInt64(tileBytes), tensor.byteCount <= 4 << 20 else {
+            throw GGUFError.limit("small canonical KV projection")
+        }
+        let started = MonotonicClock.now()
+        let region = try tensor.region(sourceID: sourceIDs[name]!, regionID: 0,
+            payloadOffset: artifact.index.payloadOffset, rows: 0..<UInt64(rows))
+        let ioStarted = MonotonicClock.now()
+        let cached = try packedCache.lookup(region)
+        var copied: UInt64 = 0
+        let packed: MLXArray
+        var ioSeconds = 0.0, copySeconds = 0.0
+        if let cached { packed = cached; ioSeconds = MonotonicClock.seconds(since: ioStarted) }
+        else {
+            let lease = try reader.acquire(region)
+            ioSeconds = MonotonicClock.seconds(since: ioStarted)
+            let copying = MonotonicClock.now()
+            do {
+                defer { lease.release() }
+                packed = MLXArray(lease.contents.bindMemory(to: UInt8.self), [region.length])
+                try packedCache.insert(packed, region: region)
+            }
+            copySeconds = MonotonicClock.seconds(since: copying)
+            copied += UInt64(region.length)
+        }
+        let copying = MonotonicClock.now()
+        let bytes = packed.asArray(UInt8.self), input = x.asType(.float32).asArray(Float.self)
+        copied += UInt64(bytes.count) // include the explicit CPU handoff even on a cache hit
+        copySeconds += MonotonicClock.seconds(since: copying)
+        let output = smallScratch.pointer.assumingMemoryBound(to: Float.self)
+        let computeStarted = MonotonicClock.now()
+        let code = bytes.withUnsafeBytes { raw in
+            input.withUnsafeBufferPointer { values in
+                flr_project_kv_rows(tensor.quantization.rawValue, raw.baseAddress, Int32(bytes.count),
+                    values.baseAddress, Int32(columns), Int32(rows), output, Int32(rows),
+                    activationScratch.pointer.assumingMemoryBound(to: Float.self), Int32(activationScratch.count / 4),
+                    activationPackingScratch.pointer, Int32(activationPackingScratch.count))
+            }
+        }
+        guard code == 0 else { throw GGUFError.invalid("canonical KV projection: \(String(cString: flr_last_error()))") }
+        let result = MLXArray(UnsafeBufferPointer(start: output, count: rows), [1, rows])
+        result.eval()
+        let computeSeconds = MonotonicClock.seconds(since: computeStarted)
+        try artifact.assertUnchanged()
+        try projectionStatistics.record(GGUFLinearReport(tiles: 1, logicalWeightBytes: tensor.byteCount,
+            scratchBytes: activationScratch.count + activationPackingScratch.count,
+            peakCopiedWeightBytes: region.length * 2, boundedOutputBytes: rows * 8,
+            wallSeconds: MonotonicClock.seconds(since: started), waitOnIOSeconds: ioSeconds,
+            dequantizeAndCopySeconds: copySeconds, computeSeconds: computeSeconds, execution: .canonicalCPUKV,
+            packedWeightCopyBytes: copied, residentWeightBytesReused: cached == nil ? 0 : tensor.byteCount))
+        return result
     }
 
     // Canonical CPU dot kernels round their RHS to Q8_K/Q8_0/F16/BF16 before

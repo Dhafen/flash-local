@@ -38,6 +38,18 @@ public struct GGUFLinearReport: Sendable, Codable {
     public let packedWeightCopyBytes: UInt64?
     public let residentWeightBytesReused: UInt64?
     public var evaluationBatches: Int? = nil
+
+    public init(tiles: Int, logicalWeightBytes: UInt64, scratchBytes: Int, peakCopiedWeightBytes: Int,
+                boundedOutputBytes: Int, wallSeconds: Double, waitOnIOSeconds: Double,
+                dequantizeAndCopySeconds: Double, computeSeconds: Double, execution: GGUFLinearExecution? = nil,
+                packedWeightCopyBytes: UInt64? = nil, residentWeightBytesReused: UInt64? = nil, evaluationBatches: Int? = nil) {
+        self.tiles = tiles; self.logicalWeightBytes = logicalWeightBytes; self.scratchBytes = scratchBytes
+        self.peakCopiedWeightBytes = peakCopiedWeightBytes; self.boundedOutputBytes = boundedOutputBytes
+        self.wallSeconds = wallSeconds; self.waitOnIOSeconds = waitOnIOSeconds
+        self.dequantizeAndCopySeconds = dequantizeAndCopySeconds; self.computeSeconds = computeSeconds
+        self.execution = execution; self.packedWeightCopyBytes = packedWeightCopyBytes
+        self.residentWeightBytesReused = residentWeightBytesReused; self.evaluationBatches = evaluationBatches
+    }
 }
 
 public enum GGUFStreamedLinear {
@@ -147,7 +159,8 @@ public enum GGUFStreamedLinear {
         packedCache: GGUFPackedTileCache? = nil,
         evaluation: GGUFLinearEvaluation = .boundedBatch
     ) throws -> (output: MLXArray, report: GGUFLinearReport) {
-        guard tensor.dimensions.count == 2 || tensor.dimensions.count == 3,
+        guard execution != .canonicalCPUKV,
+              tensor.dimensions.count == 2 || tensor.dimensions.count == 3,
               let columns = Int(exactly: tensor.dimensions[0]),
               let rows = Int(exactly: tensor.dimensions[1]),
               x.ndim == 2, x.shape[0] > 0, x.shape[1] == columns,

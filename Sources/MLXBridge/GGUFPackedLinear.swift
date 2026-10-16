@@ -7,7 +7,7 @@ import StorageCore
 /// activations. The older path remains an independent numerical/benchmark
 /// control; production can multiply the packed bytes without a CPU FP32 tile.
 public enum GGUFLinearExecution: String, Codable, Sendable {
-    case packedMetal, dequantized
+    case packedMetal, dequantized, canonicalCPUKV
 }
 
 /// Protected dense admission plus an optional bounded LRU for routed experts.

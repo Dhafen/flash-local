@@ -76,7 +76,34 @@ final class GGUFWeightSourceTests: XCTestCase {
         let report = Data("{\"calls\":1,\"tiles\":1,\"logicalWeightBytes\":16,\"wallSeconds\":1,\"waitOnIOSeconds\":0.1,\"dequantizeAndCopySeconds\":0.2,\"computeSeconds\":0.3,\"activationRoundingCalls\":0,\"activationRoundingSeconds\":0}".utf8)
         let old = try JSONDecoder().decode(GGUFProjectionStatistics.self, from: report)
         XCTAssertNil(old.packedMetalCalls)
+        XCTAssertNil(old.canonicalCPUKVCalls)
         XCTAssertEqual(old.calls, 1)
+    }
+
+    func testSmallCanonicalKVProjectionSharesProtectedCacheAndRejectsOtherShapes() throws {
+        try withSource(residentCacheBytes: 48) { source in
+            let x = MLXArray([Float(1), 2, 3, 4], [1, 4])
+            let first = try source.linearCanonicalKV(x, tensor: "embedding")
+            XCTAssertEqual(first.asArray(Float.self), [30, 70, 110])
+            XCTAssertEqual(source.readStatistics.bytesRead, 48)
+            let before = source.projectionStatistics
+            let again = try source.linearCanonicalKV(x, tensor: "embedding")
+            XCTAssertEqual(again.asArray(Float.self), [30, 70, 110])
+            XCTAssertEqual(source.readStatistics.bytesRead, 48)
+            let work = try source.projectionStatistics.subtracting(before)
+            XCTAssertEqual(work.canonicalCPUKVCalls, 1)
+            XCTAssertEqual(work.packedMetalCalls, 0)
+            XCTAssertEqual(work.residentWeightBytesReused, 48)
+            XCTAssertEqual(work.packedWeightCopyBytes, 48, "Explicit CPU handoff is counted even for cached weights")
+            XCTAssertThrowsError(try before.subtracting(source.projectionStatistics))
+            XCTAssertThrowsError(try source.linearCanonicalKV(x, tensor: "experts"))
+            XCTAssertThrowsError(try source.linearCanonicalKV(MLXArray.zeros([2, 4]), tensor: "embedding"))
+            XCTAssertThrowsError(try source.linearCanonicalKV(MLXArray.zeros([1, 5]), tensor: "embedding"))
+            XCTAssertEqual(source.readStatistics.bytesRead, 48)
+            source.shutdown()
+            XCTAssertEqual(first.asArray(Float.self), [30, 70, 110], "Output owns its reusable scratch copy")
+            XCTAssertThrowsError(try source.linearCanonicalKV(x, tensor: "embedding"))
+        }
     }
 
     func testVerifiedExpertAndEmbeddingReadsShareBoundedCache() throws {

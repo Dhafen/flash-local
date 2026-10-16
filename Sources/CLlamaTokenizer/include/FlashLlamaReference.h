@@ -24,6 +24,12 @@ int32_t flr_step(flr_context *, int32_t token, float * output, int32_t capacity)
 int32_t flr_round_linear_activations(uint32_t weight_type, const float * input,
     int32_t elements, float * output, int32_t output_capacity,
     void * packed_scratch, int32_t packed_capacity_bytes);
+// Production small K/V projection only: <=1024 output rows, <=65536 columns,
+// <=4 MiB packed weights. Uses pinned CPU operand rounding and vec_dot, without
+// a model/context/file or heap weight copy. All scratch belongs to the caller.
+int32_t flr_project_kv_rows(uint32_t weight_type, const void * weights, int32_t weight_bytes,
+    const float * input, int32_t columns, int32_t rows, float * output, int32_t output_capacity,
+    float * rounding_scratch, int32_t rounding_capacity, void * packed_scratch, int32_t packed_capacity);
 #ifdef __cplusplus
 }
 #endif

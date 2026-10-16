@@ -47,6 +47,18 @@ these rows bit for bit against CPU checkpoint inputs and record a transfer-
 inclusive synthetic benchmark. Projection weights remain streamed; this does
 not introduce a CPU whole-model inference path. Full graph gates still apply.
 
+The mixed fixture exposed one V projection just across a half rounding boundary
+(`0.23089598` CPU versus `0.23089603` packed Metal). Its single differing cached
+FP16 value then affected subsequent positions. Small K/V projections therefore
+use the unchanged pinned CPU `vec_dot` with its canonical operand conversion.
+Each is limited to one verified packed tile, at most 4 MiB, 1,024 output rows
+and 65,536 input columns. The same protected cache and reader own those bytes;
+there is no file or model opener in this helper. Expert projections remain on
+Metal. Reports identify `canonicalCPUKVCalls` and count explicit CPU handoff
+copies even on a resident hit. Tests compare raw results bit for bit against
+the CPU graph and record paired transfer/I/O-inclusive host timings. This is
+a numerical stability tradeoff pending actual phone performance measurements.
+
 `GGUFStreamedDecoder` dispatches explicitly by architecture; the existing chat,
 prefix checkpoints, cancellation, packed projections and bounded I/O are shared.
 The first Ornith app policy is 4,096 context tokens, up to 512 new tokens,
