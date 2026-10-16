@@ -279,7 +279,7 @@ final class REAMAppModel {
                         rawCacheBytes: cache, residentCacheBytes: residentCache)
                     var lastProgress = 0.0
                     return try engine.generate(messages: prompt, maximumNewTokens: limit,
-                        cancellationRequested: { flag.requested() || Task.isCancelled }) { event in
+                        cancellationRequested: { flag.requested() || Task.isCancelled }, captureCancelledSummary: true) { event in
                             if case .prefill(let p) = event {
                                 let now = ProcessInfo.processInfo.systemUptime
                                 guard now - lastProgress >= 0.2 || p.promptTokensCompleted == p.promptTokensTotal else { return }
@@ -314,8 +314,12 @@ final class REAMAppModel {
             switch await worker.value {
             case .success(let value):
                 summary = value
-                if let index = messages.firstIndex(where: { $0.id == responseID }) { messages[index].interrupted = false }
-                status = "Klar · \(value.generatedTokenIDs.count) genererade token"
+                if let index = messages.firstIndex(where: { $0.id == responseID }) {
+                    messages[index].interrupted = value.stopReason == .cancelled
+                }
+                status = value.stopReason == .cancelled
+                    ? "Stoppad · mätningen kan sparas i Filer."
+                    : "Klar · \(value.generatedTokenIDs.count) genererade token"
             case .failure(let failure):
                 if !flag.requested() { error = failure.localizedDescription }
                 status = "Genereringen avbröts."

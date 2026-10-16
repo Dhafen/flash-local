@@ -25,6 +25,10 @@ prompt processing. No captured conversation is stored in this repository.
   then name, within a fixed payload capacity. All routed experts and the
   token/PLE tables remain streamed. Cache payload bytes, hits and reuse are
   reported; allocator overhead is not disguised as payload capacity.
+- A deliberate Stop in the app can retain a partial measurement, explicitly
+  marked cancelled, so a short phone test does not require waiting for the
+  whole output limit. Only completed decode forwards count toward speed;
+  interrupted forward time and completed prompt positions are separate fields.
 
 The pinned 11,023,104-byte header (SHA-256
 `352b87fd036c3b14c4bcb3ff83c19dc1802be26c93686b4300972e9a43390292`)

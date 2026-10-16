@@ -56,7 +56,7 @@ struct Qwen4ExpTokenText {
 /// no network calls, mock responses, hidden context truncation or model-sized
 /// arrays. The app owns the worker/cancellation lifecycle around this object.
 public final class Qwen4ExpTextGeneration {
-    public enum StopReason: String, Codable, Sendable { case endOfGeneration, tokenLimit }
+    public enum StopReason: String, Codable, Sendable { case endOfGeneration, tokenLimit, cancelled }
     public struct Progress: Sendable {
         public let promptTokensCompleted: Int
         public let promptTokensTotal: Int
@@ -96,6 +96,9 @@ public final class Qwen4ExpTextGeneration {
         public var promptOutputProjectionsSkipped: Int? = nil
         public var prefillIOBytesRead: UInt64? = nil
         public var decodeIOBytesRead: UInt64? = nil
+        public var promptTokensCompleted: Int? = nil
+        /// A stopped partial forward is excluded from completed-forward speed.
+        public var interruptedDecodeForwardSeconds: Double? = nil
         public var decodeTokensPerSecond: Double? {
             decodeForwardPasses > 0 && decodeForwardSeconds > 0 ? Double(decodeForwardPasses) / decodeForwardSeconds : nil
         }
@@ -124,6 +127,7 @@ public final class Qwen4ExpTextGeneration {
 
     public func generate(messages: [Qwen35ChatMessage], maximumNewTokens: Int = 128,
                          cancellationRequested: () -> Bool = { false },
+                         captureCancelledSummary: Bool = false,
                          onEvent: (Event) throws -> Void) throws -> Summary {
         guard !running, (1...4096).contains(maximumNewTokens), maximumNewTokens < contextTokens else {
             throw GGUFError.limit("generation already active or output/context budget invalid")
@@ -157,34 +161,48 @@ public final class Qwen4ExpTextGeneration {
                 generatedTokens: generated.count, elapsedSeconds: ProcessInfo.processInfo.systemUptime - started,
                 ioBytesRead: try ioBytes(), footprintBytes: ProcessFootprint.current()?.footprintBytes ?? peak)
         }
-        for (i, id) in prompt.tokenIDs.enumerated() {
-            try check()
-            try autoreleasepool {
-                if i + 1 == prompt.tokenIDs.count {
-                    logits = try decoder.logits(for: UInt64(id), cancellationRequested: cancellationRequested).asArray(Float.self)
-                } else { try decoder.consume(UInt64(id), cancellationRequested: cancellationRequested) }
-            }
-            try onEvent(.prefill(progress(i + 1)))
-        }
-        let prefillSeconds = ProcessInfo.processInfo.systemUptime - started
-        let prefillIO = try ioBytes()
+        var completedPrompt = 0, prefillSeconds = 0.0, prefillIO: UInt64?
         var reason = StopReason.tokenLimit, decodeSeconds = 0.0, decodePasses = 0
-        for step in 0..<maximumNewTokens {
+        var interruptedDecodeSeconds = 0.0, pendingForwardStart: Double?
+        do {
+            for (i, id) in prompt.tokenIDs.enumerated() {
+                try check()
+                try autoreleasepool {
+                    if i + 1 == prompt.tokenIDs.count {
+                        logits = try decoder.logits(for: UInt64(id), cancellationRequested: cancellationRequested).asArray(Float.self)
+                    } else { try decoder.consume(UInt64(id), cancellationRequested: cancellationRequested) }
+                }
+                completedPrompt = i + 1
+                try onEvent(.prefill(progress(i + 1)))
+            }
+            prefillSeconds = ProcessInfo.processInfo.systemUptime - started
+            prefillIO = try ioBytes()
+            for step in 0..<maximumNewTokens {
+                try check()
+                let id = try Qwen4ExpGreedyToken.select(logits)
+                if tokenizer.isEndOfGeneration(id) { reason = .endOfGeneration; break }
+                let bytes = try tokenizer.bytes(for: id, includeControl: true)
+                outputBytes += bytes.count
+                guard outputBytes <= 4 << 20 else { throw GGUFError.limit("generated text exceeds 4 MiB") }
+                generated.append(id)
+                try onEvent(.token(id: id, textDelta: text.append(bytes), progress: progress(prompt.tokenIDs.count)))
+                if step + 1 < maximumNewTokens {
+                    let begin = ProcessInfo.processInfo.systemUptime
+                    pendingForwardStart = begin
+                    logits = try autoreleasepool { try decoder.logits(for: UInt64(id), cancellationRequested: cancellationRequested).asArray(Float.self) }
+                    decodeSeconds += ProcessInfo.processInfo.systemUptime - begin; decodePasses += 1
+                    pendingForwardStart = nil
+                }
+            }
             try check()
-            let id = try Qwen4ExpGreedyToken.select(logits)
-            if tokenizer.isEndOfGeneration(id) { reason = .endOfGeneration; break }
-            let bytes = try tokenizer.bytes(for: id, includeControl: true)
-            outputBytes += bytes.count
-            guard outputBytes <= 4 << 20 else { throw GGUFError.limit("generated text exceeds 4 MiB") }
-            generated.append(id)
-            try onEvent(.token(id: id, textDelta: text.append(bytes), progress: progress(prompt.tokenIDs.count)))
-            if step + 1 < maximumNewTokens {
-                let begin = ProcessInfo.processInfo.systemUptime
-                logits = try autoreleasepool { try decoder.logits(for: UInt64(id), cancellationRequested: cancellationRequested).asArray(Float.self) }
-                decodeSeconds += ProcessInfo.processInfo.systemUptime - begin; decodePasses += 1
+        } catch {
+            guard captureCancelledSummary, error is CancellationError, cancellationRequested() else { throw error }
+            reason = .cancelled
+            if prefillIO == nil { prefillSeconds = ProcessInfo.processInfo.systemUptime - started }
+            if let pendingForwardStart {
+                interruptedDecodeSeconds = ProcessInfo.processInfo.systemUptime - pendingForwardStart
             }
         }
-        try check()
         let trailing = text.finish()
         if !trailing.isEmpty { try onEvent(.trailingText(trailing)) }
         let cache = decoder.rawCacheStatistics
@@ -194,10 +212,11 @@ public final class Qwen4ExpTextGeneration {
               cache.cacheEvictionCount >= baselineCache.cacheEvictionCount else {
             throw GGUFError.invalid("raw cache accounting or lease fault")
         }
+        let totalIO = try ioBytes(), promptIO = prefillIO ?? totalIO
         return Summary(modelSHA256: artifact.manifest.sha256, promptTokenIDs: prompt.tokenIDs,
             generatedTokenIDs: generated, stopReason: reason, prefillSeconds: prefillSeconds,
             decodeForwardSeconds: decodeSeconds, decodeForwardPasses: decodePasses,
-            elapsedSeconds: ProcessInfo.processInfo.systemUptime - started, ioBytesRead: try ioBytes(),
+            elapsedSeconds: ProcessInfo.processInfo.systemUptime - started, ioBytesRead: totalIO,
             projections: try decoder.projectionStatistics.subtracting(baselineProjections),
             rawCacheHits: cache.cacheHitCount - baselineCache.cacheHitCount,
             rawCacheMisses: cache.cacheMissCount - baselineCache.cacheMissCount,
@@ -205,7 +224,8 @@ public final class Qwen4ExpTextGeneration {
             rawCacheCapacityBytes: cache.budgetBytes, rawCacheLifetimePeakBytes: cache.peakInUseBytes,
             maximumObservedFootprintBytes: peak, processLifetimePeakFootprintBytes: lifetimePeak,
             residentWeightCache: decoder.residentCacheStatistics,
-            promptOutputProjectionsSkipped: max(0, prompt.tokenIDs.count - 1),
-            prefillIOBytesRead: prefillIO, decodeIOBytesRead: try ioBytes() - prefillIO)
+            promptOutputProjectionsSkipped: min(completedPrompt, max(0, prompt.tokenIDs.count - 1)),
+            prefillIOBytesRead: promptIO, decodeIOBytesRead: totalIO - promptIO,
+            promptTokensCompleted: completedPrompt, interruptedDecodeForwardSeconds: interruptedDecodeSeconds)
     }
 }

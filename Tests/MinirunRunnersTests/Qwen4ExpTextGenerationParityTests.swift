@@ -81,6 +81,27 @@ final class Qwen4ExpTextGenerationParityTests: XCTestCase {
         XCTAssertEqual(again.projections.calls, summary.projections.calls,
             "Reset sessions report their own work, excluding the cancelled partial run")
         XCTAssertEqual(again.projections.logicalWeightBytes, summary.projections.logicalWeightBytes)
+        var stopWithReport = false
+        let partial = try engine.generate(messages: manifest.messages, maximumNewTokens: manifest.maximumNewTokens,
+            cancellationRequested: { stopWithReport }, captureCancelledSummary: true) { event in
+                if case .token = event { stopWithReport = true }
+            }
+        XCTAssertEqual(partial.stopReason, .cancelled)
+        XCTAssertEqual(partial.generatedTokenIDs, Array(summary.generatedTokenIDs.prefix(1)))
+        XCTAssertEqual(partial.promptTokensCompleted, summary.promptTokenIDs.count)
+        XCTAssertEqual(partial.decodeForwardPasses, 0)
+        XCTAssertNil(partial.decodeTokensPerSecond)
+        XCTAssertEqual((partial.prefillIOBytesRead ?? 0) + (partial.decodeIOBytesRead ?? 0), partial.ioBytesRead)
+        var stopDuringPrompt = false
+        let prefix = try engine.generate(messages: manifest.messages, maximumNewTokens: manifest.maximumNewTokens,
+            cancellationRequested: { stopDuringPrompt }, captureCancelledSummary: true) { event in
+                if case .prefill = event { stopDuringPrompt = true }
+            }
+        XCTAssertEqual(prefix.stopReason, .cancelled)
+        XCTAssertEqual(prefix.promptTokensCompleted, 1)
+        XCTAssertTrue(prefix.generatedTokenIDs.isEmpty)
+        XCTAssertEqual(prefix.decodeIOBytesRead, 0)
+        XCTAssertNil(prefix.decodeTokensPerSecond)
         XCTAssertThrowsError(try engine.generate(messages: manifest.messages, maximumNewTokens: 0) { _ in })
         print("QWEN4EXP_TEXT_SESSION_PARITY prompt=\(summary.promptTokenIDs.count) generated=\(ids.count) winnerMargin=\(reference.minimumWinnerMargin) exactTokenIDs=true")
     }
