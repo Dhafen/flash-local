@@ -16,10 +16,13 @@ final class GGUFStreamedLinearTests: XCTestCase {
         }
         let rowBytes = quantized ? columns / 256 * 144 : columns * 4
         let matrixBytes = rows * rowBytes, expertBytes = matrixBytes * experts
+        func aligned(_ bytes: Int) -> Int { (bytes + 31) / 32 * 32 }
+        let upOffset = aligned(expertBytes), denseOffset = aligned(upOffset + expertBytes)
+        let denseUpOffset = aligned(denseOffset + matrixBytes)
         let tensors: [(String, [Int], Int)] = [
-            ("gate", [columns, rows, experts], 0), ("up", [columns, rows, experts], expertBytes),
-            ("dense_gate", [columns, rows], expertBytes * 2),
-            ("dense_up", [columns, rows], expertBytes * 2 + matrixBytes)]
+            ("gate", [columns, rows, experts], 0), ("up", [columns, rows, experts], upOffset),
+            ("dense_gate", [columns, rows], denseOffset),
+            ("dense_up", [columns, rows], denseUpOffset)]
         put(3, 4); put(UInt64(tensors.count), 8); put(0, 8)
         for (name, shape, offset) in tensors {
             let bytes = Data(name.utf8); put(UInt64(bytes.count), 8); header.append(bytes)
@@ -28,11 +31,12 @@ final class GGUFStreamedLinearTests: XCTestCase {
             put(quantized ? 12 : 0, 4); put(UInt64(offset), 8)
         }
         let payloadOffset = (header.count + 31) / 32 * 32
-        let fileBytes = payloadOffset + expertBytes * 2 + matrixBytes * 2
+        let fileBytes = payloadOffset + denseUpOffset + matrixBytes
         let index = try GGUFIndex.parse(header: header, fileByteCount: UInt64(fileBytes))
         header.append(Data(repeating: 0, count: payloadOffset - header.count))
         if materialize {
-            for (name, shape, _) in tensors {
+            for (name, shape, offset) in tensors {
+                header.append(Data(repeating: 0, count: payloadOffset + offset - header.count))
                 for expert in 0..<(shape.count == 3 ? experts : 1) {
                     for row in 0..<rows {
                         let q = 1 + (expert * 3 + row % 7 + (name.contains("up") ? 5 : 0)) % 15
