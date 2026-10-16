@@ -31,14 +31,20 @@ jobs:
           git clone --quiet https://github.com/Dhafen/flash-local-swiftlet.git .work/swiftlet-validation
           git -C .work/swiftlet-validation checkout --detach 4a0510ecf678b3a5d4a5715abcd0bbb2aa839845
           test "$(git -C .work/swiftlet-validation rev-parse HEAD)" = 4a0510ecf678b3a5d4a5715abcd0bbb2aa839845
+          cp Experiments/OrnithPerformance/ValidationPackage.swift .work/swiftlet-validation/Package.swift
       - name: Swiftlet correctness and KV placement controls (synthetic only)
+        id: core
+        continue-on-error: true
         working-directory: .work/swiftlet-validation
         run: |
-          xcodebuild test -scheme Swiftlet-Package -destination 'platform=macOS' \
+          xcodebuild test -scheme SwiftletValidation-Package -destination 'platform=macOS' \
             -skipPackagePluginValidation -skipMacroValidation \
             -resultBundlePath swiftlet-tests.xcresult 2>&1 | tee swiftlet-tests.log | tail -70
           test "$(grep -c 'ORNITH_KV_PLACEMENT model=' swiftlet-tests.log)" -eq 3
       - name: Ornith metadata, placement and memory admission
+        id: experiment
+        if: always() && steps.core.outcome != 'skipped'
+        continue-on-error: true
         working-directory: Experiments/OrnithPerformance
         run: |
           xcodebuild test -scheme OrnithPerformance-Package -destination 'platform=macOS' \
@@ -46,6 +52,7 @@ jobs:
             -resultBundlePath experiment-tests.xcresult 2>&1 | tee experiment-tests.log | tail -70
           grep 'ORNITH_QPACK_SOURCE layers=40 experts=256 topK=8 tensors=1757' experiment-tests.log
       - name: Compile experiment for iOS Simulator
+        if: always() && steps.core.outcome != 'skipped'
         working-directory: Experiments/OrnithPerformance
         run: |
           xcodebuild build -scheme OrnithPerformance -destination 'generic/platform=iOS Simulator' \
@@ -61,3 +68,8 @@ jobs:
             Experiments/OrnithPerformance/experiment-ios.log
             Experiments/OrnithPerformance/Package.resolved
           retention-days: 7
+      - name: Require both numerical and experiment gates
+        if: always()
+        run: |
+          test '${{ steps.core.outcome }}' = success
+          test '${{ steps.experiment.outcome }}' = success
