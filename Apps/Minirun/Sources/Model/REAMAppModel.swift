@@ -191,6 +191,7 @@ final class REAMAppModel {
     private(set) var lastNumericsURL: URL?
     private(set) var lastNumericsReport: Qwen4ExpLocalParity.Report?
     private(set) var isPreview = false
+    private(set) var alternateRunnerActive = false
     var draft = ""
     let root: URL
     private(set) var source: PinnedGGUFDownload
@@ -208,7 +209,7 @@ final class REAMAppModel {
     @ObservationIgnored private var chatFile: URL?
     @ObservationIgnored private let modelSelectionDirectory: URL?
     var isBusy: Bool { activity != .idle }
-    var canRunNumerics: Bool { artifact != nil && !isBusy && !isPreview }
+    var canRunNumerics: Bool { artifact != nil && !isBusy && !isPreview && !alternateRunnerActive }
     var canChat: Bool { canRunNumerics && lastNumericsReport?.passedAtTestedPositions != false }
     var modelSize: String { ByteCountFormatter.string(fromByteCount: Int64(source.manifest.fileByteCount), countStyle: .file) }
     var selectedModel: LocalChatModel {
@@ -219,7 +220,19 @@ final class REAMAppModel {
         if source.manifest.sha256 == GGUFModelManifest.primaryREAM.sha256 { return LocalChatModel.ream.title }
         return "Lokal modell"
     }
-    var canSelectModel: Bool { modelSelectionDirectory != nil && !isPreview && !isBusy }
+    var canSelectModel: Bool { modelSelectionDirectory != nil && !isPreview && !isBusy && !alternateRunnerActive }
+    var canOpenAlternateRunner: Bool { !isBusy && !isPreview && !alternateRunnerActive }
+
+    func pauseForAlternateRunner() async {
+        alternateRunnerActive = true
+        stop()
+        await operation?.value
+        await inferenceSession.release()
+    }
+    func resumeAfterAlternateRunner() {
+        alternateRunnerActive = false
+        refreshStorage()
+    }
 
     init(root: URL, source: PinnedGGUFDownload = .primaryOrnith, chatFile: URL? = nil,
          settings: REAMRunSettings = .ornith, modelSelectionDirectory: URL? = nil) {

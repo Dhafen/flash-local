@@ -1,5 +1,18 @@
 # Third-party notices
 
+## Optional Ornith Performance Engine
+
+- SwiftletCore, Leon Ickson and contributors, Apache-2.0:
+  <https://github.com/leonickson1/Swiftlet>, upstream
+  `de1a942241f65ac43290cecffc85d69ea5b52310`; local fork runtime
+  `1388b08883d3d469addb5fdb88916ac7c5a19cd6`.
+- swift-transformers 1.3.3 provides local tokenization and Jinja templates.
+- `Apps/Minirun/Resources/SwiftletNotices.txt` includes full pinned dependency
+  notices, Swiftlet's design references and the mlx-lm kernel reference notice.
+  It is bundled offline and accessible from the app's license page.
+- The new package and application adapter use Apache-2.0. Downloaded Ornith
+  model weights retain their separate publisher notice; no weights are bundled.
+
 ## Flash Local additions: llama.cpp / GGML
 
 - Source: <https://github.com/ggml-org/llama.cpp>

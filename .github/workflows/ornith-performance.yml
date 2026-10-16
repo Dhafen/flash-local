@@ -1,5 +1,6 @@
 name: Ornith Performance experiment
 on:
+  workflow_call:
   push:
     branches: [codex/ornith-performance-engine]
     paths:

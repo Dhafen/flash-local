@@ -53,6 +53,9 @@ env:
   XCODEBUILD_FLAGS: -skipPackagePluginValidation -skipMacroValidation
 
 jobs:
+  qpack-validation:
+    if: ${{ !inputs.check_delivery_tools && !inputs.regenerate_project_only && !inputs.provisioning_only }}
+    uses: ./.github/workflows/ornith-performance.yml
   regenerate-project:
     if: github.event_name == 'workflow_dispatch' && inputs.regenerate_project_only
     runs-on: macos-26
@@ -102,7 +105,8 @@ jobs:
           retention-days: 7
 
   build-and-test:
-    if: ${{ !inputs.check_delivery_tools && !inputs.regenerate_project_only }}
+    needs: [qpack-validation]
+    if: ${{ !cancelled() && !inputs.check_delivery_tools && !inputs.regenerate_project_only && (needs.qpack-validation.result == 'success' || inputs.provisioning_only) }}
     name: ${{ inputs.provisioning_only && 'device archive · signing probe (no test coverage)' || 'streaming tests · app tests · package tests · iOS build' }}
     runs-on: macos-26
     timeout-minutes: ${{ inputs.upload_private_testflight && 120 || 90 }}
@@ -232,6 +236,7 @@ jobs:
             -scheme Minirun-macOS -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO \
             -only-testing:MinirunTests/ForkBrandRenderTests -resultBundlePath mac-brand.xcresult \
             -only-testing:MinirunTests/REAMChatRenderTests \
+            -only-testing:MinirunTests/OrnithPerformanceRenderTests \
             2>&1 | tee mac-brand.log | tail -50
           grep -E 'ForkBrandRenderTests.*passed' mac-brand.log
           xcrun xcresulttool export attachments --path mac-brand.xcresult --output-path brand-macos
@@ -290,6 +295,7 @@ jobs:
             -scheme Minirun-iOS -destination "platform=iOS Simulator,id=$SIMULATOR" CODE_SIGNING_ALLOWED=NO \
             -only-testing:MinirunIOSTests/ForkBrandRenderTests -resultBundlePath ios-brand.xcresult \
             -only-testing:MinirunIOSTests/REAMChatRenderTests \
+            -only-testing:MinirunIOSTests/OrnithPerformanceRenderTests \
             2>&1 | tee ios-brand.log | tail -60
           grep -E 'ForkBrandRenderTests.*passed' ios-brand.log
           xcrun xcresulttool export attachments --path ios-brand.xcresult --output-path brand-ios
