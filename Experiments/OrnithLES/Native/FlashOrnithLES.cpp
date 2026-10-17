@@ -199,6 +199,8 @@ flo_context * flo_open(int source, const char * directory, flo_options o, flo_ab
             std::ifstream in(fs::path(directory) / "manifest-template.json"); json manifest; in >> manifest;
             require(manifest.at("source_file_bytes").get<uint64_t>() == size, "Prepared source length changed");
             require(manifest.at("layout") == "gguf_tensor_major", "Unsupported local expert layout");
+            require(o.lookahead_depth <= manifest.at("model").at("expert_count").get<int64_t>(),
+                "LES lookahead exceeds expert count");
             std::map<std::pair<std::string, uint64_t>, uint64_t> groups;
             for (const auto & entry : manifest.at("entries")) {
                 const uint64_t bytes = entry.at("bytes_per_expert");

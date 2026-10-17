@@ -62,6 +62,16 @@ int main(int argc, char ** argv) {
         if (fd < 0) return 3;
         if (flo_prepare(fd, dir.c_str(), nullptr, nullptr)) throw std::runtime_error(flo_last_error());
         const int steps = fs::path(argv[1]).filename().string().find("top8") == std::string::npos ? 5 : 128;
+        std::ifstream manifest_input(dir / "manifest-template.json");
+        json manifest; manifest_input >> manifest;
+        const int bad_depth = std::min(17, manifest.at("model").at("expert_count").get<int>() + 1);
+        bool invalid_depth_rejected = false;
+        try { evaluate(fd, dir.c_str(), false, bad_depth, 1); }
+        catch (const std::runtime_error & error) {
+            const std::string reason = error.what();
+            invalid_depth_rejected = reason == "LES lookahead exceeds expert count" || reason == "Invalid scheduling options";
+        }
+        if (!invalid_depth_rejected) throw std::runtime_error("Invalid lookahead was not rejected before graph construction");
         const auto cpu = evaluate(fd, nullptr, false, 0, steps);
         const auto streamed = evaluate(fd, dir.c_str(), false, 0, steps);
         const auto ahead = evaluate(fd, dir.c_str(), false, 2, steps);
@@ -72,6 +82,7 @@ int main(int argc, char ** argv) {
         json report{{"syntheticOnly", true}, {"physicalPhone", false}, {"revision", flo_revision()},
             {"residentCPUReference", true}, {"cpuStreamingMaximumAbsoluteError", error},
             {"metalExecutionVerified", false}, {"actualRoutingIdentical", true},
+            {"invalidLookaheadRejected", true},
             {"resetBitwiseIdentical", true}, {"sameGreedy", true}, {"modelRequantized", false},
             {"gpuTimestampsAvailable", false},
             {"expertPayloadCopied", false}, {"positions", steps}, {"cpuLogits", cpu.logits}};

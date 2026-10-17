@@ -25,7 +25,8 @@ final class LESPolicyTests: XCTestCase {
         let off = try LESMemoryPlan(index: index, contextTokens: 32, footprint: footprint, lookaheadDepth: 0)
         let on = try LESMemoryPlan(index: index, contextTokens: 32, footprint: footprint, lookaheadDepth: 4)
         XCTAssertEqual(off.expertAllocationBytes, on.expertAllocationBytes)
-        XCTAssertEqual(off.cacheSlotsPerLayer, on.cacheSlotsPerLayer + 4)
+        XCTAssertEqual(on.lookaheadDepth, 3)
+        XCTAssertEqual(off.cacheSlotsPerLayer, on.cacheSlotsPerLayer + on.lookaheadDepth)
     }
     func testPageCacheVariantRetainsBoundedStagingWithoutDecodeCache() throws {
         let index = try index()
@@ -47,6 +48,8 @@ final class LESPolicyTests: XCTestCase {
             XCTAssertThrowsError(try LESMemoryPlan(index: index(), contextTokens: context, footprint: footprint))
         }
         XCTAssertThrowsError(try LESMemoryPlan(index: index(), contextTokens: 32, footprint: footprint, lookaheadDepth: 17))
+        XCTAssertEqual(try LESMemoryPlan(index: index(), contextTokens: 32, footprint: footprint,
+            lookaheadDepth: 16).lookaheadDepth, 3)
     }
     func testNumericalGateRequiresAllLogitsAndGreedyAgreement() {
         XCTAssertTrue(LESLogitComparison(positions: 4, maximumAbsoluteError: 0.001, relativeL2Error: 0.0001, sameGreedy: true).passed)

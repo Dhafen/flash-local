@@ -31,7 +31,8 @@ public struct LESMemoryPlan: Codable, Sendable, Equatable {
         } ?? ceiling
         processCeilingBytes = min(ceiling, physicalLimit)
         baselineFootprintBytes = footprint.footprintBytes
-        self.contextTokens = contextTokens; self.lookaheadDepth = pageCacheOnly ? 0 : lookaheadDepth
+        self.contextTokens = contextTokens
+        self.lookaheadDepth = pageCacheOnly ? 0 : min(lookaheadDepth, config.experts)
         prefillSlots = 32
         var groups: [String: (bytes: UInt64, layers: UInt64)] = [:]
         var dense = UInt64(index.headerByteCount + 65536)
