@@ -107,7 +107,8 @@ public enum LESPreparation {
         return try FileDigestComputer.digest(ofFileAt: url, algorithm: .sha256,
             cancellationRequested: { control.shouldAbort() }).hex
     }
-    public static func prepare(artifact: VerifiedGGUFArtifact, privateRoot: URL, control: LESControl) throws -> URL {
+    public static func prepare(artifact: VerifiedGGUFArtifact, privateRoot: URL, control: LESControl,
+                               onAdmission: (LESMemoryAdmission) -> Void = { _ in }) throws -> URL {
         try artifact.assertUnchanged()
         let fm = FileManager.default
         try fm.createDirectory(at: privateRoot, withIntermediateDirectories: true)
@@ -124,8 +125,8 @@ public enum LESPreparation {
             }
             try artifact.assertUnchanged(); return final
         }
-        guard let sample = ProcessFootprint.current() else { throw GGUFError.limit("LES memory sample unavailable") }
-        let plan = try LESMemoryPlan(index: artifact.index, contextTokens: 32, footprint: sample)
+        let plan = try LESBenchmark.plan(artifact, context: 32, depth: 4,
+            phase: "preparation", onAdmission: onAdmission)
         let available = try root.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
             .volumeAvailableCapacityForImportantUsage
         guard let available, available > 0, UInt64(available) > plan.denseBytes + (64 << 20) else {

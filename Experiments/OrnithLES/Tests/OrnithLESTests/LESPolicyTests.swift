@@ -133,7 +133,15 @@ final class LESPolicyTests: XCTestCase {
             return try [1, 2].map { try reference.logits(for: $0) }
         }
         let control = LESControl()
-        let prepared = try LESPreparation.prepare(artifact: artifact, privateRoot: root.appendingPathComponent("prepared"), control: control)
+        var admissions: [LESMemoryAdmission] = []
+        let prepared = try LESPreparation.prepare(artifact: artifact, privateRoot: root.appendingPathComponent("prepared"),
+            control: control, onAdmission: { admissions.append($0) })
+        XCTAssertEqual(admissions.count, 1)
+        let admission = try XCTUnwrap(admissions.first)
+        XCTAssertEqual(admission.phase, "preparation"); XCTAssertNil(admission.failure)
+        XCTAssertNotNil(admission.beforeReclaim); XCTAssertNotNil(admission.afterReclaim)
+        XCTAssertEqual(admission.plan?.contextTokens, 32)
+        print("ORNITH_PREPARATION_ADMISSION phaseCaptured=true beforeAndAfterCaptured=true syntheticOnly=true")
         let plan = try LESMemoryPlan(index: artifact.index, contextTokens: 32, footprint: XCTUnwrap(ProcessFootprint.current()))
         let candidate = try LESContext(artifact: artifact, prepared: prepared, plan: plan, control: control, syntheticCPUControl: true)
         for (index, token) in [1, 2].enumerated() {

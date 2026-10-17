@@ -103,6 +103,7 @@ jobs:
             > .work/les-swift-tests.log 2>&1
           tail -12 .work/les-swift-tests.log
           grep 'ORNITH_REAL_HEADER_MEMORY selectedExperts=8 requestedPrediction=4 adaptivePrediction=3 demandOnlyPrediction=0 insufficientDemandRejected=true metadataOnly=true' .work/les-swift-tests.log
+          grep 'ORNITH_PREPARATION_ADMISSION phaseCaptured=true beforeAndAfterCaptured=true syntheticOnly=true' .work/les-swift-tests.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:

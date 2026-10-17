@@ -81,7 +81,8 @@ private actor LESAppWorker {
         guard let artifact else { throw CancellationError() }
         if prepared == nil {
             progress("Förbereder fasta vikter. Experterna ligger kvar i din GGUF.")
-            prepared = try LESPreparation.prepare(artifact: artifact, privateRoot: privateRoot, control: control)
+            prepared = try LESPreparation.prepare(artifact: artifact, privateRoot: privateRoot, control: control,
+                onAdmission: { self.admissions.append($0) })
         }
         guard let prepared else { throw CancellationError() }
         if check == nil {

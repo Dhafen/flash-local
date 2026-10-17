@@ -198,6 +198,8 @@ between inference owners, after the preceding context and autorelease pool
 have ended. It resamples actual footprint and iOS headroom before admission;
 this cleanup never runs inside a forward or between a cold/warm pair. Reports
 retain before/after samples, admitted components and failures for each phase.
+The same boundary check covers initial dense-file preparation, so a first
+installation cannot bypass this cleanup and phase reporting.
 
 Prediction is optional I/O. When fewer slots fit, its depth falls before the
 actual selected-expert allowance can fall below eight. If eight demand slots

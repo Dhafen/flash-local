@@ -87,7 +87,7 @@ public enum LESBenchmark {
         _ = malloc_zone_pressure_relief(nil, 0)
         return (before, ProcessFootprint.current())
     }
-    private static func plan(_ artifact: VerifiedGGUFArtifact, context: Int, depth: Int,
+    static func plan(_ artifact: VerifiedGGUFArtifact, context: Int, depth: Int,
                              pageCache: Bool = false, phase: String,
                              onAdmission: (LESMemoryAdmission) -> Void) throws -> LESMemoryPlan {
         let samples = reclaimIdleBuffers()
