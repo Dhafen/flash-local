@@ -1,6 +1,25 @@
 # Private internal TestFlight delivery
 
-Latest version **0.1.0 (107)**, app source
+Latest version **0.1.0 (112)**, app source
+`207b5334df8661f62222af954717fb041a01311d`, is available to the existing
+private internal group. [Full delivery run 39073532467](https://github.com/Dhafen/flash-local/actions/runs/39073532467)
+passed the native/reference and QPack controls, 18 selected Swift tests,
+580 app tests, 474 package invocations (9 environment skips), 36 reviewed
+light/dark captures, device archive, signing and internal-only delivery.
+A fresh read-only Apple audit confirms `VALID`, `INTERNAL_ONLY`,
+`IN_BETA_TESTING`, nonexpired, the exact private group and unchanged sole-owner
+membership. The sealed IPA is
+`0b058fca1b407899aaa85bfb1421f5647b5df262711511a0e6e7ab57124e9237`.
+
+This build adds streamed thinking and adaptive memory admission. Update the
+existing app and retain its installed GGUF. The build-108 phone attempt
+stopped at memory admission without a completed numerical/timing comparison;
+confirmation of the build-112 memory change and LES throughput is pending.
+See [the experiment and local report analysis](ORNITH-LES.md).
+
+## Previous build 107
+
+Version **0.1.0 (107)**, app source
 `bbbb693799d6109bada90974fd29fcbec4c11677`, is available to the existing
 private internal group. [Full delivery run 39054946058](https://github.com/Dhafen/flash-local/actions/runs/39054946058)
 passed native CPU streaming/cache/LES/page-cache controls, mixed Q4_K/Q6_K

@@ -67,7 +67,7 @@ toward admission. No static MiniCPM expert-frequency/prewarm table is reused.
 | Candidate | Current evidence | Next decision |
 | --- | --- | --- |
 | A: existing packed GGUF/MLX | Phone build 107: 1.931 decode forwards/s, 190 forwards; 3.954 GB peak; uncontrolled prompt/cache | Same fixed prompt, at least 128 decode steps per mode |
-| B: llama.cpp-omni LES | Build 107 host/reference gates pass; first phone model load fails before numerical check | Resolve native loading, then trained Metal/reference gate and phone comparison |
+| B: llama.cpp-omni LES | Build 112 delivered after host/reference gates; build 108 phone attempt stopped at memory admission | Confirm adaptive admission on phone, then trained Metal/reference gate and 128-token comparison |
 | C: Flash-MoE pipeline | Code inspected; fused expert/pointwise kernels, deferred command buffers, parallel pread; no redistribution license found | Do not copy; compare permitted independently implemented techniques |
 | Swiftlet/QPack | Build 97 delivered, grouped kernels conditionally activated after four-position replay; no phone result | Different checkpoint quantization, so cannot be an identical-weight A/B |
 
@@ -227,3 +227,19 @@ The ordinary chat still uses its existing runner; LES is an opt-in comparison.
 Phone confirmation of the memory change, trained Metal/reference agreement,
 comparable 128-token performance and a fastest-backend result remain pending.
 Hosted tests and reviewed simulator captures do not establish these results.
+
+## Local analysis of phone exports
+
+Run `python3 scripts/analyze_ornith_les.py REPORT.json` on an exported LES
+report. It only reads the local JSON and prints whitelisted aggregates.
+Failed admissions retain before/after footprint and recover published numeric
+reservations without echoing raw errors, paths or chat content. A sampled peak
+alone is never substituted for the live baseline at rejection.
+
+Each cache state receives a provisional, single-prompt ranking only when all
+four modes complete at least 128 tokens, the short numerical/routing gate
+passes, token-output hashes and prompt lengths agree, memory stays in budget
+and thermal conditions are comparable. Zero-depth lookahead, inconsistent
+mode geometry, partial GPU timestamps and missing data are reported explicitly.
+The analysis does not select the app's backend or establish full model quality,
+physical flash traffic, authenticated offline execution or sustained performance.
