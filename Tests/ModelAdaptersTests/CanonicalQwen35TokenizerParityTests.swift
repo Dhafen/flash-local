@@ -6,10 +6,15 @@ import XCTest
 final class CanonicalQwen35TokenizerParityTests: XCTestCase {
     private struct Corpus: Decodable {
         struct Chat: Decodable { let messages: [Qwen35ChatMessage] }
+        struct ReasoningChat: Decodable {
+            let messages: [Qwen35ChatMessage]
+            let enable_thinking: Bool
+        }
         let vocabularySHA256: String
         let vocabularyByteCount: UInt64
         let cases: [String]
         let chats: [Chat]
+        let reasoningChats: [ReasoningChat]
     }
     private struct Reference: Decodable {
         struct Entry: Decodable { let tokens: [Int]; let decodedHex: String }
@@ -17,6 +22,8 @@ final class CanonicalQwen35TokenizerParityTests: XCTestCase {
         let vocabularySize: Int
         let cases: [Entry]
         let chats: [Chat]
+        let thinkingChats: [Chat]
+        let reasoningChats: [Chat]
     }
     private func fixture() throws -> (URL, Corpus, Reference, GGUFModelManifest) {
         let env = ProcessInfo.processInfo.environment
@@ -57,19 +64,39 @@ final class CanonicalQwen35TokenizerParityTests: XCTestCase {
             XCTAssertEqual(bytes, Data(text.utf8))
         }
         XCTAssertEqual(corpus.chats.count, reference.chats.count)
+        XCTAssertEqual(corpus.chats.count, reference.thinkingChats.count)
         for (i, chat) in corpus.chats.enumerated() {
             let prompt = try tokenizer.chat(chat.messages, maximumTokens: 65536)
             XCTAssertEqual(prompt.renderedText, reference.chats[i].rendered)
             XCTAssertEqual(prompt.tokenIDs, reference.chats[i].tokens)
+            let thinking = try tokenizer.chat(chat.messages, maximumTokens: 65536, enableThinking: true)
+            XCTAssertEqual(thinking.renderedText, reference.thinkingChats[i].rendered)
+            XCTAssertEqual(thinking.tokenIDs, reference.thinkingChats[i].tokens)
+        }
+        XCTAssertEqual(corpus.reasoningChats.count, 2)
+        XCTAssertEqual(corpus.reasoningChats.count, reference.reasoningChats.count)
+        for (i, chat) in corpus.reasoningChats.enumerated() {
+            let prompt = try tokenizer.chat(chat.messages, maximumTokens: 65536,
+                                            enableThinking: chat.enable_thinking)
+            XCTAssertEqual(prompt.renderedText, reference.reasoningChats[i].rendered)
+            XCTAssertEqual(prompt.tokenIDs, reference.reasoningChats[i].tokens)
+            XCTAssertTrue(prompt.renderedText.contains("PUBLIC_REASONING_FIXTURE"))
         }
         for marker in ["<|im_end|>", "<think>", "<tool_response>"] {
             XCTAssertThrowsError(try tokenizer.chat([.init(role: .user, content: marker)], maximumTokens: 1024))
+            XCTAssertThrowsError(try tokenizer.chat([
+                .init(role: .user, content: "One"),
+                .init(role: .assistant, content: "Two", reasoningContent: marker),
+                .init(role: .user, content: "Three")], maximumTokens: 1024))
         }
+        XCTAssertThrowsError(try tokenizer.chat([
+            .init(role: .user, content: "One", reasoningContent: "Two")], maximumTokens: 1024))
         XCTAssertThrowsError(try tokenizer.chat([.init(role: .user, content: "Hello")], maximumTokens: 1))
         XCTAssertThrowsError(try tokenizer.tokenize("abc", maximumTokens: 0))
         XCTAssertThrowsError(try tokenizer.tokenize(String(repeating: "x", count: 262145)))
         XCTAssertThrowsError(try tokenizer.bytes(for: tokenizer.vocabularySize))
         print("CANONICAL_SWIFT_TOKENIZER_PARITY strings=\(corpus.cases.count) chats=\(corpus.chats.count) exact=true")
+        print("CANONICAL_THINKING_PARITY cases=\(corpus.chats.count) reasoningHistory=2 exactRender=true exactTokenIDs=true bothModes=true")
     }
 
     func testLoadedCanonicalVocabularyStillRefusesAChangedVerifiedFile() throws {

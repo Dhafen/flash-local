@@ -44,8 +44,10 @@ class PerformanceAnalysisTests(unittest.TestCase):
         report = gguf()
         report["modelFileBytes"] = 100
         report["generation"].update(ioBytesRead=1000, prefillIOBytesRead=800)
+        report["generation"]["thinkingEnabled"] = True
         result = analyze(report)
         self.assertEqual(result["readAccounting"]["readVolumeDividedByModelFileBytes"], 10)
+        self.assertTrue(result["thinkingEnabled"])
         self.assertEqual(result["prefill"]["returnedReadBytesPerEvaluatedToken"], 100)
         for flag in ["measuresUniqueModelBytes", "measuresPhysicalFlashTraffic", "measuresDownloadBytes"]:
             self.assertFalse(result["readAccounting"][flag])

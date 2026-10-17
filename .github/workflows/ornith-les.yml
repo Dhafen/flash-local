@@ -77,14 +77,29 @@ jobs:
         run: python3 scripts/build_ornith_les.py
       - name: Build unchanged tokenizer for the Swift adapter checks
         run: python3 scripts/build_tokenizer_xcframework.py
+      - name: Both thinking modes against the pinned Ornith template
+        run: |
+          python3 scripts/make_tokenizer_reference_fixture.py --ornith
+          cmake --build .work/reference-build --config Release --target flash-local-tokenizer-reference --parallel 3
+          .work/reference-build/bin/flash-local-tokenizer-reference \
+            .test-fixtures/ornith-tokenizer/qwen35-vocabulary-only.gguf \
+            .test-fixtures/ornith-tokenizer/qwen35-tokenizer-corpus.bin \
+            .test-fixtures/ornith-tokenizer/qwen35-tokenizer-reference.json \
+            .test-fixtures/ornith-tokenizer/qwen35-tokenizer-corpus.json \
+            > .work/ornith-thinking-tokenizer.log 2>&1
+          tail -5 .work/ornith-thinking-tokenizer.log
       - name: Swift memory, comparison and aggregate export controls
         env:
           FLASH_LOCAL_ENABLE_LES: '1'
         run: |
           export ORNITH_LES_FIXTURE_ROOT="$PWD/.test-fixtures"
           export TEST_RUNNER_ORNITH_LES_FIXTURE_ROOT="$ORNITH_LES_FIXTURE_ROOT"
+          export GGUF_HEADER_FIXTURE="$PWD/.test-fixtures/ornith-tokenizer/qwen35-vocabulary-only.gguf"
+          export TEST_RUNNER_GGUF_HEADER_FIXTURE="$GGUF_HEADER_FIXTURE"
           xcodebuild test -scheme minirun-Package -destination 'platform=macOS' \
-            -only-testing:OrnithLESTests -skipPackagePluginValidation -skipMacroValidation \
+            -only-testing:OrnithLESTests -only-testing:ModelAdaptersTests/CanonicalQwen35TokenizerParityTests \
+            -only-testing:ModelAdaptersTests/QwenThinkingTextTests \
+            -skipPackagePluginValidation -skipMacroValidation \
             > .work/les-swift-tests.log 2>&1
           tail -12 .work/les-swift-tests.log
       - uses: actions/upload-artifact@v4
@@ -106,6 +121,7 @@ jobs:
             .work/les-swift-tests.log
             .work/les-real-header.json
             .work/les-real-header.log
+            .work/ornith-thinking-tokenizer.log
           retention-days: 7
       - name: Export source-bound LES framework for full app validation
         uses: actions/upload-artifact@v4

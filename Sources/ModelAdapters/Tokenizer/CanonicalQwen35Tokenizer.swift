@@ -78,31 +78,37 @@ public final class CanonicalQwen35Tokenizer {
         return Data(bytes.map { UInt8(bitPattern: $0) })
     }
 
-    public func chat(_ messages: [Qwen35ChatMessage], maximumTokens: Int) throws -> ChatPrompt {
+    public func chat(_ messages: [Qwen35ChatMessage], maximumTokens: Int,
+                     enableThinking: Bool = false) throws -> ChatPrompt {
         try artifact.assertUnchanged()
         let expectedTemplate = artifact.index.metadata["general.architecture"]?.text == "qwen35moe"
             ? Self.supportedOrnithTemplateSHA256 : Self.supportedTemplateSHA256
         guard let template = artifact.index.metadata["tokenizer.chat_template"]?.text,
               SHA256.hash(data: Data(template.utf8)).map({ String(format: "%02x", $0) }).joined() == expectedTemplate else {
-            throw GGUFError.unsupported("GGUF chat template differs from the pinned no-thinking text-chat contract")
+            throw GGUFError.unsupported("GGUF chat template differs from the pinned text-chat contract")
         }
         guard !messages.isEmpty, messages.count <= 4096 else { throw GGUFError.limit("chat message count") }
         var contentBytes = 0
         for message in messages {
             contentBytes += message.content.utf8.count
+            if let reasoning = message.reasoningContent {
+                guard message.role == .assistant else { throw GGUFError.invalid("Only assistant messages may contain reasoning") }
+                contentBytes += reasoning.utf8.count
+            }
             guard contentBytes <= 262144 else { throw GGUFError.limit("chat content exceeds 256 KiB") }
         }
         let json = try JSONEncoder().encode(messages)
         guard json.count <= 1048576 else { throw GGUFError.limit("chat JSON exceeds 1 MiB") }
         let size = json.withUnsafeBytes {
-            flt_render_chat(handle, $0.bindMemory(to: CChar.self).baseAddress, Int32(json.count), nil, 0)
+            flt_render_chat_with_thinking(handle, $0.bindMemory(to: CChar.self).baseAddress,
+                                         Int32(json.count), enableThinking, nil, 0)
         }
         guard size < 0, size != Int32.min, -Int(size) <= 524288 else { throw Self.failure() }
         var rendered = [CChar](repeating: 0, count: -Int(size))
         let written = json.withUnsafeBytes { input in
             rendered.withUnsafeMutableBufferPointer { output in
-                flt_render_chat(handle, input.bindMemory(to: CChar.self).baseAddress, Int32(json.count),
-                                output.baseAddress, Int32(output.count))
+                flt_render_chat_with_thinking(handle, input.bindMemory(to: CChar.self).baseAddress,
+                    Int32(json.count), enableThinking, output.baseAddress, Int32(output.count))
             }
         }
         guard Int(written) == rendered.count else { throw Self.failure() }

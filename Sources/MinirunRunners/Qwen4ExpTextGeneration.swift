@@ -105,6 +105,8 @@ public final class Qwen4ExpTextGeneration {
         public var prefixCheckpointPayloadBytes: UInt64? = nil
         public var prefillProjections: GGUFProjectionStatistics? = nil
         public var decodeProjections: GGUFProjectionStatistics? = nil
+        /// Prompt mode; all generated reasoning and answer tokens count above.
+        public var thinkingEnabled: Bool? = nil
         public var decodeTokensPerSecond: Double? {
             decodeForwardPasses > 0 && decodeForwardSeconds > 0 ? Double(decodeForwardPasses) / decodeForwardSeconds : nil
         }
@@ -147,6 +149,7 @@ public final class Qwen4ExpTextGeneration {
 
     public func generate(messages: [Qwen35ChatMessage], maximumNewTokens: Int = 128,
                          reusePromptPrefix: Bool = false,
+                         enableThinking: Bool = false,
                          cancellationRequested: () -> Bool = { false },
                          captureCancelledSummary: Bool = false,
                          onEvent: (Event) throws -> Void) throws -> Summary {
@@ -181,7 +184,8 @@ public final class Qwen4ExpTextGeneration {
             return stats.bytesRead - baselineIO
         }
         try check()
-        let prompt = try tokenizer.chat(messages, maximumTokens: contextTokens - maximumNewTokens)
+        let prompt = try tokenizer.chat(messages, maximumTokens: contextTokens - maximumNewTokens,
+                                        enableThinking: enableThinking)
         var reused = 0
         if reusePromptPrefix {
             if !stateTokens.isEmpty, prompt.tokenIDs.starts(with: stateTokens),
@@ -275,7 +279,7 @@ public final class Qwen4ExpTextGeneration {
         let totalIO = try ioBytes(), promptIO = prefillIO ?? totalIO
         let finalProjections = decoder.projectionStatistics
         let prefillWork = prefillProjections ?? finalProjections
-        let result = Summary(modelSHA256: artifact.manifest.sha256, promptTokenIDs: prompt.tokenIDs,
+        var result = Summary(modelSHA256: artifact.manifest.sha256, promptTokenIDs: prompt.tokenIDs,
             generatedTokenIDs: generated, stopReason: reason, prefillSeconds: prefillSeconds,
             decodeForwardSeconds: decodeSeconds, decodeForwardPasses: decodePasses,
             elapsedSeconds: ProcessInfo.processInfo.systemUptime - started, ioBytesRead: totalIO,
@@ -293,6 +297,7 @@ public final class Qwen4ExpTextGeneration {
             prefixCheckpointPayloadBytes: prefixCheckpoint?.payloadBytes,
             prefillProjections: try prefillWork.subtracting(baselineProjections),
             decodeProjections: try finalProjections.subtracting(prefillWork))
+        result.thinkingEnabled = enableThinking
         retainState = reusePromptPrefix
         return result
     }

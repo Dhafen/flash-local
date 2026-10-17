@@ -178,4 +178,10 @@ context/decode. It checks the original loader plus three streamed slot
 layouts, all 123 expert tensor types/strides/views, 41 stored blocks and the
 real tokenizer IDs. Physical allocation is capped at 32 MiB per generated
 file and host RSS at 1 GiB. This is descriptor/layout evidence, never trained
-model numerical or GPU execution evidence; its first CI validation is pending.
+model numerical or GPU execution evidence. The source-bound control at
+`74012d07e96aee26ea4cac3b70e8cda23fae3366` passed in Actions run
+`39068453176`: 753 tensor shapes, all four loader layouts, identical tokenizer
+IDs, 21,979,136 physically allocated storage bytes and 152,879,104 host peak
+RSS bytes. Its report explicitly records that inference was not executed and
+no trained weight payload was present. The synthetic numerical tests and
+three-platform framework compilation also passed in that run.

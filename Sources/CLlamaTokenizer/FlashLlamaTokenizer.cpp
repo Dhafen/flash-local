@@ -92,22 +92,34 @@ int32_t flt_token_piece(const flt_vocabulary * v, int32_t token, bool special,
 }
 int32_t flt_render_chat(const flt_vocabulary * v, const char * messages_json,
                         int32_t bytes, char * output, int32_t capacity) {
+    return flt_render_chat_with_thinking(v, messages_json, bytes, false, output, capacity);
+}
+int32_t flt_render_chat_with_thinking(const flt_vocabulary * v, const char * messages_json,
+                        int32_t bytes, bool enable_thinking, char * output, int32_t capacity) {
     if (!v || !v->program || !messages_json || bytes < 0 || bytes > 1048576 || capacity < 0 ||
         capacity > 524288 || (!output && capacity)) return fail("Invalid bounded chat request");
     try {
         auto messages = common_json::parse(std::string(messages_json, bytes));
         if (!messages.is_array() || messages.empty() || messages.size() > 4096) return fail("Chat message count");
-        std::string expected = "user"; size_t total = 0, index = 0;
+        std::string expected = "user"; size_t total = 0, index = 0; bool reasoning_history = false;
         for (const auto & message : messages) {
-            if (!message.is_object() || message.size() != 2 || !message.contains("role") ||
+            const bool has_reasoning = message.is_object() && message.contains("reasoning_content");
+            if (!message.is_object() || message.size() != size_t(has_reasoning ? 3 : 2) || !message.contains("role") ||
                 !message.contains("content") || !message.at("role").is_string() ||
                 !message.at("content").is_string()) return fail("Chat needs typed text messages");
             auto role = message.at("role").get<std::string>();
             auto content = message.at("content").get<std::string>();
             total += content.size();
+            std::string reasoning;
+            if (has_reasoning) {
+                if (role != "assistant" || !message.at("reasoning_content").is_string()) return fail("Invalid assistant reasoning");
+                reasoning = message.at("reasoning_content").get<std::string>();
+                total += reasoning.size(); reasoning_history = reasoning_history || !reasoning.empty();
+            }
             if (total > 262144) return fail("Chat content exceeds 256 KiB");
             for (const auto & marker : v->reserved) {
-                if (content.find(marker) != std::string::npos) return fail("Message contains structural tokenizer markup");
+                if (content.find(marker) != std::string::npos || reasoning.find(marker) != std::string::npos)
+                    return fail("Message contains structural tokenizer markup");
             }
             if (index++ == 0 && role == "system") continue;
             if (role != expected) return fail("Chat roles must alternate after the optional system message");
@@ -115,7 +127,7 @@ int32_t flt_render_chat(const flt_vocabulary * v, const char * messages_json,
         }
         if (expected != "assistant") return fail("Chat needs a final user turn");
         auto input = common_json::object(); input["messages"] = messages;
-        input["enable_thinking"] = false; input["preserve_thinking"] = false;
+        input["enable_thinking"] = enable_thinking; input["preserve_thinking"] = reasoning_history;
         input["add_generation_prompt"] = true;
         jinja::context context(v->chat_template);
         jinja::global_from_json(context, input, false);

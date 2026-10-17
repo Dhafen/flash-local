@@ -24,10 +24,15 @@ int32_t flt_encode(const flt_vocabulary *, const char * text, int32_t bytes,
                    bool parse_special, int32_t * output, int32_t capacity);
 int32_t flt_token_piece(const flt_vocabulary *, int32_t token, bool special,
                         char * output, int32_t capacity);
-// JSON array of typed text messages. Fixed no-thinking/no-tools policy;
+// JSON array of typed text messages and optional assistant reasoning_content.
+// Fixed no-thinking/no-tools generation policy;
 // validates roles and rejects structural-token injection in message text.
 int32_t flt_render_chat(const flt_vocabulary *, const char * messages_json,
                         int32_t bytes, char * output, int32_t capacity);
+// Same validated text-only contract, with an explicit reasoning prelude.
+// The legacy function above remains identical to enable_thinking=false.
+int32_t flt_render_chat_with_thinking(const flt_vocabulary *, const char * messages_json,
+                        int32_t bytes, bool enable_thinking, char * output, int32_t capacity);
 #ifdef __cplusplus
 }
 #endif

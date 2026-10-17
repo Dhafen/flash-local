@@ -7,6 +7,81 @@ import XCTest
 
 @MainActor
 final class REAMAppModelTests: XCTestCase {
+    func testThinkingDefaultsToOrnithAndDoesNotChangeREAM() {
+        let root = FileManager.default.temporaryDirectory
+        let ornith = REAMAppModel(root: root)
+        XCTAssertTrue(ornith.thinkingEnabled); XCTAssertTrue(ornith.supportsThinking)
+        ornith.setThinkingEnabled(false); XCTAssertFalse(ornith.thinkingEnabled)
+        let ream = REAMAppModel(root: root, source: .primaryREAM, settings: .initial)
+        ream.setThinkingEnabled(true)
+        XCTAssertFalse(ream.thinkingEnabled); XCTAssertFalse(ream.supportsThinking)
+    }
+    func testLegacyMessagesDecodeAndReasoningIsSeparateFromCanonicalHistory() throws {
+        let old = try JSONSerialization.data(withJSONObject: [["id": UUID().uuidString,
+            "role": "assistant", "text": "Legacy reply", "interrupted": false]])
+        let restored = try JSONDecoder().decode([REAMMessage].self, from: old)
+        XCTAssertEqual(restored.first?.text, "Legacy reply")
+        XCTAssertNil(restored.first?.reasoning); XCTAssertNil(restored.first?.isThinking)
+        let history: [REAMMessage] = [.init(role: .user, text: "First"),
+            .init(role: .assistant, text: "55", reasoning: "Public synthetic reasoning"),
+            .init(role: .user, text: "Stopped"),
+            .init(role: .assistant, text: "", interrupted: true, reasoning: "Unfinished synthetic reasoning"),
+            .init(role: .user, text: "Next")]
+        let prompt = REAMMessage.generationPrompt(history)
+        XCTAssertEqual(prompt.map(\.content), ["First", "55", "Stopped", "", "Next"])
+        XCTAssertEqual(prompt[1].reasoningContent, "Public synthetic reasoning")
+        XCTAssertEqual(prompt[3].reasoningContent, "Unfinished synthetic reasoning")
+        XCTAssertEqual(history[3].reasoning, "Unfinished synthetic reasoning")
+    }
+    func testOrnithThinkingUsesCanonicalTokensAndStopsWithoutAnActiveIndicator() async throws {
+        let env = ProcessInfo.processInfo.environment
+        guard let path = env["GGUF_HEADER_FIXTURE"] ?? env["TEST_RUNNER_GGUF_HEADER_FIXTURE"] else {
+            throw XCTSkip("Set the generated synthetic fixture directory")
+        }
+        let fixtures = URL(fileURLWithPath: path).deletingLastPathComponent()
+        let fixture = try JSONDecoder().decode(Fixture.self,
+            from: Data(contentsOf: fixtures.appendingPathComponent("synthetic-ornith-chat.json")))
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try LocalModelStorage.prepare(root: root)
+        defer { try? FileManager.default.removeItem(at: root) }
+        XCTAssertLessThan(fixture.fileByteCount, 1 << 20)
+        try FileManager.default.copyItem(at: fixtures.appendingPathComponent(fixture.fileName),
+            to: root.appendingPathComponent(fixture.fileName))
+        let manifest = try GGUFModelManifest(fileName: fixture.fileName, fileByteCount: fixture.fileByteCount, sha256: fixture.sha256)
+        let verified = try VerifiedGGUFArtifact.verify(insideRoot: root, manifest: manifest)
+        let (prompt, expected) = try autoreleasepool { () throws -> ([Int], [Int]) in
+            let tokenizer = try CanonicalQwen35Tokenizer(artifact: verified)
+            let prompt = try tokenizer.chat(fixture.messages, maximumTokens: fixture.contextTokens - 3, enableThinking: true)
+            XCTAssertTrue(prompt.renderedText.hasSuffix("<think>\n"))
+            let reference = try Qwen4ExpCPUReference(artifact: verified, contextTokens: fixture.contextTokens, budgetBytes: 4_000_000_000)
+            var logits: [Float] = [], ids: [Int] = []
+            for token in prompt.tokenIDs { logits = try reference.logits(for: token) }
+            for step in 0..<3 {
+                var best = 0
+                for i in logits.indices where logits[i] > logits[best] { best = i }
+                if tokenizer.isEndOfGeneration(best) { break }
+                ids.append(best)
+                if step < 2 { logits = try reference.logits(for: best) }
+            }
+            return (prompt.tokenIDs, ids)
+        }
+        let source = try PinnedGGUFDownload(url: URL(string: "https://example.invalid/synthetic.gguf")!, manifest: manifest)
+        XCTAssertFalse(expected.isEmpty, "The synthetic thinking session must actually generate tokens")
+        let model = REAMAppModel(root: root, source: source,
+            settings: REAMRunSettings(contextTokens: fixture.contextTokens, budgetBytes: 4_000_000_000,
+                maximumNewTokens: 3, rawCacheBytes: 2 << 20))
+        model.prepare(); await model.waitUntilIdle()
+        model.setThinkingEnabled(true); XCTAssertTrue(model.thinkingEnabled)
+        model.draft = try XCTUnwrap(fixture.messages.first).content; model.send()
+        XCTAssertNotEqual(model.messages.last?.isThinking, true, "A waiting prompt is not generated reasoning")
+        await model.waitUntilIdle()
+        XCTAssertNil(model.error); XCTAssertEqual(model.summary?.promptTokenIDs, prompt)
+        XCTAssertEqual(model.summary?.generatedTokenIDs, expected)
+        XCTAssertEqual(model.summary?.thinkingEnabled, true); XCTAssertNotEqual(model.messages.last?.isThinking, true)
+        model.draft = "Next"; model.send(); model.stop(); await model.waitUntilIdle()
+        XCTAssertNotEqual(model.messages.last?.isThinking, true)
+        print("THINKING_CHAT canonicalPrompt=true sameReferenceTokens=true separateChannels=true stopClearsIndicator=true syntheticOnly=true")
+    }
     private struct Fixture: Decodable {
         let fileName: String
         let fileByteCount: UInt64

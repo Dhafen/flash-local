@@ -110,6 +110,9 @@ def analyze(report):
         "measuresPhysicalFlashTraffic": False,
         "measuresDownloadBytes": False,
     }
+    thinking = generation.get("thinkingEnabled")
+    if thinking is not None and not isinstance(thinking, bool):
+        raise ValueError("invalid thinking mode")
     build = report.get("appBuild")
     if not isinstance(build, str) or not build.isascii() or not build.isdigit():
         build = None
@@ -117,6 +120,7 @@ def analyze(report):
         "schemaVersion": 1,
         "backend": backend,
         "kernelMode": kernel_mode,
+        "thinkingEnabled": thinking,
         "readAccounting": read_accounting,
         "appBuild": build,
         "contextCapacityTokens": number(context, "context capacity", integer=True, positive=True),

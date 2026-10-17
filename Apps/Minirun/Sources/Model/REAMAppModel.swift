@@ -10,8 +10,12 @@ struct REAMMessage: Codable, Identifiable, Sendable {
     let role: Qwen35ChatMessage.Role
     var text: String
     var interrupted: Bool
-    init(role: Qwen35ChatMessage.Role, text: String, interrupted: Bool = false) {
+    var reasoning: String? = nil
+    var isThinking: Bool? = nil
+    init(role: Qwen35ChatMessage.Role, text: String, interrupted: Bool = false,
+         reasoning: String? = nil, isThinking: Bool? = nil) {
         id = UUID(); self.role = role; self.text = text; self.interrupted = interrupted
+        self.reasoning = reasoning; self.isThinking = isThinking
     }
 
     /// Keep visible failed attempts, but omit an unanswered turn as a pair
@@ -20,14 +24,15 @@ struct REAMMessage: Codable, Identifiable, Sendable {
     static func generationPrompt(_ history: [REAMMessage]) -> [Qwen35ChatMessage] {
         var prompt: [Qwen35ChatMessage] = []
         for message in history {
-            if message.role == .assistant && message.interrupted && message.text.isEmpty {
+            if message.role == .assistant && message.interrupted && message.text.isEmpty && (message.reasoning ?? "").isEmpty {
                 if prompt.last?.role == .user { prompt.removeLast() }
                 continue
             }
             // Recover old persisted histories that already contain an
             // unanswered user: the next send supersedes that pending turn.
             if message.role == .user && prompt.last?.role == .user { prompt.removeLast() }
-            prompt.append(.init(role: message.role, content: message.text))
+            prompt.append(.init(role: message.role, content: message.text,
+                reasoningContent: message.role == .assistant ? message.reasoning : nil))
         }
         return prompt
     }
@@ -85,7 +90,7 @@ private actor REAMInferenceSession {
         do { try engine?.resetConversation() } catch { release() }
     }
 
-    func generate(artifact: VerifiedGGUFArtifact, settings: REAMRunSettings,
+    func generate(artifact: VerifiedGGUFArtifact, settings: REAMRunSettings, thinkingEnabled: Bool,
                   messages: [Qwen35ChatMessage], cancellation: REAMCancellation,
                   events: AsyncThrowingStream<Qwen4ExpTextGeneration.Event, Error>.Continuation)
         -> Result<Qwen4ExpTextGeneration.Summary, Error> {
@@ -100,7 +105,8 @@ private actor REAMInferenceSession {
                 }
                 var lastProgress = 0.0
                 return try engine!.generate(messages: messages, maximumNewTokens: settings.maximumNewTokens,
-                    reusePromptPrefix: true, cancellationRequested: { cancellation.requested() || Task.isCancelled },
+                    reusePromptPrefix: true, enableThinking: thinkingEnabled,
+                    cancellationRequested: { cancellation.requested() || Task.isCancelled },
                     captureCancelledSummary: true) { event in
                         if case .prefill(let p) = event {
                             let now = ProcessInfo.processInfo.systemUptime
@@ -192,6 +198,7 @@ final class REAMAppModel {
     private(set) var lastNumericsReport: Qwen4ExpLocalParity.Report?
     private(set) var isPreview = false
     private(set) var alternateRunnerActive = false
+    private(set) var thinkingEnabled = false
     var draft = ""
     let root: URL
     private(set) var source: PinnedGGUFDownload
@@ -222,6 +229,21 @@ final class REAMAppModel {
     }
     var canSelectModel: Bool { modelSelectionDirectory != nil && !isPreview && !isBusy && !alternateRunnerActive }
     var canOpenAlternateRunner: Bool { !isBusy && !isPreview && !alternateRunnerActive }
+    var supportsThinking: Bool {
+        source.manifest.sha256 == GGUFModelManifest.primaryOrnith.sha256 ||
+            artifact?.index.metadata["general.architecture"]?.text == "qwen35moe"
+    }
+    func setThinkingEnabled(_ enabled: Bool) {
+        guard supportsThinking, !isBusy, !isPreview, !alternateRunnerActive else { return }
+        thinkingEnabled = enabled
+        if modelSelectionDirectory != nil {
+            UserDefaults.standard.set(enabled, forKey: "FlashLocal.ornithThinking")
+        }
+    }
+    func isGenerating(_ message: REAMMessage) -> Bool {
+        message.id == messages.last?.id && message.role == .assistant &&
+            (activity == .generating || activity == .stopping)
+    }
 
     func pauseForAlternateRunner() async {
         alternateRunnerActive = true
@@ -245,6 +267,10 @@ final class REAMAppModel {
          settings: REAMRunSettings = .ornith, modelSelectionDirectory: URL? = nil) {
         self.root = root; self.source = source; self.chatFile = chatFile; self.settings = settings
         self.modelSelectionDirectory = modelSelectionDirectory
+        if source.manifest.sha256 == GGUFModelManifest.primaryOrnith.sha256 {
+            thinkingEnabled = modelSelectionDirectory == nil ? true :
+                UserDefaults.standard.object(forKey: "FlashLocal.ornithThinking") as? Bool ?? true
+        }
     }
     static func live() -> REAMAppModel {
         let manager = FileManager.default
@@ -266,6 +292,8 @@ final class REAMAppModel {
             guard activeID == id else { return }
             if flag.requested() { status = "Modellbytet avbröts."; finish(id); return }
             artifact = nil; source = target.source; settings = target.settings
+            thinkingEnabled = target == .ornith &&
+                (UserDefaults.standard.object(forKey: "FlashLocal.ornithThinking") as? Bool ?? true)
             chatFile = directory.appendingPathComponent(target.chatName)
             messages.removeAll(); draft = ""; summary = nil; generationProgress = nil
             lastMeasurementURL = nil; lastNumericsURL = nil; lastNumericsReport = nil
@@ -284,7 +312,11 @@ final class REAMAppModel {
                 }
                 let restored = try JSONDecoder().decode([REAMMessage].self, from: Data(contentsOf: chatFile))
                 guard restored.count <= 4096 else { throw CocoaError(.fileReadTooLarge) }
-                messages = restored
+                messages = restored.map { message in
+                    var value = message
+                    if value.isThinking == true { value.isThinking = false; value.interrupted = true }
+                    return value
+                }
             }
             scan(); if hasFile { verify() }
         } catch { self.error = error.localizedDescription }
@@ -405,17 +437,18 @@ final class REAMAppModel {
         let responseID = messages.last!.id
         let (id, flag) = begin(.generating, status: "Förbereder lokal generering…")
         generationProgress = nil; summary = nil; lastMeasurementURL = nil; save()
-        let session = inferenceSession, settings = settings
+        let session = inferenceSession, settings = settings, thinking = thinkingEnabled && supportsThinking
         let channel = AsyncThrowingStream<Qwen4ExpTextGeneration.Event, Error>.makeStream(bufferingPolicy: .bufferingOldest(32))
         channel.continuation.onTermination = { if case .cancelled = $0 { flag.cancel() } }
         let worker = Task.detached(priority: .userInitiated) { () -> Result<Qwen4ExpTextGeneration.Summary, Error> in
-            let result = await session.generate(artifact: artifact, settings: settings, messages: prompt,
+            let result = await session.generate(artifact: artifact, settings: settings, thinkingEnabled: thinking, messages: prompt,
                 cancellation: flag, events: channel.continuation)
             switch result { case .success: channel.continuation.finish(); case .failure(let error): channel.continuation.finish(throwing: error) }
             return result
         }
         cancelWorker = { worker.cancel() }
         operation = Task {
+            var output = QwenThinkingText(startsInThinking: thinking)
             do {
                 for try await event in channel.stream {
                     guard let index = messages.firstIndex(where: { $0.id == responseID }) else { continue }
@@ -427,21 +460,33 @@ final class REAMAppModel {
                                 + (p.reusedPromptTokens > 0 ? " · \(p.reusedPromptTokens) återanvända" : "")
                         }
                     case .token(_, let text, let p):
-                        generationProgress = p; messages[index].text += text
-                        if activity != .stopping { status = "Genererar lokalt…" }
-                    case .trailingText(let text): messages[index].text += text
+                        generationProgress = p; output.append(text)
+                        messages[index].text = output.answer
+                        messages[index].reasoning = output.reasoning.isEmpty ? nil : output.reasoning
+                        messages[index].isThinking = output.isThinking
+                        if activity != .stopping { status = output.isThinking ? "Tänker lokalt…" : "Skriver svaret lokalt…" }
+                    case .trailingText(let text): output.append(text)
                     }
                 }
             } catch { /* Worker result below is authoritative, after teardown. */ }
-            switch await worker.value {
+            let result = await worker.value
+            output.finish()
+            if let index = messages.firstIndex(where: { $0.id == responseID }) {
+                messages[index].text = output.answer
+                messages[index].reasoning = output.reasoning.isEmpty ? nil : output.reasoning
+                messages[index].isThinking = false
+            }
+            switch result {
             case .success(let value):
                 summary = value
                 if let index = messages.firstIndex(where: { $0.id == responseID }) {
-                    messages[index].interrupted = value.stopReason == .cancelled
+                    messages[index].interrupted = value.stopReason == .cancelled || output.isThinking
                 }
-                status = value.stopReason == .cancelled
-                    ? "Stoppad · mätningen kan sparas i Filer."
-                    : "Klar · \(value.generatedTokenIDs.count) genererade token"
+                if value.stopReason == .cancelled { status = "Stoppad · mätningen kan sparas i Filer." }
+                else if output.isThinking {
+                    status = value.stopReason == .tokenLimit ? "Tokengränsen nåddes under tänkandet · inget färdigt svar."
+                        : "Modellen avslutade under tänkandet · inget färdigt svar."
+                } else { status = "Klar · \(value.generatedTokenIDs.count) genererade token" }
             case .failure(let failure):
                 if !flag.requested() { error = failure.localizedDescription }
                 status = "Genereringen avbröts."
@@ -543,6 +588,13 @@ final class REAMAppModel {
         value.isPreview = true; value.status = "Layoutförhandsvisning – ingen modell körs."
         value.messages = [.init(role: .user, text: "Hur körs modellen?"),
                           .init(role: .assistant, text: "Exempeltext för granskning av chattens layout.")]
+        return value
+    }
+    static func reviewThinkingPreview(active: Bool) -> REAMAppModel {
+        let value = reviewPreview()
+        value.messages = [.init(role: .user, text: "Vad är 50 + 5?"),
+            .init(role: .assistant, text: active ? "" : "50 + 5 = 55.",
+                reasoning: "Jag summerar 50 och 5 för att få resultatet.", isThinking: active)]
         return value
     }
     #endif

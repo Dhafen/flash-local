@@ -59,11 +59,17 @@ def metadata_prefix(header, expected_sha256=HEADER_SHA256):
     return position, template
 
 
-def main():
+def main(ornith=False):
     root = pathlib.Path(__file__).resolve().parents[1]
-    folder = root / ".test-fixtures"
-    header = (folder / "ream.header").read_bytes()
-    position, _ = metadata_prefix(header)
+    source = root / ".test-fixtures"
+    if ornith:
+        from fetch_ornith_metadata import HEADER_SHA256 as expected_hash
+    else:
+        expected_hash = HEADER_SHA256
+    folder = source / "ornith-tokenizer" if ornith else source
+    folder.mkdir(exist_ok=True)
+    header = (source / ("ornith.header" if ornith else "ream.header")).read_bytes()
+    position, _ = metadata_prefix(header, expected_sha256=expected_hash)
     # A legal metadata-only GGUF: all original KV bytes, zero tensors.
     vocabulary = header[:8] + struct.pack("<Q", 0) + header[16:position]
     vocabulary += bytes((-len(vocabulary)) % 32)
@@ -100,11 +106,18 @@ def main():
     ]
     for text in cases[20:36]:
         chats.append([{"role": "user", "content": text}])
-    manifest = {"headerSHA256": HEADER_SHA256,
+    manifest = {"headerSHA256": expected_hash,
                 "vocabularySHA256": hashlib.sha256(vocabulary).hexdigest(),
                 "vocabularyByteCount": len(vocabulary), "cases": cases,
                 "chats": [{"messages": messages, "enable_thinking": False,
                            "preserve_thinking": False, "add_generation_prompt": True} for messages in chats]}
+    manifest["reasoningChats"] = [
+        {"messages": [{"role": "user", "content": "First"},
+                      {"role": "assistant", "content": "55",
+                       "reasoning_content": "PUBLIC_REASONING_FIXTURE"},
+                      {"role": "user", "content": "Continue"}],
+         "enable_thinking": enabled, "preserve_thinking": True,
+         "add_generation_prompt": True} for enabled in (False, True)]
     (folder / "qwen35-tokenizer-corpus.json").write_text(
         json.dumps(manifest, ensure_ascii=True), encoding="utf-8")
     binary = bytearray(struct.pack("<I", len(cases)))
@@ -116,4 +129,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--ornith", action="store_true")
+    main(ornith=parser.parse_args().ornith)

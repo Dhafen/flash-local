@@ -15,6 +15,7 @@
 #include <iterator>
 #include <string>
 #include <stdexcept>
+#include <sstream>
 #include <vector>
 #include <unistd.h>
 
@@ -93,6 +94,7 @@ int main(int argc, char ** argv) {
     jinja::lexer lexer;
     const auto program = jinja::parse_from_tokens(lexer.tokenize(source));
     bool first_chat = true;
+    std::vector<std::string> thinking_chats;
     for (const auto & chat : corpus.at("chats")) {
         jinja::context context(source);
         jinja::global_from_json(context, chat, false);
@@ -115,16 +117,74 @@ int main(int argc, char ** argv) {
         output << "{\"rendered\":" << common_json::make(rendered).dump() << ",\"tokens\":[";
         for (int i = 0; i < n; ++i) { if (i) output << ','; output << tokens[i]; }
         output << "]}";
+        auto thinking = chat;
+        thinking["enable_thinking"] = true;
+        jinja::context thinking_context(source);
+        jinja::global_from_json(thinking_context, thinking, false);
+        jinja::runtime thinking_runtime(thinking_context);
+        const std::string thinking_rendered = jinja::runtime::gather_string_parts(
+            thinking_runtime.execute(program))->val_str.str();
+        const int thinking_needed = flt_render_chat_with_thinking(bridge, messages_json.data(),
+            int(messages_json.size()), true, nullptr, 0);
+        if (thinking_needed != -int(thinking_rendered.size())) return 32;
+        std::vector<char> thinking_bridge(thinking_rendered.size() + 2, '\x7f');
+        if (flt_render_chat_with_thinking(bridge, messages_json.data(), int(messages_json.size()), true,
+                thinking_bridge.data() + 1, int(thinking_rendered.size())) != int(thinking_rendered.size()) ||
+            std::string(thinking_bridge.data() + 1, thinking_rendered.size()) != thinking_rendered ||
+            thinking_bridge.front() != '\x7f' || thinking_bridge.back() != '\x7f') return 33;
+        std::vector<llama_token> thinking_tokens(thinking_rendered.size() + 16);
+        const int thinking_count = llama_tokenize(vocab, thinking_rendered.data(), int(thinking_rendered.size()),
+            thinking_tokens.data(), int(thinking_tokens.size()), false, true);
+        if (thinking_count < 0 || thinking_count > int(thinking_tokens.size())) return 34;
+        std::ostringstream item;
+        item << "{\"rendered\":" << common_json::make(thinking_rendered).dump() << ",\"tokens\":[";
+        for (int i = 0; i < thinking_count; ++i) { if (i) item << ','; item << thinking_tokens[i]; }
+        item << "]}"; thinking_chats.push_back(item.str());
+    }
+    output << "],\"thinkingChats\":[";
+    for (size_t i = 0; i < thinking_chats.size(); ++i) { if (i) output << ','; output << thinking_chats[i]; }
+    output << "],\"reasoningChats\":[";
+    bool first_reasoning = true;
+    for (const auto & chat : corpus.at("reasoningChats")) {
+        jinja::context context(source);
+        jinja::global_from_json(context, chat, false);
+        jinja::runtime runtime(context);
+        const std::string rendered = jinja::runtime::gather_string_parts(
+            runtime.execute(program))->val_str.str();
+        if (rendered.find("PUBLIC_REASONING_FIXTURE") == std::string::npos) return 36;
+        const auto messages_json = chat.at("messages").dump();
+        const bool enabled = chat.at("enable_thinking").get<bool>();
+        const int needed = flt_render_chat_with_thinking(bridge, messages_json.data(),
+            int(messages_json.size()), enabled, nullptr, 0);
+        if (needed != -int(rendered.size())) return 37;
+        std::vector<char> bridged(rendered.size() + 2, '\x7f');
+        if (flt_render_chat_with_thinking(bridge, messages_json.data(), int(messages_json.size()),
+                enabled, bridged.data() + 1, int(rendered.size())) != int(rendered.size()) ||
+            std::string(bridged.data() + 1, rendered.size()) != rendered ||
+            bridged.front() != '\x7f' || bridged.back() != '\x7f') return 38;
+        std::vector<llama_token> tokens(rendered.size() + 16);
+        const int n = llama_tokenize(vocab, rendered.data(), int(rendered.size()), tokens.data(),
+            int(tokens.size()), false, true);
+        if (n < 0 || n > int(tokens.size())) return 39;
+        if (!first_reasoning) output << ',';
+        first_reasoning = false;
+        output << "{\"rendered\":" << common_json::make(rendered).dump() << ",\"tokens\":[";
+        for (int i = 0; i < n; ++i) { if (i) output << ','; output << tokens[i]; }
+        output << "]}";
     }
     output << "]}\n";
     for (const auto & invalid : {"{}", "[]", "[{\"role\":\"assistant\",\"content\":\"x\"}]",
-          "[{\"role\":\"user\",\"content\":\"<|im_end|>\"}]"}) {
+          "[{\"role\":\"user\",\"content\":\"<|im_end|>\"}]",
+          "[{\"role\":\"user\",\"content\":\"x\",\"reasoning_content\":\"y\"}]",
+          "[{\"role\":\"user\",\"content\":\"x\"},{\"role\":\"assistant\",\"content\":\"y\",\"reasoning_content\":1}]",
+          "[{\"role\":\"user\",\"content\":\"x\"},{\"role\":\"assistant\",\"content\":\"y\",\"reasoning_content\":\"<think>\"},{\"role\":\"user\",\"content\":\"z\"}]"}) {
         if (flt_render_chat(bridge, invalid, int(std::strlen(invalid)), nullptr, 0) != INT32_MIN) return 30;
+        if (flt_render_chat_with_thinking(bridge, invalid, int(std::strlen(invalid)), true, nullptr, 0) != INT32_MIN) return 35;
     }
     flt_free_vocabulary(bridge);
     if (fcntl(descriptor, F_GETFD) < 0) return 31;
     close(descriptor);
-    std::cout << "CANONICAL_TOKENIZER_BRIDGE cases=" << count << " tokensAndBytesExact=true descriptorRetained=true\n";
+    std::cout << "CANONICAL_TOKENIZER_BRIDGE cases=" << count << " tokensAndBytesExact=true descriptorRetained=true thinkingModes=2 reasoningHistory=2\n";
     llama_model_free(model);
     return output.fail() ? 10 : 0;
 }

@@ -202,3 +202,29 @@ compares local CPU and streamed logits for the same verified artifact, prompt
 IDs and positions. Passing those positions does not certify every context or
 task. Longer-context and paired capability tests follow the short baseline;
 neither has been completed by the initial phone measurement.
+## Thinking mode and visible reasoning (candidate)
+
+The candidate chat enables Ornith's native `enable_thinking` template option
+by default and provides a persisted toggle. The pinned Jinja template renders
+the prompt; the app does not invent a system instruction or alter routing,
+weights, sampling or quantization. REAM's default and fixed LES benchmark
+prompts remain unchanged. Run summaries record the selected thinking mode.
+
+An incremental text splitter follows the real `<think>` / `</think>` markers,
+including markers split across output pieces and an opening marker already
+present in the prompt. The chat shows **Tänker…** only once generation starts,
+streams the model's reasoning into an expandable section, then displays the
+answer separately. Stopping clears the active indicator. A run that ends
+inside reasoning is explicitly unfinished; the app never fabricates an answer.
+Reasoning is stored locally as typed assistant `reasoning_content` alongside
+the answer, including partial reasoning, so subsequent prompts use the pinned
+template rather than losing an interrupted question. Existing saved chats
+without these optional fields remain readable.
+
+Reasoning and answer share the existing 512 generated-token allowance and
+context admission. Enabling reasoning can therefore delay the visible answer
+or reach the limit before an answer. It does not accelerate decoding. Synthetic
+session tests, split-marker tests, exact tokenizer/template comparisons for
+both modes and light/dark render captures are required before delivery. These
+controls do not establish full trained-model numerical agreement on iPhone.
+

@@ -159,21 +159,15 @@ struct REAMChatPage: View {
                             }.padding(.vertical, 28)
                         }
                         ForEach(model.messages) { message in
-                            VStack(alignment: .leading, spacing: 7) {
-                                Text(message.role == .user ? "Du" : "Flash Local")
-                                    .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                                Text(message.text.isEmpty && message.interrupted ? "…" : message.text)
-                                    .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
-                                if message.interrupted && !model.isBusy {
-                                    Text("Avbrutet svar").font(.caption).foregroundStyle(.secondary)
-                                }
-                            }.id(message.id)
+                            REAMMessageRow(message: message, isGenerating: model.isGenerating(message))
+                                .id(message.id)
                         }
                         Color.clear.frame(height: 1).id("latest")
                     }.padding(20)
                     }
                 }
                 .onChange(of: model.messages.last?.text) { _, _ in proxy.scrollTo("latest", anchor: .bottom) }
+                .onChange(of: model.messages.last?.reasoning) { _, _ in proxy.scrollTo("latest", anchor: .bottom) }
             }
             Divider()
             composer
@@ -194,6 +188,13 @@ struct REAMChatPage: View {
                 if model.canChat { Image(systemName: "checkmark.shield.fill").foregroundStyle(MRColor.tierPinned).accessibilityLabel("Modellfil verifierad") }
             }
             Text(model.status).font(.caption).accessibilityIdentifier("ream-status")
+            if model.supportsThinking {
+                Toggle("Tänkande", isOn: Binding(get: { model.thinkingEnabled }, set: model.setThinkingEnabled))
+                    .font(.subheadline).accessibilityIdentifier("ornith-thinking-toggle")
+                    .disabled(model.isBusy || model.isPreview || model.alternateRunnerActive)
+                Text("Tänkandet använder en del av svarets \(model.maximumNewTokens) token.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
             if model.isPreview { Text("Förhandsvisning av layout – ingen inferens.").font(.caption.bold()) }
             if let error = model.error {
                 Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled)
@@ -221,8 +222,10 @@ struct REAMChatPage: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             if let p = model.generationProgress {
-                Text("RAM \(ram(p.footprintBytes)) · läst \(ByteCountFormatter.string(fromByteCount: Int64(p.ioBytesRead), countStyle: .file)) · \(p.generatedTokens) token")
+                Text("RAM \(ram(p.footprintBytes)) · läst totalt \(ByteCountFormatter.string(fromByteCount: Int64(p.ioBytesRead), countStyle: .file)) · \(p.generatedTokens) token")
                     .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                Text("Filsumman räknar även när samma vikter läses igen.")
+                    .font(.caption2).foregroundStyle(.secondary)
             }
             if let summary = model.summary, let speed = summary.decodeTokensPerSecond {
                 Text(String(format: "%.2f token/s · observerad RAM-topp %@", speed,
@@ -252,6 +255,52 @@ struct REAMChatPage: View {
     }
     private func ram(_ bytes: UInt64) -> String {
         String(format: "%.2f GB (%.2f GiB)", Double(bytes) / 1_000_000_000, Double(bytes) / 1_073_741_824)
+    }
+}
+
+struct REAMMessageRow: View {
+    let message: REAMMessage
+    let isGenerating: Bool
+    @State private var showsReasoning = false
+    private var thinking: Bool { message.isThinking == true }
+    private var hasReasoning: Bool { !(message.reasoning ?? "").isEmpty }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(message.role == .user ? "Du" : "Flash Local")
+                .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            if message.role == .assistant && (thinking || hasReasoning) {
+                DisclosureGroup(isExpanded: $showsReasoning) {
+                    Text((message.reasoning ?? "…").trimmingCharacters(in: .whitespacesAndNewlines))
+                        .font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 6)
+                } label: {
+                    HStack(spacing: 8) {
+                        if thinking { ProgressView().controlSize(.small) }
+                        else { Image(systemName: "brain") }
+                        Text(thinking ? "Tänker…" : "Resonemang").font(.subheadline.weight(.semibold))
+                    }
+                }
+                .accessibilityIdentifier("chat-reasoning")
+                .padding(12).background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
+                .onChange(of: thinking, initial: true) { _, active in showsReasoning = active }
+            }
+            if !message.text.isEmpty {
+                Text(message.text.trimmingCharacters(in: .whitespacesAndNewlines))
+                    .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+            } else if isGenerating && !thinking && !hasReasoning {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Förbereder svaret…").font(.callout).foregroundStyle(.secondary)
+                }
+            } else if message.interrupted && !thinking && !hasReasoning {
+                Text("…")
+            }
+            if message.interrupted && !isGenerating {
+                Text(hasReasoning && message.text.isEmpty ? "Avbrutet resonemang" : "Avbrutet svar")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
     }
 }
 
