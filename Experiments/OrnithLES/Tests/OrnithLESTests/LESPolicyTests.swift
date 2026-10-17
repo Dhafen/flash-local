@@ -84,7 +84,7 @@ final class LESPolicyTests: XCTestCase {
         let control = LESControl()
         let prepared = try LESPreparation.prepare(artifact: artifact, privateRoot: root.appendingPathComponent("prepared"), control: control)
         let plan = try LESMemoryPlan(index: artifact.index, contextTokens: 32, footprint: XCTUnwrap(ProcessFootprint.current()))
-        let candidate = try LESContext(artifact: artifact, prepared: prepared, plan: plan, control: control)
+        let candidate = try LESContext(artifact: artifact, prepared: prepared, plan: plan, control: control, syntheticCPUControl: true)
         for (index, token) in [1, 2].enumerated() {
             let actual = try candidate.logits(tokens: [token])
             XCTAssertEqual(actual.count, expected[index].count)

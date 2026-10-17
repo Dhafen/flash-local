@@ -26,7 +26,7 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 35
     env:
-      ORNITH_LES_CI_SIMD_PROBE: '1'
+      ORNITH_LES_CPU_CONTROL: '1'
     steps:
       - uses: actions/checkout@v7
         with:
@@ -39,7 +39,7 @@ jobs:
         run: python3 scripts/build_ornith_les.py
       - name: Generate small untrained Ornith fixture
         run: python3 scripts/make_qwen4exp_test_model.py --ornith
-      - name: Compare resident, streamed and lookahead execution on CPU and Metal
+      - name: Compare resident, streamed and lookahead execution with the CPU oracle
         run: |
           .work/ornith-les-macos/bin/ornith-les-control \
             .test-fixtures/synthetic-ornith.gguf .work/les-control-f32 .work/les-control-f32.json \

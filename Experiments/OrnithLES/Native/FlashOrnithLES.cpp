@@ -7,6 +7,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <TargetConditionals.h>
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
@@ -168,7 +169,15 @@ flo_context * flo_open(int source, const char * directory, flo_options o, flo_ab
         require(o.lookahead_depth >= 0 && o.lookahead_depth <= 16 && o.io_threads >= 1 && o.io_threads <= 8 &&
             o.cpu_threads >= 1 && o.cpu_threads <= 8, "Invalid scheduling options");
         const bool streaming = directory && *directory;
-        require(!streaming || o.metal, "Stripped LES expert slots require the Metal alloc-only backend");
+        if (streaming && !o.metal) {
+            #if TARGET_OS_OSX
+            const char * control_mode = std::getenv("ORNITH_LES_CPU_CONTROL");
+            require(control_mode && std::string(control_mode) == "1" && size <= (32 << 20),
+                "CPU streaming is restricted to bounded macOS synthetic controls");
+            #else
+            throw std::runtime_error("The iPhone LES backend requires Metal");
+            #endif
+        }
         require(streaming || size <= (32 << 20), "Resident control is restricted to tiny synthetic fixtures");
         require(!streaming || (o.prefill_slots >= 8 && o.prefill_slots <= 256 &&
             (o.cache_slots_per_layer == 0 || o.cache_slots_per_layer >= 8) &&
@@ -209,7 +218,7 @@ flo_context * flo_open(int source, const char * directory, flo_options o, flo_ab
         }
         std::call_once(initialized, [] { llama_backend_init(); });
         auto mp = llama_model_default_params();
-        mp.n_gpu_layers = o.metal ? 999 : 0; mp.use_mmap = true; mp.use_mlock = false; mp.use_extra_bufts = false;
+        mp.n_gpu_layers = o.metal ? 999 : 0; mp.use_mmap = o.metal; mp.use_mlock = false; mp.use_extra_bufts = false;
         if (streaming) { mp.moe_experts_path = manifest_path.c_str(); mp.moe_slot_bank = o.prefill_slots; }
         mp.progress_callback = [](float, void * data) {
             auto * c = static_cast<flo_context *>(data); return !c->abort || !c->abort(c->user);

@@ -75,6 +75,20 @@ def patched_files(source):
     replace("src/llama-moe-slot.cpp", "        static const int m = [] {", "        const int m = [] {")
     replace("src/llama-context.h", "struct llama_context {", """struct llama_context {
     llama_moe_slot_runtime * flash_local_slots() const { return moe_slots.get(); }""")
+    replace("src/llama-model.cpp", '#include "llama-model.h"',
+            '#include "llama-model.h"\n#if defined(__APPLE__)\n#include <TargetConditionals.h>\n#endif')
+    replace("src/llama-model.cpp", "    if (!fn) {\n        return nullptr;\n    }", """    if (!fn) {
+#if defined(__APPLE__) && TARGET_OS_OSX
+        // CI has no usable Metal reduction device. Only bounded synthetic
+        // CPU controls opt in; mmap is disabled for this allocation path.
+        const char * control = std::getenv("ORNITH_LES_CPU_CONTROL");
+        if (control && std::strcmp(control, "1") == 0 &&
+            ggml_backend_dev_type(dev) == GGML_BACKEND_DEVICE_TYPE_CPU) {
+            return ggml_backend_cpu_buffer_type();
+        }
+#endif
+        return nullptr;
+    }""")
     replace("src/models/qwen35moe.cpp", "il + 1 < n_layer && model.layers[il + 1].ffn_gate_inp != nullptr",
             "il + 1 < n_transformer_layers && model.layers[il + 1].ffn_gate_inp != nullptr")
     file = "ggml/src/ggml-metal/ggml-metal-context.m"
@@ -86,11 +100,6 @@ def patched_files(source):
     if count != 7:
         raise ValueError(f"Pinned Metal commit sites changed: {count}")
     result[file] = text
-    replace("ggml/src/ggml-metal/ggml-metal-device.m",
-            "            dev->props.has_simdgroup_reduction |= [dev->mtl_device supportsFamily:MTLGPUFamilyMetal3_GGML];",
-            "            dev->props.has_simdgroup_reduction |= [dev->mtl_device supportsFamily:MTLGPUFamilyMetal3_GGML];\n"
-            "            extern bool flash_omni_ci_simd_probe(id<MTLDevice>);\n"
-            "            if (!dev->props.has_simdgroup_reduction) dev->props.has_simdgroup_reduction = flash_omni_ci_simd_probe(dev->mtl_device);")
     replace("ggml/src/ggml-metal/ggml-metal-device.m",
             "    [encoder->obj dispatchThreadgroups:MTLSizeMake(tg0, tg1, tg2) threadsPerThreadgroup:MTLSizeMake(tptg0, tptg1, tptg2)];",
             "    extern void flash_omni_record_dispatch(void);\n    flash_omni_record_dispatch();\n"

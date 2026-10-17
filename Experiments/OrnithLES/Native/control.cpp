@@ -63,24 +63,20 @@ int main(int argc, char ** argv) {
         if (flo_prepare(fd, dir.c_str(), nullptr, nullptr)) throw std::runtime_error(flo_last_error());
         const int steps = fs::path(argv[1]).filename().string().find("top8") == std::string::npos ? 5 : 128;
         const auto cpu = evaluate(fd, nullptr, false, 0, steps);
-        const auto gpu = evaluate(fd, nullptr, true, 0, steps);
-        const auto gpu_stream = evaluate(fd, dir.c_str(), true, 0, steps);
-        const auto gpu_ahead = evaluate(fd, dir.c_str(), true, 2, steps);
-        const auto gpu_page = evaluate(fd, dir.c_str(), true, 0, steps, 0);
-        const double gpu_error = std::max({compare(gpu, gpu_stream), compare(gpu, gpu_ahead), compare(gpu, gpu_page)});
-        const double backend_error = compare(cpu, gpu);
-        if (gpu_error > 1e-6 || backend_error > 0.01 ||
-            !gpu_ahead.metrics.dispatches || !gpu_ahead.metrics.command_buffers)
+        const auto streamed = evaluate(fd, dir.c_str(), false, 0, steps);
+        const auto ahead = evaluate(fd, dir.c_str(), false, 2, steps);
+        const auto page = evaluate(fd, dir.c_str(), false, 0, steps, 0);
+        const double error = std::max({compare(cpu, streamed), compare(cpu, ahead), compare(cpu, page)});
+        if (error > 1e-6 || !ahead.metrics.io_calls || !ahead.metrics.io_bytes)
             throw std::runtime_error("LES correctness/instrumentation gate failed");
         json report{{"syntheticOnly", true}, {"physicalPhone", false}, {"revision", flo_revision()},
-            {"residentCPUReference", true}, {"metalMaximumAbsoluteError", gpu_error},
-            {"cpuVsMetalMaximumAbsoluteError", backend_error}, {"actualRoutingIdentical", true},
+            {"residentCPUReference", true}, {"cpuStreamingMaximumAbsoluteError", error},
+            {"metalExecutionVerified", false}, {"actualRoutingIdentical", true},
             {"resetBitwiseIdentical", true}, {"sameGreedy", true}, {"modelRequantized", false},
-            {"virtualGPUProbeRequested", std::getenv("ORNITH_LES_CI_SIMD_PROBE") != nullptr},
-            {"gpuTimestampsAvailable", gpu_ahead.metrics.timestamped_command_buffers > 0},
+            {"gpuTimestampsAvailable", false},
             {"expertPayloadCopied", false}, {"positions", steps}, {"cpuLogits", cpu.logits}};
         std::ofstream out(argv[3]); out << report.dump(2) << '\n'; out.close(); close(fd);
-        std::cout << "ORNITH_LES_CONTROL cpuVsMetalMaxAbs=" << backend_error << " metalMaxAbs=" << gpu_error
+        std::cout << "ORNITH_LES_CONTROL cpuMaxAbs=" << error << " metalExecutionVerified=false"
                   << " routing=true reset=true noRequantization=true noExpertCopy=true syntheticOnly=true\n";
         return 0;
     } catch (const std::exception & e) { std::cerr << e.what() << '\n'; return 1; }

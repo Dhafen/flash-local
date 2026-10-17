@@ -51,14 +51,21 @@ public final class LESContext {
     public let vocabularySize: Int
     public let plan: LESMemoryPlan
     public init(artifact: VerifiedGGUFArtifact, prepared: URL, plan: LESMemoryPlan,
-                control: LESControl, traceRouting: Bool = false, bypassPageCache: Bool = false) throws {
+                control: LESControl, traceRouting: Bool = false, bypassPageCache: Bool = false,
+                syntheticCPUControl: Bool = false) throws {
         try artifact.assertUnchanged()
         guard prepared.isFileURL, !control.shouldAbort() else { throw CancellationError() }
         self.artifact = artifact; self.control = control; self.plan = plan
         var options = flo_options()
         options.context_tokens = Int32(plan.contextTokens); options.prefill_slots = Int32(plan.prefillSlots)
         options.cache_slots_per_layer = Int32(plan.cacheSlotsPerLayer); options.lookahead_depth = Int32(plan.lookaheadDepth)
-        options.io_threads = 4; options.cpu_threads = 4; options.metal = true
+        if syntheticCPUControl {
+            guard artifact.manifest.fileByteCount <= 32 << 20,
+                  artifact.index.metadata["general.name"]?.text == "synthetic-graph-test" else {
+                throw GGUFError.unsupported("CPU control requires generated tiny fixture")
+            }
+        }
+        options.io_threads = 4; options.cpu_threads = 4; options.metal = !syntheticCPUControl
         options.bypass_page_cache = bypassPageCache; options.trace_routing = traceRouting
         options.memory_ceiling_bytes = plan.processCeilingBytes
         let descriptor = try artifact.duplicateForReading(); defer { Darwin.close(descriptor) }

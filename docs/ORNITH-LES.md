@@ -79,7 +79,7 @@ wall latency; overlapping durations can sum beyond elapsed time. Application
 read bytes are not physical flash-controller bytes.
 
 Initial tests use tiny untrained fixtures only: resident versus streamed
-versus lookahead execution, full logits, actual router decisions, greedy
+versus lookahead CPU execution, full logits, actual router decisions, greedy
 choice and recurrent/KV reset. Trained Ornith parity, 128-token sustained
 throughput, OS-cache effects, memory pressure, thermals and useful 8K/32K/65K
 context remain device gates. An empty application expert cache is not a
@@ -112,11 +112,14 @@ symbol-isolated XCFramework before app/archive/signing gates. No device result
 or TestFlight delivery is established by implementing those gates.
 
 
-The hosted Apple Paravirtual GPU reports no SIMD-reduction capability, so the
-unmodified feature gate rejects streamed Metal expert allocations before
-inference. A CI-only path, restricted to macOS + Paravirtual + an explicit
-flag, executes a 32-lane SIMD reduction and verifies all four known results
-before allowing the reduction kernels. It does not enable SIMD matrix-multiply.
-It is compiled out on iPhone. CI records this virtual-device test separately;
-no A19 performance or hardware compatibility is inferred. Unavailable Metal
-timestamps remain unavailable, rather than being reported as zero GPU work.
+The hosted Apple Paravirtual GPU advertises no SIMD reduction. An explicit
+instruction probe also failed; it was removed rather than forcing a capability
+flag. Numerical CI therefore uses a complete resident CPU oracle versus the
+same streamed/cache/lookahead/page-cache graph with host allocations. That
+host allocation adapter is macOS-only, requires an explicit control flag,
+disables mmap for the fixture, and is restricted by the C API to at most
+32 MiB. The Swift test additionally requires the generated fixture name.
+It cannot enable CPU streaming on iPhone. No mathematical operator or routing
+is changed. Metal is compiled for all three platforms but its runtime numerics
+remain a physical-device gate. The app always uses Metal and must compare its
+trained logits with the existing CPU reference before benchmarking.
