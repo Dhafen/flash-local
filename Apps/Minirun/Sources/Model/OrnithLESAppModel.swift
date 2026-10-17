@@ -20,7 +20,8 @@ private struct LESRunExport: Encodable {
         decodeIOBytesPerForward = Double(run.decodeIOBytes) / Double(max(1, run.decodeForwardPasses))
         hasRequired128Tokens = run.hasRequiredLength
         if let before = run.metricsAfterPrefill, let after = run.metricsAfter {
-            metalDecodeNanoseconds = after.metalNanoseconds - before.metalNanoseconds
+            metalDecodeNanoseconds = after.metalTimestampedCommandBuffers > before.metalTimestampedCommandBuffers
+                ? after.metalNanoseconds - before.metalNanoseconds : nil
             metalDecodeDispatches = after.metalDispatches - before.metalDispatches
             let hits = after.demandCacheHits - before.demandCacheHits
             let misses = after.demandCacheMisses - before.demandCacheMisses

@@ -119,6 +119,7 @@ jobs:
     timeout-minutes: ${{ inputs.upload_private_testflight && 120 || 90 }}
     env:
       FLASH_LOCAL_ENABLE_LES: ${{ inputs.ornith_les && '1' || '0' }}
+      ORNITH_LES_CI_SIMD_PROBE: ${{ inputs.ornith_les && '1' || '0' }}
     steps:
       - uses: actions/checkout@v7
         with:

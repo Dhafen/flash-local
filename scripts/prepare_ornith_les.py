@@ -87,6 +87,11 @@ def patched_files(source):
         raise ValueError(f"Pinned Metal commit sites changed: {count}")
     result[file] = text
     replace("ggml/src/ggml-metal/ggml-metal-device.m",
+            "            dev->props.has_simdgroup_reduction |= [dev->mtl_device supportsFamily:MTLGPUFamilyMetal3_GGML];",
+            "            dev->props.has_simdgroup_reduction |= [dev->mtl_device supportsFamily:MTLGPUFamilyMetal3_GGML];\n"
+            "            extern bool flash_omni_ci_simd_probe(id<MTLDevice>);\n"
+            "            if (!dev->props.has_simdgroup_reduction) dev->props.has_simdgroup_reduction = flash_omni_ci_simd_probe(dev->mtl_device);")
+    replace("ggml/src/ggml-metal/ggml-metal-device.m",
             "    [encoder->obj dispatchThreadgroups:MTLSizeMake(tg0, tg1, tg2) threadsPerThreadgroup:MTLSizeMake(tptg0, tptg1, tptg2)];",
             "    extern void flash_omni_record_dispatch(void);\n    flash_omni_record_dispatch();\n"
             "    [encoder->obj dispatchThreadgroups:MTLSizeMake(tg0, tg1, tg2) threadsPerThreadgroup:MTLSizeMake(tptg0, tptg1, tptg2)];")

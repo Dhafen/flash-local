@@ -19,7 +19,7 @@
 #include <vector>
 using json = nlohmann::json;
 namespace fs = std::filesystem;
-extern "C" void flash_omni_metal_snapshot(uint64_t *, uint64_t *, uint64_t *);
+extern "C" void flash_omni_metal_snapshot(uint64_t *, uint64_t *, uint64_t *, uint64_t *);
 static thread_local std::string last_error;
 static std::mutex owner;
 static std::once_flag initialized;
@@ -282,7 +282,7 @@ flo_metrics flo_snapshot(const flo_context * c) {
         out.process_ns = s.process; out.install_ns = s.install;
         out.demand_hits = s.demand_hits; out.demand_misses = s.demand_misses;
     }
-    flash_omni_metal_snapshot(&out.dispatches, &out.command_buffers, &out.gpu_ns); return out;
+    flash_omni_metal_snapshot(&out.dispatches, &out.command_buffers, &out.gpu_ns, &out.timestamped_command_buffers); return out;
 }
 const char * flo_last_error() { return last_error.c_str(); }
 const char * flo_revision() { return "96bbf61710d44421ea54e63f5194f9b17c20d877+flash-local-tensor-major-v1"; }

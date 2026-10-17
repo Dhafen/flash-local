@@ -110,3 +110,13 @@ link LES unless `FLASH_LOCAL_ENABLE_LES=1`. The dedicated delivery input require
 the native/reference/Swift gates and transfers an exact-source/hash-checked,
 symbol-isolated XCFramework before app/archive/signing gates. No device result
 or TestFlight delivery is established by implementing those gates.
+
+
+The hosted Apple Paravirtual GPU reports no SIMD-reduction capability, so the
+unmodified feature gate rejects streamed Metal expert allocations before
+inference. A CI-only path, restricted to macOS + Paravirtual + an explicit
+flag, executes a 32-lane SIMD reduction and verifies all four known results
+before allowing the reduction kernels. It does not enable SIMD matrix-multiply.
+It is compiled out on iPhone. CI records this virtual-device test separately;
+no A19 performance or hardware compatibility is inferred. Unavailable Metal
+timestamps remain unavailable, rather than being reported as zero GPU work.

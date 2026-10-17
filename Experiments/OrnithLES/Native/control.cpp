@@ -8,6 +8,7 @@
 #include <cmath>
 #include <vector>
 #include <algorithm>
+#include <cstdlib>
 #include <stdexcept>
 namespace fs = std::filesystem;
 using json = nlohmann::json;
@@ -69,12 +70,14 @@ int main(int argc, char ** argv) {
         const double gpu_error = std::max({compare(gpu, gpu_stream), compare(gpu, gpu_ahead), compare(gpu, gpu_page)});
         const double backend_error = compare(cpu, gpu);
         if (gpu_error > 1e-6 || backend_error > 0.01 ||
-            !gpu_ahead.metrics.dispatches || !gpu_ahead.metrics.command_buffers || !gpu_ahead.metrics.gpu_ns)
+            !gpu_ahead.metrics.dispatches || !gpu_ahead.metrics.command_buffers)
             throw std::runtime_error("LES correctness/instrumentation gate failed");
         json report{{"syntheticOnly", true}, {"physicalPhone", false}, {"revision", flo_revision()},
             {"residentCPUReference", true}, {"metalMaximumAbsoluteError", gpu_error},
             {"cpuVsMetalMaximumAbsoluteError", backend_error}, {"actualRoutingIdentical", true},
             {"resetBitwiseIdentical", true}, {"sameGreedy", true}, {"modelRequantized", false},
+            {"virtualGPUProbeRequested", std::getenv("ORNITH_LES_CI_SIMD_PROBE") != nullptr},
+            {"gpuTimestampsAvailable", gpu_ahead.metrics.timestamped_command_buffers > 0},
             {"expertPayloadCopied", false}, {"positions", steps}, {"cpuLogits", cpu.logits}};
         std::ofstream out(argv[3]); out << report.dump(2) << '\n'; out.close(); close(fd);
         std::cout << "ORNITH_LES_CONTROL cpuVsMetalMaxAbs=" << backend_error << " metalMaxAbs=" << gpu_error

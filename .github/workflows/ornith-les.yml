@@ -25,6 +25,8 @@ jobs:
   native-controls:
     runs-on: macos-26
     timeout-minutes: 35
+    env:
+      ORNITH_LES_CI_SIMD_PROBE: '1'
     steps:
       - uses: actions/checkout@v7
         with:
