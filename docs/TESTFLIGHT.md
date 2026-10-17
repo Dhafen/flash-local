@@ -1,6 +1,29 @@
 # Private internal TestFlight delivery
 
-Latest version **0.1.0 (84)**, source
+Latest version **0.1.0 (97)**, app source
+`bcad87da52735a3ec6fca799a6b6bf47aa0fc92e`, is available to the existing
+private internal group. [Full delivery run 39030060624](https://github.com/Dhafen/flash-local/actions/runs/39030060624)
+passed all gates: 186 Swiftlet control functions, 24 QPack tests, twelve
+exact tokenizer/template cases, mixed synthetic graph parity, 573 app tests,
+474 package invocations (nine environment-gated skips), twenty reviewed
+light/dark Mac/iOS captures, arm64 device archive, Apple signing, both memory
+entitlements, privacy manifest and private upload. A fresh read-only Apple
+audit confirms `VALID`, `INTERNAL_ONLY`, `IN_BETA_TESTING`, nonexpired,
+exact private group and unchanged sole-owner membership. The sealed IPA is
+`e77126389b5fa3d5a9ec69699b516ed66d97860afcf18144f0ae2d51b56f59a5`.
+
+Build 97 adds a visible **Ornith Performance** entry. Its separate MLX/QPack
+mode compares original and grouped expert kernels at four teacher-forced
+positions, across the full vocabulary, before enabling grouped dispatches.
+A mismatch retains original kernels. This short check does not establish
+full trained-model parity, quality or sustained iPhone throughput. The
+existing GGUF/REAM backend and model files are retained. LES is not included.
+The new LES investigation targets the existing Q4_K_M GGUF without requiring
+a separate MLX checkpoint; do not download another model just for that work.
+
+## Previous build 84
+
+Previous version **0.1.0 (84)**, source
 `b093bec6b3d4061b6693e07fdb3e4a6ab9a95606`, is available to the configured
 own internal tester. [Full run 38946605484](https://github.com/Dhafen/flash-local/actions/runs/38946605484)
 passed all gates, including 569 app tests, the package suite (474 tests, nine

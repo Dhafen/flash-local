@@ -113,3 +113,22 @@ tensors contains MTP weights**. MTP decoding cannot be enabled from that
 field alone. Speculative decoding and the authenticated foreground LAN API
 remain follow-ups after correctness and actual device comparison. Routing
 top-k and the model graph are unchanged.
+
+
+## Delivered guarded kernel integration: build 97
+
+App source `bcad87da52735a3ec6fca799a6b6bf47aa0fc92e`, with Swiftlet code
+pinned to `1e348e7b61289d70ba5bde2c212bcfa7867f4323`, passed
+[full run 39030060624](https://github.com/Dhafen/flash-local/actions/runs/39030060624)
+and is confirmed available as private TestFlight 0.1.0 (97). The visible
+Ornith Performance entry includes automatic original/grouped kernel replay,
+manual original comparison and aggregate-only control export. Four full
+vocabulary vectors must agree bitwise with identical teacher-forced inputs;
+all error/cancel paths restore original mode. This bounded guard is not a
+trained-model reference validation or a sustained speed result. Original
+GGUF/REAM decoding is unchanged. See the [delivery record](TESTFLIGHT.md).
+
+The next isolated LES experiment reuses the existing GGUF. Its first device
+milestone is 3 decode tokens/s, then 5 or 8 if measured sustainable. No
+13-token/s promise or physical QPack speedup is made. Existing phone baseline
+remains build 94: 1.184 decode forwards/s over nine forwards.
