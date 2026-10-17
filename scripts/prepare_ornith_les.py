@@ -53,13 +53,24 @@ def patched_files(source):
             readv_span(fd, offset, iov, n);
         }""")
     replace("src/llama-moe-slot.h", "        int64_t process;", """        uint64_t all_bytes, all_calls, predicted, prediction_hits, prefetch_bytes;
+        uint64_t demand_hits, demand_misses;
         int64_t process;""")
+    replace("src/llama-moe-slot.cpp", "    std::atomic<uint64_t> io_bytes_all{0};",
+            "    std::atomic<uint64_t> demand_hits{0}, demand_misses{0};\n    std::atomic<uint64_t> io_bytes_all{0};")
+    replace("src/llama-moe-slot.cpp", "    const int n_hit = n_unique - n_miss;", """    const int n_hit = n_unique - n_miss;
+    pimpl->demand_hits.fetch_add((uint64_t)n_hit, std::memory_order_relaxed);
+    pimpl->demand_misses.fetch_add((uint64_t)n_miss, std::memory_order_relaxed);""")
     replace("src/llama-moe-slot.cpp", "    counters c;", """    counters c;
     c.all_bytes = pimpl->io_bytes_all.load(std::memory_order_relaxed);
     c.all_calls = pimpl->io_calls_all.load(std::memory_order_relaxed);
     c.predicted = pimpl->lookahead.n_armed.load(std::memory_order_relaxed);
     c.prediction_hits = pimpl->lookahead.n_hits.load(std::memory_order_relaxed);
     c.prefetch_bytes = pimpl->lookahead.n_pred_bytes.load(std::memory_order_relaxed);""")
+    replace("src/llama-moe-slot.cpp", "    c.process  = pimpl->process_ns.load(std::memory_order_relaxed);", """    c.demand_hits = pimpl->demand_hits.load(std::memory_order_relaxed);
+    c.demand_misses = pimpl->demand_misses.load(std::memory_order_relaxed);
+    c.process  = pimpl->process_ns.load(std::memory_order_relaxed);""")
+    # Cache mode is a per-context experiment, not a process-first-call setting.
+    replace("src/llama-moe-slot.cpp", "        static const int m = [] {", "        const int m = [] {")
     replace("src/llama-context.h", "struct llama_context {", """struct llama_context {
     llama_moe_slot_runtime * flash_local_slots() const { return moe_slots.get(); }""")
     replace("src/models/qwen35moe.cpp", "il + 1 < n_layer && model.layers[il + 1].ffn_gate_inp != nullptr",

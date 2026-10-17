@@ -15,7 +15,10 @@ import struct
 import argparse
 
 
-def main(chat=False, mixed=False, ornith=False):
+def main(chat=False, mixed=False, ornith=False, wide_experts=False):
+    if wide_experts and (not ornith or chat or mixed):
+        raise ValueError('Wide-router fixture is a separate untrained F32 Ornith control')
+    experts, selected = (256, 8) if wide_experts else (3, 2)
     if chat and mixed:
         raise ValueError("Mixed fixture has a separate graph-only vocabulary")
     hidden, width, rank, ple = (256, 256, 32, 128) if mixed else (16, 8, 4, 8)
@@ -61,7 +64,7 @@ def main(chat=False, mixed=False, ornith=False):
         "block_count": 4, "embedding_length": hidden, "vocab_size": vocabulary_size, "context_length": 4096,
         "feed_forward_length": width, "attention.head_count": 2, "attention.head_count_kv": 1,
         "attention.key_length": 8, "attention.value_length": 8, "rope.dimension_count": 2,
-        "expert_count": 3, "expert_used_count": 2, "expert_feed_forward_length": width,
+        "expert_count": experts, "expert_used_count": selected, "expert_feed_forward_length": width,
         "expert_shared_feed_forward_length": width, "ssm.conv_kernel": 2, "ssm.state_size": 128,
         "ssm.group_count": key_heads, "ssm.time_step_rank": value_heads, "ssm.inner_size": value_width,
         "full_attention_interval": 4, "hyper_connection.count": 2, "hyper_connection.low_rank": rank,
@@ -112,12 +115,12 @@ def main(chat=False, mixed=False, ornith=False):
             tensor(p + "post_attention_norm.weight", [hidden], 1.1)
         else:
             hc(p + "hc_attn_"); hc(p + "hc_ffn_")
-        tensor(p + "ffn_gate_inp.weight", [hidden, 3])
+        tensor(p + "ffn_gate_inp.weight", [hidden, experts])
         tensor(p + "ffn_gate_inp_shexp.weight", [hidden])
         for projection in ["gate", "up"]:
-            tensor(p + f"ffn_{projection}_exps.weight", [hidden, width, 3])
+            tensor(p + f"ffn_{projection}_exps.weight", [hidden, width, experts])
             tensor(p + f"ffn_{projection}_shexp.weight", [hidden, width])
-        tensor(p + "ffn_down_exps.weight", [width, hidden, 3])
+        tensor(p + "ffn_down_exps.weight", [width, hidden, experts])
         tensor(p + "ffn_down_shexp.weight", [width, hidden])
         if layer == 3 or (ornith and layer == 4):
             tensor(p + "attn_q.weight", [hidden, 32])
@@ -167,6 +170,7 @@ def main(chat=False, mixed=False, ornith=False):
     folder.mkdir(exist_ok=True)
     family = "ornith" if ornith else "qwen4exp"
     stem = f"synthetic-{family}-mixed-source" if mixed else (f"synthetic-{family}-chat" if chat else f"synthetic-{family}")
+    if wide_experts: stem += '-top8'
     (folder / (stem + ".gguf")).write_bytes(model)
     manifest = dict(fileName=stem + ".gguf", fileByteCount=len(model),
                     sha256=hashlib.sha256(model).hexdigest(), tokens=[1, 2, 3, 15, 4], contextTokens=128 if chat else 32)
@@ -181,5 +185,6 @@ if __name__ == "__main__":
     parser.add_argument("--chat", action="store_true", help="Add tiny byte vocabulary and pinned chat template")
     parser.add_argument("--mixed", action="store_true", help="Generate wider random graph for canonical mixed quantization")
     parser.add_argument("--ornith", action="store_true", help="Qwen3.5 MoE trunk with an unused MTP block; no HC/PLE")
+    parser.add_argument("--wide-experts", action="store_true", help="Separate tiny F32 Ornith fixture with 256 experts and top-8")
     args = parser.parse_args()
-    main(chat=args.chat, mixed=args.mixed, ornith=args.ornith)
+    main(chat=args.chat, mixed=args.mixed, ornith=args.ornith, wide_experts=args.wide_experts)

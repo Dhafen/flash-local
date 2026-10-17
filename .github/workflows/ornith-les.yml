@@ -43,6 +43,35 @@ jobs:
             > .work/les-controls.log 2>&1
           cat .work/les-controls.log | tail -8
           grep 'ORNITH_LES_CONTROL.*routing=true.*syntheticOnly=true' .work/les-controls.log
+      - name: Mixed Q4_K/Q6_K expert controls
+        run: |
+          python3 scripts/make_qwen4exp_test_model.py --ornith --mixed
+          .work/ornith-les-macos/bin/ornith-les-mixed-fixture \
+            .test-fixtures/synthetic-ornith-mixed-source.gguf .test-fixtures/synthetic-ornith-mixed.gguf --ornith
+          .work/ornith-les-macos/bin/ornith-les-control \
+            .test-fixtures/synthetic-ornith-mixed.gguf .work/les-control-mixed .work/les-control-mixed.json \
+            > .work/les-mixed-controls.log 2>&1
+          tail -8 .work/les-mixed-controls.log
+      - name: Real routing cardinality without trained weights
+        run: |
+          python3 scripts/make_qwen4exp_test_model.py --ornith --wide-experts
+          .work/ornith-les-macos/bin/ornith-les-control \
+            .test-fixtures/synthetic-ornith-top8.gguf .work/les-control-top8 .work/les-control-top8.json \
+            > .work/les-top8-controls.log 2>&1
+          tail -8 .work/les-top8-controls.log
+      - name: Compare both complete synthetic graphs with the existing pinned CPU reference
+        run: python3 scripts/run_ornith_les_reference.py
+      - name: Build unchanged tokenizer for the Swift adapter checks
+        run: python3 scripts/build_tokenizer_xcframework.py
+      - name: Swift memory, comparison and aggregate export controls
+        env:
+          FLASH_LOCAL_ENABLE_LES: '1'
+        run: |
+          export ORNITH_LES_FIXTURE_ROOT="$PWD/.test-fixtures"
+          xcodebuild test -scheme minirun-Package -destination 'platform=macOS' \
+            -only-testing:OrnithLESTests -skipPackagePluginValidation -skipMacroValidation \
+            > .work/les-swift-tests.log 2>&1
+          tail -12 .work/les-swift-tests.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -53,4 +82,11 @@ jobs:
             .work/ornith-les-runtime/build-manifest.json
             .work/les-controls.log
             .work/les-control-f32.json
+            .work/les-mixed-controls.log
+            .work/les-control-mixed.json
+            .work/les-top8-controls.log
+            .work/les-control-top8.json
+            .work/les-reference-check.json
+            .work/les-reference.log
+            .work/les-swift-tests.log
           retention-days: 7

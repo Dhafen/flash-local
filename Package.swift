@@ -1,5 +1,10 @@
 // swift-tools-version: 5.9
 import PackageDescription
+import Foundation
+
+// Only the isolated experiment opts in. Normal production resolution and its
+// tokenizer/reference binary remain unchanged.
+let enableLES = ProcessInfo.processInfo.environment["FLASH_LOCAL_ENABLE_LES"] == "1"
 
 let package = Package(
     name: "minirun",
@@ -16,7 +21,7 @@ let package = Package(
         .library(name: "BenchScenarios", targets: ["BenchScenarios"]),
         .library(name: "MinirunKit", targets: ["MinirunKit"]),
         .library(name: "MinirunRunners", targets: ["MinirunRunners"]),
-    ],
+    ] + (enableLES ? [.library(name: "OrnithLES", targets: ["OrnithLES"])] : []),
     dependencies: [
         .package(url: "https://github.com/ml-explore/mlx-swift.git", exact: "0.31.4"),
     ],
@@ -81,12 +86,18 @@ let package = Package(
                 "ModelAdapters",
                 "StorageCore",
                 .product(name: "MLX", package: "mlx-swift"),
-            ]
+            ] + (enableLES ? [.target(name: "OrnithLES")] : [])
         ),
         .testTarget(
             name: "MinirunRunnersTests",
             dependencies: ["MinirunRunners", "ModelAdapters", "StorageCore", "MinirunKit"]
         ),
         .plugin(name: "EmbedGitRevision", capability: .buildTool()),
-    ]
+    ] + (enableLES ? [
+        .binaryTarget(name: "FlashOrnithLES", path: ".work/ornith-les-runtime/FlashOrnithLES.xcframework"),
+        .target(name: "OrnithLES", dependencies: ["FlashOrnithLES", "ModelAdapters", "GGUFCore", "MinirunKit", "StorageCore",
+            .product(name: "MLX", package: "mlx-swift")], path: "Experiments/OrnithLES/Sources/OrnithLES"),
+        .testTarget(name: "OrnithLESTests", dependencies: ["OrnithLES", "GGUFCore", "StorageCore", "ModelAdapters"],
+            path: "Experiments/OrnithLES/Tests/OrnithLESTests")
+    ] : [])
 )

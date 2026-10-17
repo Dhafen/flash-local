@@ -64,8 +64,13 @@ int flo_prepare(int source, const char * directory, flo_abort abort, void * user
         last_error.clear(); const auto source_bytes = file_size(source);
         require(directory && fs::is_directory(directory) && fs::is_empty(directory), "Preparation needs an empty private directory");
         check_abort(abort, user);
+        const int header_fd = dup(source); require(header_fd >= 0, "Cannot duplicate GGUF descriptor");
+        FILE * raw_header = fdopen(header_fd, "rb");
+        if (!raw_header) { close(header_fd); throw std::runtime_error("Cannot open GGUF stream"); }
+        std::unique_ptr<FILE, decltype(&fclose)> header_file(raw_header, &fclose);
+        require(fseek(raw_header, 0, SEEK_SET) == 0, "Cannot rewind verified GGUF stream");
         gguf_owner input, dense;
-        input.file = gguf_init_from_file(fd_path(source).c_str(), {true, &input.tensors});
+        input.file = gguf_init_from_file_ptr(raw_header, {true, &input.tensors});
         require(input.file && input.tensors, "Invalid GGUF metadata");
         const auto arch = gguf_find_key(input.file, "general.architecture");
         require(arch >= 0 && gguf_get_kv_type(input.file, arch) == GGUF_TYPE_STRING &&
@@ -135,6 +140,7 @@ struct flo_context {
     fd_owner source;
     fs::path manifest;
     llama_model * model = nullptr;
+    FILE * model_file = nullptr;
     llama_context * context = nullptr;
     flo_abort abort = nullptr; void * user = nullptr;
     int vocabulary = 0, batch = 0, position = 0, capacity = 0;
@@ -144,6 +150,7 @@ struct flo_context {
     ~flo_context() {
         if (context) llama_free(context);
         if (model) llama_model_free(model);
+        if (model_file) fclose(model_file);
         if (!manifest.empty()) { std::error_code ignored; fs::remove(manifest, ignored); }
     }
 };
@@ -207,7 +214,12 @@ flo_context * flo_open(int source, const char * directory, flo_options o, flo_ab
             auto * c = static_cast<flo_context *>(data); return !c->abort || !c->abort(c->user);
         };
         result->abort = abort; result->user = user; mp.progress_callback_user_data = result.get();
-        result->model = llama_model_load_from_file(model_path.c_str(), mp);
+        const int model_fd = streaming ? open(model_path.c_str(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC) : dup(result->source.value);
+        require(model_fd >= 0, "Cannot open LES model stream");
+        result->model_file = fdopen(model_fd, "rb");
+        if (!result->model_file) { close(model_fd); throw std::runtime_error("Cannot retain LES model stream"); }
+        require(fseek(result->model_file, 0, SEEK_SET) == 0, "Cannot rewind model stream");
+        result->model = llama_model_load_from_file_ptr(result->model_file, mp);
         require(result->model, "LES model loading failed"); check_abort(abort, user);
         auto cp = llama_context_default_params();
         cp.n_ctx = o.context_tokens; cp.n_batch = 32;
@@ -267,6 +279,7 @@ flo_metrics flo_snapshot(const flo_context * c) {
         out.io_bytes = s.all_bytes; out.io_calls = s.all_calls; out.misses = s.miss; out.selected_experts = s.unique;
         out.predicted = s.predicted; out.prediction_hits = s.prediction_hits; out.prefetch_bytes = s.prefetch_bytes;
         out.process_ns = s.process; out.install_ns = s.install;
+        out.demand_hits = s.demand_hits; out.demand_misses = s.demand_misses;
     }
     flash_omni_metal_snapshot(&out.dispatches, &out.command_buffers, &out.gpu_ns); return out;
 }

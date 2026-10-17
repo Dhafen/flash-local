@@ -28,10 +28,13 @@ target_link_options(FlashOrnithLES PRIVATE
   "LINKER:-exported_symbols_list,${CMAKE_CURRENT_SOURCE_DIR}/exports.txt")
 set_target_properties(FlashOrnithLES PROPERTIES FRAMEWORK TRUE FRAMEWORK_VERSION A
   MACOSX_FRAMEWORK_IDENTIFIER com.dhafen.flashlocal.ornithles
+  MACOSX_FRAMEWORK_BUNDLE_VERSION 1 MACOSX_FRAMEWORK_SHORT_VERSION_STRING 1.0.0
   PUBLIC_HEADER FlashOrnithLES.h BUILD_WITH_INSTALL_RPATH TRUE
   INSTALL_NAME_DIR "@rpath" XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED NO)
 if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
   add_executable(ornith-les-control control.cpp)
   target_include_directories(ornith-les-control PRIVATE "${OMNI_SOURCE}/vendor")
   target_link_libraries(ornith-les-control PRIVATE FlashOrnithLES)
+  add_executable(ornith-les-mixed-fixture "${CMAKE_CURRENT_SOURCE_DIR}/../../../Tests/ReferenceHarness/mixed.cpp" MetalTelemetry.m)
+  target_link_libraries(ornith-les-mixed-fixture PRIVATE llama "-framework Metal")
 endif()

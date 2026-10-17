@@ -11,6 +11,7 @@ typedef struct {
     uint64_t predicted, prediction_hits, prefetch_bytes;
     uint64_t process_ns, install_ns, dispatches, command_buffers, gpu_ns;
     uint64_t routing_digest, routing_decisions;
+    uint64_t demand_hits, demand_misses;
 } flo_metrics;
 typedef struct {
     int32_t context_tokens, prefill_slots, cache_slots_per_layer;
