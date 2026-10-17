@@ -164,7 +164,9 @@ final class OrnithLESAppModel {
         stop(); await operation?.value; await worker.release(); isShuttingDown = false
     }
     private func save(check: LESNumericalCheck?, runs: [LESBenchmarkRun], airplane: Bool, failure: String? = nil) throws {
-        #if os(iOS)
+        #if targetEnvironment(simulator)
+        let platform = "iOSSimulator"
+        #elseif os(iOS)
         let platform = "iOSDevice"
         #else
         let platform = "macOS"

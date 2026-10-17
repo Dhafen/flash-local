@@ -50,6 +50,17 @@ def main():
                 modules = framework/'Modules'
                 modules.mkdir(exist_ok=True)
                 (modules/'module.modulemap').write_text('framework module FlashOrnithLES {\n  umbrella header "FlashOrnithLES.h"\n  export *\n}\n')
+                header = framework/'Headers/FlashOrnithLES.h'
+                if not header.is_file() or header.read_bytes() != (root/'Experiments/OrnithLES/Native/FlashOrnithLES.h').read_bytes():
+                    raise RuntimeError(f'{name} framework is missing its exact public C ABI header')
+                probe = runtime/'module-probe.m'
+                probe.write_text('@import FlashOrnithLES;\n')
+                sdk_path = subprocess.check_output(['xcrun', '--sdk', sdk, '--show-sdk-path'], text=True).strip()
+                triple = {'macos': 'arm64-apple-macos14.0', 'ios': 'arm64-apple-ios18.0',
+                          'ios-simulator': 'arm64-apple-ios18.0-simulator'}[name]
+                run(['xcrun', '--sdk', sdk, 'clang', '-target', triple, '-isysroot', sdk_path,
+                     '-fmodules', '-fsyntax-only', '-F', framework.parent,
+                     '-fmodules-cache-path=' + str(runtime/('module-cache-' + name)), probe])
                 binary = framework/'FlashOrnithLES'
                 symbols = subprocess.check_output(['xcrun', 'nm', '-gU', binary], text=True)
                 actual = {line.split()[-1] for line in symbols.splitlines() if line.strip()}
@@ -61,7 +72,7 @@ def main():
                     raise RuntimeError('LES framework depends on a second exported llama library')
                 frameworks += ['-framework', framework]
                 records.append(dict(platform=name, sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
-                    exportedSymbols=sorted(actual), symbolIsolated=True))
+                    exportedSymbols=sorted(actual), symbolIsolated=True, publicHeaderVerified=True, moduleImportVerified=True))
                 print(f'LES framework ready: {name}, isolated exports verified', flush=True)
             if not args.mac_only:
                 target = runtime/'FlashOrnithLES.xcframework'

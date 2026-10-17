@@ -116,6 +116,11 @@ def patched_files(source):
             "    [encoder->obj dispatchThreadgroups:MTLSizeMake(tg0, tg1, tg2) threadsPerThreadgroup:MTLSizeMake(tptg0, tptg1, tptg2)];",
             "    extern void flash_omni_record_dispatch(void);\n    flash_omni_record_dispatch();\n"
             "    [encoder->obj dispatchThreadgroups:MTLSizeMake(tg0, tg1, tg2) threadsPerThreadgroup:MTLSizeMake(tptg0, tptg1, tptg2)];")
+    file = "ggml/src/ggml-metal/ggml-metal-device.m"
+    replace(file, '#include <Metal/Metal.h>', '#include <Metal/Metal.h>\nextern void flash_omni_commit(id<MTLCommandBuffer>);')
+    result[file], count = re.subn(pattern, r"\1flash_omni_commit(\2);", result[file])
+    if count != 5:
+        raise ValueError(f"Pinned Metal copy/fill commit sites changed: {count}")
     return result
 
 

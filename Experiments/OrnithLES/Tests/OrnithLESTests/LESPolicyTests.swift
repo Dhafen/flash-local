@@ -62,12 +62,19 @@ final class LESPolicyTests: XCTestCase {
         }
     }
     func testAggregateNumericalExportDoesNotContainTokenOrLogitPayloads() throws {
-        let result = LESLogitComparison(positions: 4, maximumAbsoluteError: 0, relativeL2Error: 0, sameGreedy: true)
+        let result = LESLogitComparison(positions: 4, maximumAbsoluteError: 0, relativeL2Error: 0, sameGreedy: true,
+            routingDigest: 19, routingDecisions: 48)
         let check = LESNumericalCheck(modelSHA256: String(repeating: "a", count: 64), referenceRevision: "reference",
             nativeRevision: "candidate", noLookahead: result, lookahead: result, batchedPrefill: result)
         let encoded = String(decoding: try JSONEncoder().encode(check), as: UTF8.self)
         for key in ["promptTokenIDs", "generatedTokenIDs", "logits", "chat", "messages"] { XCTAssertFalse(encoded.contains("\"" + key + "\"")) }
         XCTAssertTrue(check.passed); XCTAssertFalse(check.fullModelNumericsVerified)
+        var different = result; different.routingDigest = 20
+        XCTAssertFalse(LESNumericalCheck(modelSHA256: "same", referenceRevision: "reference", nativeRevision: "candidate",
+            noLookahead: result, lookahead: different, batchedPrefill: result).passed)
+        var untraced = result; untraced.routingDecisions = 0
+        XCTAssertFalse(LESNumericalCheck(modelSHA256: "same", referenceRevision: "reference", nativeRevision: "candidate",
+            noLookahead: untraced, lookahead: untraced, batchedPrefill: result).passed)
     }
     func testOldCPUReferenceAndIsolatedLESCoexistAndPreserveSource() throws {
         let fixtures = try XCTUnwrap(ProcessInfo.processInfo.environment["ORNITH_LES_FIXTURE_ROOT"])

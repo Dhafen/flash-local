@@ -13,6 +13,8 @@ public struct LESLogitComparison: Codable, Sendable, Equatable {
     public let maximumAbsoluteError: Double
     public let relativeL2Error: Double
     public let sameGreedy: Bool
+    public var routingDigest: UInt64? = nil
+    public var routingDecisions: UInt64? = nil
     public var passed: Bool {
         positions == 4 && maximumAbsoluteError.isFinite && relativeL2Error.isFinite &&
             (0...0.01).contains(maximumAbsoluteError) && (0...0.001).contains(relativeL2Error) && sameGreedy
@@ -26,7 +28,12 @@ public struct LESNumericalCheck: Codable, Sendable {
     public let lookahead: LESLogitComparison
     public let batchedPrefill: LESLogitComparison
     public let fullModelNumericsVerified = false
-    public var passed: Bool { noLookahead.passed && lookahead.passed && batchedPrefill.passed }
+    public var passed: Bool {
+        noLookahead.passed && lookahead.passed && batchedPrefill.passed &&
+            noLookahead.routingDecisions.map({ $0 > 0 }) == true &&
+            noLookahead.routingDigest != nil && noLookahead.routingDigest == lookahead.routingDigest &&
+            noLookahead.routingDecisions == lookahead.routingDecisions
+    }
 }
 public struct LESBenchmarkRun: Codable, Sendable {
     public let backend: LESBenchmarkBackend
@@ -90,7 +97,7 @@ public enum LESBenchmark {
     private static func compare(_ replay: Replay, artifact: VerifiedGGUFArtifact, prepared: URL,
                                 depth: Int, prefillBatch: Int = 1, control: LESControl) throws -> LESLogitComparison {
         let memory = try plan(artifact, context: 128, depth: depth)
-        let context = try LESContext(artifact: artifact, prepared: prepared, plan: memory, control: control)
+        let context = try LESContext(artifact: artifact, prepared: prepared, plan: memory, control: control, traceRouting: true)
         var logits: [Float] = []
         for first in stride(from: 0, to: replay.prompt.count, by: prefillBatch) {
             logits = try context.logits(tokens: Array(replay.prompt[first..<min(first + prefillBatch, replay.prompt.count)]))
@@ -108,7 +115,8 @@ public enum LESBenchmark {
             }
         }
         return LESLogitComparison(positions: 4, maximumAbsoluteError: absolute,
-            relativeL2Error: sqrt(squared / max(referenceSquared, 1e-30)), sameGreedy: same)
+            relativeL2Error: sqrt(squared / max(referenceSquared, 1e-30)), sameGreedy: same,
+            routingDigest: context.metrics.routingDigest, routingDecisions: context.metrics.routingDecisions)
     }
     public static func check(artifact: VerifiedGGUFArtifact, prepared: URL, control: LESControl,
                              progress: @Sendable (String) -> Void = { _ in }) throws -> LESNumericalCheck {

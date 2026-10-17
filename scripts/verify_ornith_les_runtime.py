@@ -14,7 +14,8 @@ def main():
     if record['appSourceRevision'] != source or record['trainedInferenceExecuted'] is not False:
         raise ValueError('LES binary is from another source or lacks the synthetic-only declaration')
     expected = {entry['platform']: entry for entry in record['slices']}
-    if set(expected) != {'macos', 'ios', 'ios-simulator'} or not all(x['symbolIsolated'] for x in expected.values()):
+    if set(expected) != {'macos', 'ios', 'ios-simulator'} or not all(
+            x['symbolIsolated'] and x['publicHeaderVerified'] and x['moduleImportVerified'] for x in expected.values()):
         raise ValueError('Incomplete symbol-isolated platform validation')
     framework = runtime/'FlashOrnithLES.xcframework'
     info = plistlib.loads((framework/'Info.plist').read_bytes())

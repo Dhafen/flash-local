@@ -20,7 +20,7 @@ endif()
 add_subdirectory("${OMNI_SOURCE}" omni)
 # Two llama runtimes must coexist. A dynamic framework exports ONLY flo_*;
 # the old tokenizer/reference runtime retains its own statically linked symbols.
-add_library(FlashOrnithLES SHARED FlashOrnithLES.cpp MetalTelemetry.m)
+add_library(FlashOrnithLES SHARED FlashOrnithLES.cpp FlashOrnithLES.h MetalTelemetry.m)
 target_include_directories(FlashOrnithLES PRIVATE
   "${OMNI_SOURCE}/src" "${OMNI_SOURCE}/vendor")
 target_link_libraries(FlashOrnithLES PRIVATE llama "-framework Foundation" "-framework Metal")
