@@ -227,4 +227,3 @@ or reach the limit before an answer. It does not accelerate decoding. Synthetic
 session tests, split-marker tests, exact tokenizer/template comparisons for
 both modes and light/dark render captures are required before delivery. These
 controls do not establish full trained-model numerical agreement on iPhone.
-

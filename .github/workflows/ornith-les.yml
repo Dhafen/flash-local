@@ -73,21 +73,21 @@ jobs:
           tail -8 .work/les-top8-controls.log
       - name: Compare both complete synthetic graphs with the existing pinned CPU reference
         run: python3 scripts/run_ornith_les_reference.py
-      - name: Build isolated original-math LES runtime (Mac, iPhone, Simulator)
-        run: python3 scripts/build_ornith_les.py
-      - name: Build unchanged tokenizer for the Swift adapter checks
-        run: python3 scripts/build_tokenizer_xcframework.py
       - name: Both thinking modes against the pinned Ornith template
         run: |
           python3 scripts/make_tokenizer_reference_fixture.py --ornith
           cmake --build .work/reference-build --config Release --target flash-local-tokenizer-reference --parallel 3
-          .work/reference-build/bin/flash-local-tokenizer-reference \
+          .work/reference-build/flash-local-tokenizer-reference \
             .test-fixtures/ornith-tokenizer/qwen35-vocabulary-only.gguf \
             .test-fixtures/ornith-tokenizer/qwen35-tokenizer-corpus.bin \
             .test-fixtures/ornith-tokenizer/qwen35-tokenizer-reference.json \
             .test-fixtures/ornith-tokenizer/qwen35-tokenizer-corpus.json \
             > .work/ornith-thinking-tokenizer.log 2>&1
           tail -5 .work/ornith-thinking-tokenizer.log
+      - name: Build isolated original-math LES runtime (Mac, iPhone, Simulator)
+        run: python3 scripts/build_ornith_les.py
+      - name: Build canonical tokenizer for the Swift adapter checks
+        run: python3 scripts/build_tokenizer_xcframework.py
       - name: Swift memory, comparison and aggregate export controls
         env:
           FLASH_LOCAL_ENABLE_LES: '1'
