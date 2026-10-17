@@ -62,12 +62,14 @@ def main():
                 frameworks += ['-framework', framework]
                 records.append(dict(platform=name, sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
                     exportedSymbols=sorted(actual), symbolIsolated=True))
+                print(f'LES framework ready: {name}, isolated exports verified', flush=True)
             if not args.mac_only:
                 target = runtime/'FlashOrnithLES.xcframework'
                 if target.exists():
                     raise RuntimeError('XCFramework output exists; keep immutable build evidence')
                 run(['xcodebuild', '-create-xcframework', *frameworks, '-output', target])
-            (runtime/'build-manifest.json').write_text(json.dumps(dict(revision=REVISION,
+            app_source = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip()
+            (runtime/'build-manifest.json').write_text(json.dumps(dict(revision=REVISION, appSourceRevision=app_source,
                 patchedSource=json.loads((source/'flash-local-source.json').read_text()), slices=records,
                 trainedInferenceExecuted=False), indent=2)+'\n')
         except Exception:

@@ -233,6 +233,13 @@ final class REAMAppModel {
         alternateRunnerActive = false
         refreshStorage()
     }
+    #if canImport(OrnithLES)
+    func verifiedOrnithForAlternateRunner() -> VerifiedGGUFArtifact? {
+        guard alternateRunnerActive, !isBusy, let artifact,
+              artifact.manifest.sha256 == GGUFModelManifest.primaryOrnith.sha256 else { return nil }
+        do { try artifact.assertUnchanged(); return artifact } catch { return nil }
+    }
+    #endif
 
     init(root: URL, source: PinnedGGUFDownload = .primaryOrnith, chatFile: URL? = nil,
          settings: REAMRunSettings = .ornith, modelSelectionDirectory: URL? = nil) {

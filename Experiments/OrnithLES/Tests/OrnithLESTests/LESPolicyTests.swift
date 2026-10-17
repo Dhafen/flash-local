@@ -61,7 +61,7 @@ final class LESPolicyTests: XCTestCase {
     func testAggregateNumericalExportDoesNotContainTokenOrLogitPayloads() throws {
         let result = LESLogitComparison(positions: 4, maximumAbsoluteError: 0, relativeL2Error: 0, sameGreedy: true)
         let check = LESNumericalCheck(modelSHA256: String(repeating: "a", count: 64), referenceRevision: "reference",
-            nativeRevision: "candidate", noLookahead: result, lookahead: result)
+            nativeRevision: "candidate", noLookahead: result, lookahead: result, batchedPrefill: result)
         let encoded = String(decoding: try JSONEncoder().encode(check), as: UTF8.self)
         for key in ["promptTokenIDs", "generatedTokenIDs", "logits", "chat", "messages"] { XCTAssertFalse(encoded.contains("\"" + key + "\"")) }
         XCTAssertTrue(check.passed); XCTAssertFalse(check.fullModelNumericsVerified)

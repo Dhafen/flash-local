@@ -12,16 +12,18 @@
 namespace fs = std::filesystem;
 using json = nlohmann::json;
 struct output { std::vector<std::vector<float>> logits; flo_metrics metrics; };
-static output evaluate(int fd, const char * dir, bool metal, int depth) {
+static output evaluate(int fd, const char * dir, bool metal, int depth, int steps, int cache = 8) {
     flo_options options{};
-    options.context_tokens = 32; options.prefill_slots = 16; options.cache_slots_per_layer = 8;
+    options.context_tokens = steps > 5 ? 256 : 32; options.prefill_slots = 16; options.cache_slots_per_layer = cache;
     options.lookahead_depth = depth; options.io_threads = 2; options.cpu_threads = 2;
     options.metal = metal; options.trace_routing = true; options.memory_ceiling_bytes = 5500000000ULL;
     flo_context * context = flo_open(fd, dir, options, nullptr, nullptr);
     if (!context) throw std::runtime_error(flo_last_error());
     output out;
     try {
-        for (int32_t token : {1, 2, 3, 15, 4}) {
+        const int32_t tokens[] = {1, 2, 3, 15, 4};
+        for (int index = 0; index < steps; ++index) {
+            const int32_t token = tokens[index % 5];
             std::vector<float> row(flo_vocabulary_size(context));
             if (flo_decode(context, &token, 1, row.data(), (int)row.size())) throw std::runtime_error(flo_last_error());
             out.logits.push_back(row);
@@ -58,25 +60,24 @@ int main(int argc, char ** argv) {
         const int fd = open(argv[1], O_RDONLY | O_NOFOLLOW);
         if (fd < 0) return 3;
         if (flo_prepare(fd, dir.c_str(), nullptr, nullptr)) throw std::runtime_error(flo_last_error());
-        const auto cpu = evaluate(fd, nullptr, false, 0);
-        const auto streamed = evaluate(fd, dir.c_str(), false, 0);
-        const auto ahead = evaluate(fd, dir.c_str(), false, 2);
-        const auto gpu = evaluate(fd, nullptr, true, 0);
-        const auto gpu_stream = evaluate(fd, dir.c_str(), true, 0);
-        const auto gpu_ahead = evaluate(fd, dir.c_str(), true, 2);
-        const double cpu_error = std::max(compare(cpu, streamed), compare(cpu, ahead));
-        const double gpu_error = std::max(compare(gpu, gpu_stream), compare(gpu, gpu_ahead));
+        const int steps = fs::path(argv[1]).filename().string().find("top8") == std::string::npos ? 5 : 128;
+        const auto cpu = evaluate(fd, nullptr, false, 0, steps);
+        const auto gpu = evaluate(fd, nullptr, true, 0, steps);
+        const auto gpu_stream = evaluate(fd, dir.c_str(), true, 0, steps);
+        const auto gpu_ahead = evaluate(fd, dir.c_str(), true, 2, steps);
+        const auto gpu_page = evaluate(fd, dir.c_str(), true, 0, steps, 0);
+        const double gpu_error = std::max({compare(gpu, gpu_stream), compare(gpu, gpu_ahead), compare(gpu, gpu_page)});
         const double backend_error = compare(cpu, gpu);
-        if (cpu_error > 1e-6 || gpu_error > 1e-6 || backend_error > 0.01 ||
+        if (gpu_error > 1e-6 || backend_error > 0.01 ||
             !gpu_ahead.metrics.dispatches || !gpu_ahead.metrics.command_buffers || !gpu_ahead.metrics.gpu_ns)
             throw std::runtime_error("LES correctness/instrumentation gate failed");
         json report{{"syntheticOnly", true}, {"physicalPhone", false}, {"revision", flo_revision()},
-            {"cpuMaximumAbsoluteError", cpu_error}, {"metalMaximumAbsoluteError", gpu_error},
+            {"residentCPUReference", true}, {"metalMaximumAbsoluteError", gpu_error},
             {"cpuVsMetalMaximumAbsoluteError", backend_error}, {"actualRoutingIdentical", true},
             {"resetBitwiseIdentical", true}, {"sameGreedy", true}, {"modelRequantized", false},
-            {"expertPayloadCopied", false}, {"cpuLogits", cpu.logits}};
+            {"expertPayloadCopied", false}, {"positions", steps}, {"cpuLogits", cpu.logits}};
         std::ofstream out(argv[3]); out << report.dump(2) << '\n'; out.close(); close(fd);
-        std::cout << "ORNITH_LES_CONTROL cpuMaxAbs=" << cpu_error << " metalMaxAbs=" << gpu_error
+        std::cout << "ORNITH_LES_CONTROL cpuVsMetalMaxAbs=" << backend_error << " metalMaxAbs=" << gpu_error
                   << " routing=true reset=true noRequantization=true noExpertCopy=true syntheticOnly=true\n";
         return 0;
     } catch (const std::exception & e) { std::cerr << e.what() << '\n'; return 1; }

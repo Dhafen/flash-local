@@ -1,5 +1,6 @@
 name: Ornith LES isolated validation
 on:
+  workflow_call:
   workflow_dispatch:
   push:
     branches: [codex/ornith-les-backend]
@@ -89,4 +90,13 @@ jobs:
             .work/les-reference-check.json
             .work/les-reference.log
             .work/les-swift-tests.log
+          retention-days: 7
+      - name: Export source-bound LES framework for full app validation
+        uses: actions/upload-artifact@v4
+        with:
+          name: ornith-les-runtime
+          include-hidden-files: true
+          path: |
+            .work/ornith-les-runtime/FlashOrnithLES.xcframework
+            .work/ornith-les-runtime/build-manifest.json
           retention-days: 7

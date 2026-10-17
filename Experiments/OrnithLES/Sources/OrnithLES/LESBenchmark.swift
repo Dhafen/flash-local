@@ -21,8 +21,9 @@ public struct LESNumericalCheck: Codable, Sendable {
     public let nativeRevision: String
     public let noLookahead: LESLogitComparison
     public let lookahead: LESLogitComparison
+    public let batchedPrefill: LESLogitComparison
     public let fullModelNumericsVerified = false
-    public var passed: Bool { noLookahead.passed && lookahead.passed }
+    public var passed: Bool { noLookahead.passed && lookahead.passed && batchedPrefill.passed }
 }
 public struct LESBenchmarkRun: Codable, Sendable {
     public let backend: LESBenchmarkBackend
@@ -78,13 +79,13 @@ public enum LESBenchmark {
         return Replay(prompt: prompt, forced: forced, logits: vectors)
     }
     private static func compare(_ replay: Replay, artifact: VerifiedGGUFArtifact, prepared: URL,
-                                depth: Int, control: LESControl) throws -> LESLogitComparison {
+                                depth: Int, prefillBatch: Int = 1, control: LESControl) throws -> LESLogitComparison {
         let memory = try plan(artifact, context: 128, depth: depth)
         let context = try LESContext(artifact: artifact, prepared: prepared, plan: memory, control: control)
         var logits: [Float] = []
-        // Match the CPU oracle's one-token execution; batched prefill is a
-        // separate numerical gate, never inferred from this comparison.
-        for token in replay.prompt { logits = try context.logits(tokens: [token]) }
+        for first in stride(from: 0, to: replay.prompt.count, by: prefillBatch) {
+            logits = try context.logits(tokens: Array(replay.prompt[first..<min(first + prefillBatch, replay.prompt.count)]))
+        }
         var absolute = 0.0, squared = 0.0, referenceSquared = 0.0, same = true
         for position in 0..<4 {
             if position > 0 { logits = try context.logits(tokens: [replay.forced[position - 1]]) }
@@ -110,9 +111,11 @@ public enum LESBenchmark {
         let off = try autoreleasepool { try compare(replay, artifact: artifact, prepared: prepared, depth: 0, control: control) }
         progress("Kontrollerar LES med förläsning…")
         let on = try autoreleasepool { try compare(replay, artifact: artifact, prepared: prepared, depth: 4, control: control) }
+        progress("Kontrollerar batchad promptbearbetning…")
+        let batch = try autoreleasepool { try compare(replay, artifact: artifact, prepared: prepared, depth: 0, prefillBatch: 4, control: control) }
         return LESNumericalCheck(modelSHA256: artifact.manifest.sha256,
             referenceRevision: Qwen4ExpCPUReference.sourceRevision, nativeRevision: LESContext.revision,
-            noLookahead: off, lookahead: on)
+            noLookahead: off, lookahead: on, batchedPrefill: batch)
     }
 
     /// Fresh state on every run. Two runs on the same engine distinguish an
@@ -150,9 +153,12 @@ public enum LESBenchmark {
             var worstThermal = thermal, peak = ProcessFootprint.current()?.footprintBytes ?? 0
             let before = native?.metrics, startBytes = reads(), started = MonotonicClock.now()
             var logits: [Float] = []
-            for (index, token) in prompt.enumerated() {
-                logits = try step(token, projecting: index == prompt.count - 1) ?? []
-                progress("\(backend.rawValue) · \(warm ? "varm" : "tom appcache") · prompt \(index + 1)/\(prompt.count)")
+            let batchSize = native == nil ? 1 : 4
+            for first in stride(from: 0, to: prompt.count, by: batchSize) {
+                let end = min(first + batchSize, prompt.count)
+                if let native { logits = try native.logits(tokens: Array(prompt[first..<end])) }
+                else { logits = try step(prompt[first], projecting: end == prompt.count) ?? [] }
+                progress("\(backend.rawValue) · \(warm ? "varm" : "tom appcache") · prompt \(end)/\(prompt.count)")
                 peak = max(peak, ProcessFootprint.current()?.footprintBytes ?? 0)
             }
             let prefillSeconds = MonotonicClock.seconds(since: started), prefillBytes = reads(), afterPrefill = native?.metrics

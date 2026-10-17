@@ -17,7 +17,7 @@ Reviewed source snapshots:
 - Anemll/Flash-iOS `4f1a69777629cda07b4fdd7d93511ed43f62fad5`:
   `FlashMoEEngine.m`, `metal_infer/infer.m`, shaders and I/O experiments.
   This snapshot has no license grant file; its code is not copied or shipped.
-- Swiftlet's QPack/Engine/Metal sources and our separately tested grouped
+- Swiftlet's QPack/Engine/Metal sources upstream `de1a942241f65ac43290cecffc85d69ea5b52310` and our separately tested grouped
   dispatch fork, described in [Ornith Performance](ORNITH-PERFORMANCE.md).
 
 The [publisher's 13+ token/s iPhone claim](https://github.com/OpenBMB/MiniCPM-V)
@@ -90,3 +90,23 @@ DSpark needs a matching trained draft, target verification and recurrent
 rollback. MiniCPM's draft is not an Ornith draft. Speculative decoding is
 disabled; no quality/distribution equivalence is claimed. The foreground
 LAN API remains a follow-up after correctness and decode speed.
+
+
+The native streamed path requires Metal's alloc-only buffer type; CPU-only
+streamed synthesis is explicitly unsupported by this upstream loader. Controls
+use the complete resident tiny CPU model as oracle and compare resident Metal,
+streamed Metal, lookahead and page-cache variants. This does not require a CPU
+streaming implementation. A separate check compares the unchanged original
+pinned CPU reference. The 256-expert/top-8 fixture repeats 128 teacher-forced
+positions to exercise eviction and prefetch races without trained weights.
+
+The opt-in app benchmark uses the existing verified file capability, prepares
+only dense weights, performs a bounded CPU-reference comparison, then compares
+four modes over two genuine greedy generations each. Early EOS is retained
+and marks that run shorter than the required 128 tokens. Batched prefill has
+its own reference gate. Numerical disagreement prevents candidate benchmarks;
+the original chat remains available. The default production package does not
+link LES unless `FLASH_LOCAL_ENABLE_LES=1`. The dedicated delivery input requires
+the native/reference/Swift gates and transfers an exact-source/hash-checked,
+symbol-isolated XCFramework before app/archive/signing gates. No device result
+or TestFlight delivery is established by implementing those gates.

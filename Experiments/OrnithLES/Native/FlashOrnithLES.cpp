@@ -168,6 +168,7 @@ flo_context * flo_open(int source, const char * directory, flo_options o, flo_ab
         require(o.lookahead_depth >= 0 && o.lookahead_depth <= 16 && o.io_threads >= 1 && o.io_threads <= 8 &&
             o.cpu_threads >= 1 && o.cpu_threads <= 8, "Invalid scheduling options");
         const bool streaming = directory && *directory;
+        require(!streaming || o.metal, "Stripped LES expert slots require the Metal alloc-only backend");
         require(streaming || size <= (32 << 20), "Resident control is restricted to tiny synthetic fixtures");
         require(!streaming || (o.prefill_slots >= 8 && o.prefill_slots <= 256 &&
             (o.cache_slots_per_layer == 0 || o.cache_slots_per_layer >= 8) &&
