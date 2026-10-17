@@ -4,6 +4,16 @@ See the [10–15 token/s work plan](ORNITH-10-15-TPS-PLAN.md) for the measured
 build 94 **GGUF** baseline, code-level QPack bottlenecks, ordered experiments
 and numerical/quality gates. The target is not yet established on iPhone.
 
+A [separate grouped-expert prototype](https://github.com/Dhafen/flash-local-swiftlet/pull/2)
+now passes 186 Core/lifecycle controls and iOS compilation in
+[run 39027165387](https://github.com/Dhafen/flash-local-swiftlet/actions/runs/39027165387),
+source `1e348e7b61289d70ba5bde2c212bcfa7867f4323`. Eight selected int4 expert
+chains use three dispatches instead of 32. Actual Ornith projection shapes
+with g64/BF16 scales match the original GPU output bitwise; small untrained
+whole-model controls match logits/routes/KV, eviction and continuation.
+This prototype is not integrated into the app; trained phone parity and
+sustained A/B measurements remain required before activation.
+
 The optional **Ornith QPack (testläge)** menu opens a separate chat and weight
 directory. The existing GGUF/REAM runners, source weights and conversations
 remain available. The app waits for one runner to release its model before

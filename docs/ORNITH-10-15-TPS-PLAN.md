@@ -274,6 +274,13 @@ python -m unittest discover -s scripts/tests -p 'test_analyze_ornith_performance
 ```
 
 Nästa beslut som behöver fysisk mätning är P0: QPack i den redan levererade
-appen. Nästa kodprototyp är P1 med separat flagga, syntetiska/CPU-kontroller
-och därefter ett parat telefonprov. Ingen ny modellhämtning behövs för
-varje efterföljande kernel- eller cacheändring.
+appen. [P1-prototypen finns nu separat](https://github.com/Dhafen/flash-local-swiftlet/pull/2)
+med flaggan avstängd som standard. Kod/testrevision
+`1e348e7b61289d70ba5bde2c212bcfa7867f4323` passerade 186 Core/livscykelkontroller
+och iOS-kompilering i [körning 39027165387](https://github.com/Dhafen/flash-local-swiftlet/actions/runs/39027165387).
+De åtta expertkedjorna samlas till tre GPU-dispatchar; ett litet åttalagersprov
+med top-8 sparade 232 dispatchar per decode med bitvis identiska logits och
+samma routing. BF16/g64 provas även med Orniths faktiska projektionsstorlekar.
+Detta är mekanisk/syntetisk verifiering, inte tränad modellparitet eller
+telefonhastighet. Prototypen är ännu inte integrerad i appen. Ingen ny
+modellhämtning behövs för varje efterföljande kernel- eller cacheändring.
