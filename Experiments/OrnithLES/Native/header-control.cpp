@@ -142,7 +142,7 @@ int main(int argc, char ** argv) {
         require(gguf_write_to_file(dense.file, dense_path.c_str(), true), "Dense metadata write failed");
         uint64_t dense_end = gguf_get_meta_size(dense.file);
         for (int64_t i = 0; i < gguf_get_n_tensors(dense.file); ++i)
-            dense_end = std::max(dense_end, gguf_get_meta_size(dense.file) + gguf_get_tensor_offset(dense.file, i) + gguf_get_tensor_size(dense.file, i));
+            dense_end = std::max<uint64_t>(dense_end, gguf_get_meta_size(dense.file) + gguf_get_tensor_offset(dense.file, i) + gguf_get_tensor_size(dense.file, i));
         const uint64_t dense_physical = sparse_extent(dense_path, dense_end);
         const fs::path manifest_path = root / "manifest.json";
         json manifest{{"schema_version", 1}, {"experts_kind", "omni_moe_gguf"}, {"layout", "gguf_tensor_major"},
