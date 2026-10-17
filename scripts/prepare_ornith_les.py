@@ -31,6 +31,8 @@ def patched_files(source):
             'layout != "layer_major_expert" && layout != "expert_major" && layout != "gguf_tensor_major"')
     replace("src/llama-moe-experts.cpp", "        llama_moe_experts_entry entry;",
             '        llama_moe_experts_entry entry;\n        entry.tensor_major = layout == "gguf_tensor_major";')
+    replace("src/llama-moe-experts.cpp", "        if (entry.expert_stride < family_end) {",
+            "        if (entry.tensor_major ? entry.expert_stride != entry.bytes_per_expert : entry.expert_stride < family_end) {")
     replace("src/llama-moe-slot.cpp", "        const size_t st = bindings[0].entry->expert_stride;", """        if (bindings[0].entry->tensor_major) {
             // Keep separate original GGUF family extents. Destination slots
             // remain GPU-visible; each family is read directly, without staging.
