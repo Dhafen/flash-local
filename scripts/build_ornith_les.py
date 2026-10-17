@@ -40,7 +40,10 @@ def main():
                 run(command)
                 targets = ['FlashOrnithLES'] + (['ornith-les-control'] if name == 'macos' else [])
                 run(['cmake', '--build', build, '--config', 'Release', '--target', *targets, '--parallel', '3'])
-                candidates = list(build.rglob('FlashOrnithLES.framework'))
+                # Xcode also creates an EagerLinkingTBDs .framework directory
+                # containing only a text stub. Select an actual Mach-O product.
+                candidates = [p for p in build.rglob('FlashOrnithLES.framework')
+                              if (p/'FlashOrnithLES').is_file()]
                 if len(candidates) != 1:
                     raise RuntimeError(f'Expected one {name} framework')
                 framework = candidates[0]
