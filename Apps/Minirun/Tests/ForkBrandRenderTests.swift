@@ -33,6 +33,8 @@ final class ForkBrandRenderTests: XCTestCase {
             provenance.license.sha256, "The report manifest must identify the exact offline license bytes")
         XCTAssertTrue(REAMBundledNotices.text.contains("Qwen Community License 1.0"))
         XCTAssertTrue(REAMBundledNotices.text.contains("Apache License"))
+        XCTAssertTrue(REAMBundledNotices.text.contains("Ornith Performance Engine / Swiftlet acknowledgements"))
+        XCTAssertTrue(REAMBundledNotices.text.contains("1388b08883d3d469addb5fdb88916ac7c5a19cd6"))
         var rendered: [Data] = []
         for scheme in [ColorScheme.light, .dark] {
             let renderer = ImageRenderer(content: AboutPage().frame(width: 430)

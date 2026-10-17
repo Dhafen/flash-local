@@ -10,6 +10,8 @@ name: Minirun
 packages:
   minirun:
     path: ../..
+  OrnithPerformance:
+    path: ../../Experiments/OrnithPerformance
   # Sparkle 2, macOS target only.  The Mac app is distributed outside the App
   # Store; the iOS app is not, and must not link an updater it cannot use.
   # Pinned exactly because this framework installs executable code — the
@@ -89,6 +91,8 @@ targets:
         product: StorageCore
       - package: Sparkle
         product: Sparkle
+      - package: OrnithPerformance
+        product: OrnithPerformance
     settings:
       base:
         ARCHS: arm64
@@ -113,6 +117,8 @@ targets:
       - path: Tests
     dependencies:
       - target: Minirun-macOS
+      - package: OrnithPerformance
+        product: OrnithPerformance
     settings:
       base:
         ARCHS: arm64
@@ -166,6 +172,8 @@ targets:
         product: MinirunRunners
       - package: minirun
         product: StorageCore
+      - package: OrnithPerformance
+        product: OrnithPerformance
     settings:
       base:
         ARCHS: arm64
@@ -204,6 +212,8 @@ targets:
         product: StorageCore
       - package: minirun
         product: iOSBench
+      - package: OrnithPerformance
+        product: OrnithPerformance
     settings:
       base:
         ARCHS: arm64

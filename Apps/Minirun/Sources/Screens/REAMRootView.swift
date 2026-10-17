@@ -9,9 +9,15 @@ struct REAMRootView: View {
     @Environment(\.scenePhase) private var scenePhase
     private enum Confirmation { case clear, discard }
     @State private var confirmation: Confirmation?
+    private enum AlternateRunner: String, Identifiable {
+        case qpack
+        var id: String { rawValue }
+    }
+    @State private var alternateRunner: AlternateRunner?
+    @State private var performanceModel = OrnithPerformanceAppModel.live()
     var body: some View {
         NavigationStack {
-            REAMChatPage(model: model, discard: { confirmation = .discard })
+            REAMChatPage(model: model, discard: { confirmation = .discard }, openPerformance: openPerformance)
                 .navigationTitle("Flash Local")
                 .toolbar {
                     ToolbarItem(placement: .automatic) {
@@ -24,6 +30,9 @@ struct REAMRootView: View {
                             Picker("Modell", selection: Binding(get: { model.selectedModel }, set: { model.selectModel($0) })) {
                                 ForEach(LocalChatModel.allCases) { target in Text(target.title).tag(target) }
                             }.disabled(!model.canSelectModel)
+                            Button("Ornith QPack (testläge)") {
+                                openPerformance()
+                            }.disabled(!model.canOpenAlternateRunner)
                             NavigationLink("Om Flash Local") { AboutView() }
                             Button("Kontrollera numerik (kort test)") { model.checkNumerics() }
                                 .disabled(!model.canRunNumerics)
@@ -48,6 +57,9 @@ struct REAMRootView: View {
                     if confirmation == .discard { Text("Redan hämtade delar tas bort. En färdig modellfil påverkas inte.") }
                 }
         }
+        .sheet(item: $alternateRunner, onDismiss: {
+            Task { await performanceModel.shutdown(); model.resumeAfterAlternateRunner() }
+        }) { _ in OrnithPerformanceView(model: performanceModel) }
         .tint(MRColor.tierPinned)
         .task { model.prepare() }
         .onChange(of: scenePhase) { _, phase in
@@ -62,17 +74,37 @@ struct REAMRootView: View {
         }
         #endif
     }
+    private func openPerformance() {
+        guard model.canOpenAlternateRunner else { return }
+        Task { await model.pauseForAlternateRunner(); alternateRunner = .qpack }
+    }
 }
 
 /// Pure page content, separable from navigation/lifecycle for light/dark QA.
 struct REAMChatPage: View {
     @Bindable var model: REAMAppModel
     var discard: () -> Void = {}
+    var openPerformance: () -> Void = {}
     var body: some View {
         VStack(spacing: 0) {
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(spacing: 0) {
+                    Button(action: openPerformance) {
+                        HStack(spacing: 12) {
+                            Image(systemName: "cpu").font(.title2)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Ornith Performance").font(.headline)
+                                Text("Öppna modell och optimeringskontroll").font(.caption)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!model.canOpenAlternateRunner)
+                    .accessibilityIdentifier("open-ornith-performance")
+                    .padding(.bottom, 16)
                     modelCard
                     Divider()
                     LazyVStack(alignment: .leading, spacing: 20) {
@@ -188,7 +220,7 @@ struct REAMChatPage: View {
 enum REAMBundledNotices {
     static let text: String = {
         do {
-            let files = ["QwenModelLicense", "OpenSourceNotices"]
+            let files = ["QwenModelLicense", "OpenSourceNotices", "SwiftletNotices"]
             return try files.map { name in
                 guard let url = Bundle.main.url(forResource: name, withExtension: "txt") else {
                     throw CocoaError(.fileNoSuchFile)

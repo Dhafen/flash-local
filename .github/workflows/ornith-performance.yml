@@ -1,0 +1,123 @@
+name: Ornith Performance experiment
+on:
+  workflow_call:
+  push:
+    branches: [codex/ornith-performance-engine]
+    paths:
+      - 'Experiments/OrnithPerformance/**'
+      - '.github/workflows/ornith-performance.yml'
+      - 'scripts/inspect_ornith_mlx.py'
+      - 'scripts/tests/test_ornith_mlx_metadata.py'
+permissions:
+  contents: read
+concurrency:
+  group: ornith-performance-${{ github.ref }}
+  cancel-in-progress: true
+defaults:
+  run:
+    shell: bash
+jobs:
+  isolated-engine:
+    runs-on: macos-26
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Pinned Xcode and isolated Swiftlet source
+        run: |
+          test "$(uname -m)" = arm64
+          sudo xcode-select -s /Applications/Xcode_26.2.app
+          xcodebuild -version
+          git clone --quiet https://github.com/Dhafen/flash-local-swiftlet.git .work/swiftlet-validation
+          git -C .work/swiftlet-validation checkout --detach 1e348e7b61289d70ba5bde2c212bcfa7867f4323
+          test "$(git -C .work/swiftlet-validation rev-parse HEAD)" = 1e348e7b61289d70ba5bde2c212bcfa7867f4323
+          cp Experiments/OrnithPerformance/ValidationPackage.swift .work/swiftlet-validation/Package.swift
+          # Test scheduling only: keep the original assertions, deadlines and
+          # runtime sources intact. Blocking probe suites run in isolation.
+          python3 - <<'PY'
+          from pathlib import Path
+          root = Path('.work/swiftlet-validation/Tests/SwiftletCoreTests')
+          for name in ('SwiftletSessionTests', 'TextGeneratorTests'):
+              path = root / f'{name}.swift'
+              text = path.read_text()
+              original = f'@Suite struct {name} '
+              assert text.count(original) == 1, name
+              path.write_text(text.replace(original, f'@Suite(.serialized) struct {name} '))
+          PY
+          git -C .work/swiftlet-validation diff -- Tests > .work/swiftlet-validation/test-scheduling.patch
+      - name: Bounded metadata inspection logic
+        run: python3 -m unittest discover -s scripts/tests -p 'test_ornith_mlx_metadata.py' -v
+      - name: Swiftlet correctness and KV placement controls (synthetic only)
+        id: core
+        continue-on-error: true
+        working-directory: .work/swiftlet-validation
+        run: |
+          xcodebuild -list -json > schemes.json
+          scheme=$(python3 -c 'import json; d=json.load(open("schemes.json")); s=(d.get("workspace") or d.get("project"))["schemes"]; c=[x for x in s if x.lower().replace("-", "").startswith("swiftlet")]; p=[x for x in c if x.endswith("-Package")]; c=p or c; assert len(c)==1, s; print(c[0])')
+          printf '%s\n' "$scheme" > scheme-used.txt
+          xcodebuild test -scheme "$scheme" -destination 'platform=macOS' \
+            -skipPackagePluginValidation -skipMacroValidation \
+            -skip-testing:SwiftletCoreTests/SwiftletSessionTests \
+            -skip-testing:SwiftletCoreTests/TextGeneratorTests \
+            -resultBundlePath swiftlet-tests.xcresult 2>&1 | tee swiftlet-tests.log | tail -70
+          test "$(grep -c 'ORNITH_KV_PLACEMENT model=' swiftlet-tests.log)" -eq 3
+          grep 'ORNITH_EXPERT_IO returnedBytesCounted=true hotHitsReadZero=true' swiftlet-tests.log
+          test "$(grep -c 'GROUPED_QPACK topK=' swiftlet-tests.log)" -eq 2
+          # Run the semaphore/deadline lifecycle probes without concurrent
+          # Metal compilation. They still execute and remain required gates.
+          for suite in SwiftletSessionTests TextGeneratorTests; do
+            xcodebuild test -scheme "$scheme" -destination 'platform=macOS' \
+              -skipPackagePluginValidation -skipMacroValidation -parallel-testing-enabled NO \
+              -only-testing:"SwiftletCoreTests/$suite" \
+              -resultBundlePath "$suite.xcresult" 2>&1 | tee "$suite.log" | tail -70
+            grep -E 'Test run with [1-9][0-9]* tests?.*passed' "$suite.log"
+          done
+      - name: Pinned Python tokenizer oracle (metadata only)
+        run: |
+          python3 -m venv .work/tokenizer-oracle
+          .work/tokenizer-oracle/bin/python -m pip install -q -r Experiments/OrnithPerformance/reference-requirements.txt
+          .work/tokenizer-oracle/bin/python scripts/prepare_ornith_mlx_tokenizer.py --output .test-fixtures/ornith-mlx-tokenizer
+      - name: Ornith metadata, placement and memory admission
+        id: experiment
+        if: ${{ !cancelled() && steps.core.outcome != 'skipped' }}
+        continue-on-error: true
+        env:
+          TEST_RUNNER_ORNITH_MLX_TOKENIZER_FIXTURE: ${{ github.workspace }}/.test-fixtures/ornith-mlx-tokenizer
+        working-directory: Experiments/OrnithPerformance
+        run: |
+          xcodebuild test -scheme OrnithPerformance -destination 'platform=macOS' \
+            -skipPackagePluginValidation -skipMacroValidation \
+            -resultBundlePath experiment-tests.xcresult 2>&1 | tee experiment-tests.log | tail -70
+          grep 'ORNITH_QPACK_SOURCE layers=40 experts=256 topK=8 tensors=1757' experiment-tests.log
+          grep 'ORNITH_MLX_TOKENIZER_PARITY cases=12 exactTokenIDs=true exactDecodedText=true' experiment-tests.log
+          grep 'ORNITH_KERNEL_CHECK exactReplay=true failClosed=true noChatPayload=true syntheticOnly=true' experiment-tests.log
+      - name: Compile experiment for iOS Simulator
+        if: ${{ !cancelled() && steps.core.outcome != 'skipped' }}
+        working-directory: Experiments/OrnithPerformance
+        run: |
+          xcodebuild build -scheme OrnithPerformance -destination 'generic/platform=iOS Simulator' \
+            -skipPackagePluginValidation -skipMacroValidation CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee experiment-ios.log | tail -70
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ornith-performance-text
+          include-hidden-files: true
+          path: |
+            .work/swiftlet-validation/swiftlet-tests.log
+            .work/swiftlet-validation/SwiftletSessionTests.log
+            .work/swiftlet-validation/TextGeneratorTests.log
+            .work/swiftlet-validation/test-scheduling.patch
+            .work/swiftlet-validation/schemes.json
+            .work/swiftlet-validation/scheme-used.txt
+            Experiments/OrnithPerformance/experiment-tests.log
+            Experiments/OrnithPerformance/experiment-ios.log
+            Experiments/OrnithPerformance/Package.resolved
+            .test-fixtures/ornith-mlx-tokenizer/reference.json
+          retention-days: 7
+      - name: Require both numerical and experiment gates
+        if: always()
+        run: |
+          test '${{ steps.core.outcome }}' = success
+          test '${{ steps.experiment.outcome }}' = success
