@@ -169,3 +169,13 @@ loader's actual cause with local paths removed. Descriptor parsing/retention,
 diagnostic limits/privacy and an invalid-header C-API regression join the
 native controls. Physical confirmation remains required. No weights, router
 selection, quantization or production GGUF/REAM computation are changed.
+
+The host-only `ornith-les-header-control` adds the real checkpoint's full
+tensor/vocabulary geometry to the small numerical fixtures. It fetches only
+the pinned 10,990,848-byte metadata header, generates sparse files with no
+trained weight payload, and forces `no_alloc=true`, CPU placement and no
+context/decode. It checks the original loader plus three streamed slot
+layouts, all 123 expert tensor types/strides/views, 41 stored blocks and the
+real tokenizer IDs. Physical allocation is capped at 32 MiB per generated
+file and host RSS at 1 GiB. This is descriptor/layout evidence, never trained
+model numerical or GPU execution evidence; its first CI validation is pending.

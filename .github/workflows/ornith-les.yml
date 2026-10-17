@@ -38,6 +38,14 @@ jobs:
           sudo xcode-select -s /Applications/Xcode_26.2.app
       - name: Build isolated Mac runtime for fast numerical controls
         run: python3 scripts/build_ornith_les.py --mac-only
+      - name: Real checkpoint tensor shapes without trained weights
+        run: |
+          python3 scripts/fetch_ornith_metadata.py
+          .work/ornith-les-macos/bin/ornith-les-header-control \
+            .test-fixtures/ornith.header .work/les-real-header-only .work/les-real-header.json \
+            > .work/les-real-header.log 2>&1
+          tail -5 .work/les-real-header.log
+          grep 'ORNITH_REAL_HEADER.*metadataOnly=true.*inferenceExecuted=false' .work/les-real-header.log
       - name: Generate small untrained Ornith fixture
         run: python3 scripts/make_qwen4exp_test_model.py --ornith
       - name: Compare resident, streamed and lookahead execution with the CPU oracle
@@ -96,6 +104,8 @@ jobs:
             .work/les-reference-check.json
             .work/les-reference.log
             .work/les-swift-tests.log
+            .work/les-real-header.json
+            .work/les-real-header.log
           retention-days: 7
       - name: Export source-bound LES framework for full app validation
         uses: actions/upload-artifact@v4
