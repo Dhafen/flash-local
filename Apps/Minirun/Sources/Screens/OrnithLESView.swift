@@ -58,10 +58,18 @@ struct OrnithLESPage: View {
                 if let check = model.numericalCheck {
                     Text(check.passed ? "Kort referenskontroll godkänd." : "Referenskontrollen avvek. Ingen ny motor aktiverades.")
                         .font(.callout.bold()).foregroundStyle(check.passed ? Color.primary : Color.red)
+                    if check.lookahead.activeLookaheadDepth == 0 {
+                        Text("RAM-utrymmet räckte till expertcache men inte till förläsning i kontrollen.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 }
                 ForEach(Array(model.runs.enumerated()), id: \.offset) { _, run in
                     VStack(alignment: .leading, spacing: 5) {
                         Text("\(run.backend.rawValue) · \(run.applicationCache)").font(.headline)
+                        if let plan = run.memoryPlan, plan.requestedLookaheadDepth > 0 {
+                            Text("Förläsning \(plan.lookaheadDepth)/\(plan.requestedLookaheadDepth) · top-8 oförändrat")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                         Text(String(format: "%.2f token/s · %.1f prompttoken/s · %.2f GB", run.decodeTokensPerSecond,
                             run.prefillTokensPerSecond, Double(run.maximumObservedFootprintBytes) / 1e9))
                             .font(.subheadline.monospacedDigit())

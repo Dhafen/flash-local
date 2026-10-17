@@ -14,11 +14,13 @@ private struct LESRunExport: Encodable {
     let metalDecodeNanoseconds: UInt64?
     let metalDecodeDispatches: UInt64?
     let expertCacheHitRate: Double?
+    let lookaheadActive: Bool?
     init(_ run: LESBenchmarkRun) {
         measurement = run; decodeForwardTokensPerSecond = run.decodeTokensPerSecond
         prefillTokensPerSecond = run.prefillTokensPerSecond
         decodeIOBytesPerForward = Double(run.decodeIOBytes) / Double(max(1, run.decodeForwardPasses))
         hasRequired128Tokens = run.hasRequiredLength
+        lookaheadActive = run.memoryPlan.map { $0.lookaheadDepth > 0 }
         if let before = run.metricsAfterPrefill, let after = run.metricsAfter {
             metalDecodeNanoseconds = after.metalTimestampedCommandBuffers > before.metalTimestampedCommandBuffers
                 ? after.metalNanoseconds - before.metalNanoseconds : nil
@@ -49,6 +51,7 @@ private struct LESAppReport: Encodable {
     let contextCapacityTokens = 4096
     let numericalCheck: LESNumericalCheck?
     let measurements: [LESRunExport]
+    let memoryAdmissions: [LESMemoryAdmission]
     let failure: String?
     let maximumObservedFootprintBytes: UInt64
     let modelSHA256 = GGUFModelManifest.primaryOrnith.sha256
@@ -58,11 +61,14 @@ private actor LESAppWorker {
     private var artifact: VerifiedGGUFArtifact?
     private var prepared: URL?
     private var check: LESNumericalCheck?
+    private var admissions: [LESMemoryAdmission] = []
+    func memoryAdmissionReport() -> [LESMemoryAdmission] { admissions }
     func release() { artifact = nil; prepared = nil }
     func execute(modelsRoot: URL, privateRoot: URL, existing: VerifiedGGUFArtifact?, control: LESControl,
                  progress: @Sendable (String) -> Void,
                  onCheck: @Sendable (LESNumericalCheck) -> Void,
                  onRun: @Sendable (LESBenchmarkRun) -> Void) throws -> (LESNumericalCheck, [LESBenchmarkRun]) {
+        admissions.removeAll(keepingCapacity: true)
         if artifact == nil {
             if let existing, existing.manifest.sha256 == GGUFModelManifest.primaryOrnith.sha256 {
                 try existing.assertUnchanged(); artifact = existing
@@ -79,7 +85,8 @@ private actor LESAppWorker {
         }
         guard let prepared else { throw CancellationError() }
         if check == nil {
-            check = try LESBenchmark.check(artifact: artifact, prepared: prepared, control: control, progress: progress)
+            check = try LESBenchmark.check(artifact: artifact, prepared: prepared, control: control,
+                progress: progress, onAdmission: { self.admissions.append($0) })
         }
         guard let check else { throw CancellationError() }
         onCheck(check)
@@ -88,7 +95,7 @@ private actor LESAppWorker {
         for backend in LESBenchmarkBackend.allCases {
             let pair = try autoreleasepool {
                 try LESBenchmark.runPair(backend: backend, artifact: artifact, prepared: prepared,
-                    check: check, control: control, progress: progress)
+                    check: check, control: control, progress: progress, onAdmission: { self.admissions.append($0) })
             }
             for run in pair { runs.append(run); onRun(run) }
         }
@@ -105,6 +112,7 @@ final class OrnithLESAppModel {
     private(set) var error: String?
     private(set) var numericalCheck: LESNumericalCheck?
     private(set) var runs: [LESBenchmarkRun] = []
+    private(set) var memoryAdmissions: [LESMemoryAdmission] = []
     private(set) var measurementURL: URL?
     var userDeclaredAirplaneMode = false
     let modelsRoot: URL
@@ -133,7 +141,7 @@ final class OrnithLESAppModel {
     func start(existing: VerifiedGGUFArtifact? = nil) {
         guard canStart else { return }
         let flag = LESControl(), id = UUID()
-        activeID = id; control = flag; isBusy = true; error = nil; runs = []; measurementURL = nil
+        activeID = id; control = flag; isBusy = true; error = nil; runs = []; memoryAdmissions = []; measurementURL = nil
         let declaredAirplane = userDeclaredAirplaneMode
         operation = Task { [weak self] in
             guard let self else { return }
@@ -148,12 +156,14 @@ final class OrnithLESAppModel {
                         Task { @MainActor in guard let self, self.activeID == id else { return }; self.runs.append(value) }
                     })
                 guard activeID == id else { return }
+                memoryAdmissions = await worker.memoryAdmissionReport()
                 numericalCheck = result.0; runs = result.1
                 status = !result.0.passed ? "Numeriken avvek. LES-testet stoppades; den vanliga chatten är oförändrad." :
                     runs.allSatisfy(\.hasRequiredLength) ? "Jämförelsen är klar." : "Något svar blev kortare än 128 token. Den körningen är inte jämförbar."
                 try save(check: result.0, runs: result.1, airplane: declaredAirplane)
             } catch {
                 guard activeID == id else { return }
+                memoryAdmissions = await worker.memoryAdmissionReport()
                 self.error = error.localizedDescription; status = "Testet stoppades."
                 try? save(check: numericalCheck, runs: runs, airplane: declaredAirplane, failure: error.localizedDescription)
             }
@@ -178,7 +188,7 @@ final class OrnithLESAppModel {
             sourceRevision: BuildInfo.gitRevision, timestamp: Date(), platform: platform, deviceIdentifier: Sysctl.string("hw.machine"),
             physicalMemoryBytes: ProcessInfo.processInfo.physicalMemory, operatingSystem: ProcessInfo.processInfo.operatingSystemVersionString,
             lowPowerModeEnabled: ProcessInfo.processInfo.isLowPowerModeEnabled, userDeclaredAirplaneMode: airplane,
-            numericalCheck: check, measurements: runs.map(LESRunExport.init), failure: failure,
+            numericalCheck: check, measurements: runs.map(LESRunExport.init), memoryAdmissions: memoryAdmissions, failure: failure,
             maximumObservedFootprintBytes: control?.maximumObservedFootprintBytes ?? 0)
         let folder = documents.appendingPathComponent("Diagnostics")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)

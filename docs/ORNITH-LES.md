@@ -185,3 +185,25 @@ IDs, 21,979,136 physically allocated storage bytes and 152,879,104 host peak
 RSS bytes. Its report explicitly records that inference was not executed and
 no trained weight payload was present. The synthetic numerical tests and
 three-platform framework compilation also passed in that run.
+
+## Adaptive prediction window follow-up
+
+The build-108 phone attempt stops at Swift memory admission with no completed
+numerical check or benchmark; observed process peak is 2,279,560,368 bytes.
+The report does not include the precise failing phase or current headroom.
+It therefore does not confirm either trained-model loading or an LES speed.
+
+The candidate releases unused MLX and Darwin allocator pages at transitions
+between inference owners, after the preceding context and autorelease pool
+have ended. It resamples actual footprint and iOS headroom before admission;
+this cleanup never runs inside a forward or between a cold/warm pair. Reports
+retain before/after samples, admitted components and failures for each phase.
+
+Prediction is optional I/O. When fewer slots fit, its depth falls before the
+actual selected-expert allowance can fall below eight. If eight demand slots
+do not fit, admission still fails. A zero-depth run is explicitly recorded and
+displayed as having no active lookahead. The real header supplies a regression
+for simulated 4.3 GB and 4.1 GB ceilings, with eight demand slots plus three or
+zero prediction slots, respectively; a 4.0 GB example must still fail. These
+are policy inputs, not measurements of the phone's actual available memory.
+Physical confirmation of the change remains pending.

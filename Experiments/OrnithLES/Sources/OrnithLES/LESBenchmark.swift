@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import GGUFCore
 import MinirunKit
 import MLX
@@ -15,6 +16,7 @@ public struct LESLogitComparison: Codable, Sendable, Equatable {
     public let sameGreedy: Bool
     public var routingDigest: UInt64? = nil
     public var routingDecisions: UInt64? = nil
+    public var activeLookaheadDepth: Int? = nil
     public var passed: Bool {
         positions == 4 && maximumAbsoluteError.isFinite && relativeL2Error.isFinite &&
             (0...0.01).contains(maximumAbsoluteError) && (0...0.001).contains(relativeL2Error) && sameGreedy
@@ -77,10 +79,29 @@ public enum LESBenchmark {
         guard !values.isEmpty, values.allSatisfy(\.isFinite) else { throw GGUFError.invalid("Non-finite benchmark logits") }
         return values.indices.max { values[$0] < values[$1] }!
     }
-    private static func plan(_ artifact: VerifiedGGUFArtifact, context: Int, depth: Int, pageCache: Bool = false) throws -> LESMemoryPlan {
-        guard let footprint = ProcessFootprint.current() else { throw GGUFError.limit("LES memory sample unavailable") }
-        return try LESMemoryPlan(index: artifact.index, contextTokens: context, footprint: footprint,
-            lookaheadDepth: depth, pageCacheOnly: pageCache)
+    private static func reclaimIdleBuffers() -> (ProcessFootprint?, ProcessFootprint?) {
+        let before = ProcessFootprint.current()
+        // Called only after the preceding inference owner and its autorelease
+        // pool have ended, never between a cold/warm pair or during a forward.
+        MLX.Memory.clearCache()
+        _ = malloc_zone_pressure_relief(nil, 0)
+        return (before, ProcessFootprint.current())
+    }
+    private static func plan(_ artifact: VerifiedGGUFArtifact, context: Int, depth: Int,
+                             pageCache: Bool = false, phase: String,
+                             onAdmission: (LESMemoryAdmission) -> Void) throws -> LESMemoryPlan {
+        let samples = reclaimIdleBuffers()
+        do {
+            guard let footprint = samples.1 else { throw GGUFError.limit("LES memory sample unavailable") }
+            let result = try LESMemoryPlan(index: artifact.index, contextTokens: context, footprint: footprint,
+                lookaheadDepth: depth, pageCacheOnly: pageCache)
+            onAdmission(.init(phase: phase, beforeReclaim: samples.0, afterReclaim: samples.1, plan: result, failure: nil))
+            return result
+        } catch {
+            onAdmission(.init(phase: phase, beforeReclaim: samples.0, afterReclaim: samples.1, plan: nil,
+                failure: error.localizedDescription))
+            throw GGUFError.limit("\(phase): \(error.localizedDescription)")
+        }
     }
     private static func reference(artifact: VerifiedGGUFArtifact, prompt: [Int], control: LESControl) throws -> Replay {
         let context = try Qwen4ExpCPUReference(artifact: artifact, contextTokens: 128, budgetBytes: 5_500_000_000,
@@ -95,8 +116,10 @@ public enum LESBenchmark {
         return Replay(prompt: prompt, forced: forced, logits: vectors)
     }
     private static func compare(_ replay: Replay, artifact: VerifiedGGUFArtifact, prepared: URL,
-                                depth: Int, prefillBatch: Int = 1, control: LESControl) throws -> LESLogitComparison {
-        let memory = try plan(artifact, context: 128, depth: depth)
+                                depth: Int, prefillBatch: Int = 1, control: LESControl,
+                                onAdmission: (LESMemoryAdmission) -> Void) throws -> LESLogitComparison {
+        let memory = try plan(artifact, context: 128, depth: depth,
+            phase: "numerics.prediction\(depth).prefill\(prefillBatch)", onAdmission: onAdmission)
         let context = try LESContext(artifact: artifact, prepared: prepared, plan: memory, control: control, traceRouting: true)
         var logits: [Float] = []
         for first in stride(from: 0, to: replay.prompt.count, by: prefillBatch) {
@@ -116,20 +139,25 @@ public enum LESBenchmark {
         }
         return LESLogitComparison(positions: 4, maximumAbsoluteError: absolute,
             relativeL2Error: sqrt(squared / max(referenceSquared, 1e-30)), sameGreedy: same,
-            routingDigest: context.metrics.routingDigest, routingDecisions: context.metrics.routingDecisions)
+            routingDigest: context.metrics.routingDigest, routingDecisions: context.metrics.routingDecisions,
+            activeLookaheadDepth: memory.lookaheadDepth)
     }
     public static func check(artifact: VerifiedGGUFArtifact, prepared: URL, control: LESControl,
-                             progress: @Sendable (String) -> Void = { _ in }) throws -> LESNumericalCheck {
+                             progress: @Sendable (String) -> Void = { _ in },
+                             onAdmission: (LESMemoryAdmission) -> Void = { _ in }) throws -> LESNumericalCheck {
         let tokenizer = try CanonicalQwen35Tokenizer(artifact: artifact)
         let tokens = try tokenizer.chat([.init(role: .user, content: "Vad är 50 + 5?")], maximumTokens: 64).tokenIDs
         progress("Jämför hela modellgrafen med CPU-referensen…")
         let replay = try autoreleasepool { try reference(artifact: artifact, prompt: tokens, control: control) }
         progress("Kontrollerar LES utan förläsning…")
-        let off = try autoreleasepool { try compare(replay, artifact: artifact, prepared: prepared, depth: 0, control: control) }
+        let off = try autoreleasepool { try compare(replay, artifact: artifact, prepared: prepared, depth: 0,
+            control: control, onAdmission: onAdmission) }
         progress("Kontrollerar LES med förläsning…")
-        let on = try autoreleasepool { try compare(replay, artifact: artifact, prepared: prepared, depth: 4, control: control) }
+        let on = try autoreleasepool { try compare(replay, artifact: artifact, prepared: prepared, depth: 4,
+            control: control, onAdmission: onAdmission) }
         progress("Kontrollerar batchad promptbearbetning…")
-        let batch = try autoreleasepool { try compare(replay, artifact: artifact, prepared: prepared, depth: 0, prefillBatch: 4, control: control) }
+        let batch = try autoreleasepool { try compare(replay, artifact: artifact, prepared: prepared, depth: 0,
+            prefillBatch: 4, control: control, onAdmission: onAdmission) }
         return LESNumericalCheck(modelSHA256: artifact.manifest.sha256,
             referenceRevision: Qwen4ExpCPUReference.sourceRevision, nativeRevision: LESContext.revision,
             noLookahead: off, lookahead: on, batchedPrefill: batch)
@@ -141,13 +169,25 @@ public enum LESBenchmark {
     /// comparable 128-token result. No EOS suppression or routing change.
     public static func runPair(backend: LESBenchmarkBackend, artifact: VerifiedGGUFArtifact,
                                prepared: URL, check: LESNumericalCheck, control: LESControl,
-                               progress: @Sendable (String) -> Void = { _ in }) throws -> [LESBenchmarkRun] {
+                               progress: @Sendable (String) -> Void = { _ in },
+                               onAdmission: (LESMemoryAdmission) -> Void = { _ in }) throws -> [LESBenchmarkRun] {
         guard check.modelSHA256 == artifact.manifest.sha256,
               backend == .existingGGUF || check.passed else { throw GGUFError.invalid("LES numerical check has not passed") }
         let tokenizer = try CanonicalQwen35Tokenizer(artifact: artifact)
         let prompt = try tokenizer.chat([.init(role: .user, content: Self.prompt)], maximumTokens: 512).tokenIDs
-        let nativePlan: LESMemoryPlan? = backend == .existingGGUF ? nil : try plan(artifact, context: 4096,
-            depth: backend == .omniLookahead ? 4 : 0, pageCache: backend == .omniPageCache)
+        let nativePlan: LESMemoryPlan?
+        if backend == .existingGGUF {
+            let samples = reclaimIdleBuffers()
+            onAdmission(.init(phase: "benchmark.existingGGUF", beforeReclaim: samples.0,
+                afterReclaim: samples.1, plan: nil, failure: nil))
+            nativePlan = nil
+        } else {
+            nativePlan = try plan(artifact, context: 4096, depth: backend == .omniLookahead ? 4 : 0,
+                pageCache: backend == .omniPageCache, phase: "benchmark.\(backend.rawValue)", onAdmission: onAdmission)
+            if let nativePlan, nativePlan.requestedLookaheadDepth > nativePlan.lookaheadDepth {
+                progress("\(backend.rawValue) · förläsning \(nativePlan.lookaheadDepth)/\(nativePlan.requestedLookaheadDepth), anpassad efter RAM · top-8 oförändrat")
+            }
+        }
         var original: GGUFStreamedDecoder?
         var native: LESContext?
         if let nativePlan { native = try LESContext(artifact: artifact, prepared: prepared, plan: nativePlan, control: control) }

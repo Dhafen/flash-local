@@ -39,6 +39,44 @@ final class LESPolicyTests: XCTestCase {
         let sample = ProcessFootprint(footprintBytes: 100_000_000, peakFootprintBytes: 100_000_000, availableBytes: 64 << 20)
         XCTAssertThrowsError(try LESMemoryPlan(index: index(), contextTokens: 32, footprint: sample))
     }
+    func testPublishedHeaderAdaptsPredictionBeforeChangingTheRealExpertAllowance() throws {
+        let root = try XCTUnwrap(ProcessInfo.processInfo.environment["ORNITH_LES_FIXTURE_ROOT"])
+        let header = try Data(contentsOf: URL(fileURLWithPath: root).appendingPathComponent("ornith.header"))
+        XCTAssertEqual(header.count, 10_990_848)
+        let index = try GGUFIndex.parse(header: header, fileByteCount: 21_713_463_040)
+        let config = try Qwen35MoEConfig(index: index)
+        XCTAssertEqual(config.experts, 256); XCTAssertEqual(config.expertsPerToken, 8)
+        let baseline: UInt64 = 350_000_000
+        func plan(_ ceiling: UInt64, depth: Int = 4, context: Int = 128) throws -> LESMemoryPlan {
+            try LESMemoryPlan(index: index, contextTokens: context,
+                footprint: .init(footprintBytes: baseline, peakFootprintBytes: baseline,
+                    availableBytes: ceiling - baseline), lookaheadDepth: depth)
+        }
+        let full = try plan(5_500_000_000, context: 4096)
+        XCTAssertEqual(full.lookaheadDepth, 4); XCTAssertEqual(full.requestedLookaheadDepth, 4)
+        XCTAssertEqual(full.expertBytesPerSlot, 78_225_408)
+        XCTAssertEqual(full.prefillAllocationBytes, 84_148_224)
+        XCTAssertLessThanOrEqual(full.admittedProcessBytes, full.processCeilingBytes)
+        let narrow = try plan(4_300_000_000), off = try plan(4_300_000_000, depth: 0)
+        XCTAssertEqual(narrow.cacheSlotsPerLayer, 8); XCTAssertEqual(narrow.lookaheadDepth, 3)
+        XCTAssertEqual(narrow.requestedLookaheadDepth, 4)
+        XCTAssertEqual(narrow.expertAllocationBytes, off.expertAllocationBytes)
+        let demandOnly = try plan(4_100_000_000)
+        XCTAssertEqual(demandOnly.cacheSlotsPerLayer, 8); XCTAssertEqual(demandOnly.lookaheadDepth, 0)
+        XCTAssertLessThanOrEqual(demandOnly.admittedProcessBytes, demandOnly.processCeilingBytes)
+        XCTAssertThrowsError(try plan(4_000_000_000)) { error in
+            let text = error.localizedDescription
+            XCTAssertTrue(text.contains("all 8 selected experts"))
+            XCTAssertTrue(text.contains("baseline=350000000")); XCTAssertTrue(text.contains("window=7"))
+        }
+        let sample = LESMemoryAdmission(phase: "synthetic.admission", beforeReclaim: footprint,
+            afterReclaim: footprint, plan: narrow, failure: nil)
+        let encoded = String(decoding: try JSONEncoder().encode(sample), as: UTF8.self)
+        for key in ["promptTokenIDs", "generatedTokenIDs", "logits", "messages", "path"] {
+            XCTAssertFalse(encoded.contains("\"" + key + "\""))
+        }
+        print("ORNITH_REAL_HEADER_MEMORY selectedExperts=8 requestedPrediction=4 adaptivePrediction=3 demandOnlyPrediction=0 insufficientDemandRejected=true metadataOnly=true")
+    }
     func testNoExpertCapacityMayBeBorrowedFromOtherReservations() throws {
         let sample = ProcessFootprint(footprintBytes: 5_000_000_000, peakFootprintBytes: 5_000_000_000, availableBytes: nil)
         XCTAssertThrowsError(try LESMemoryPlan(index: index(), contextTokens: 32, footprint: sample))
