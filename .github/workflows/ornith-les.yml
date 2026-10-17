@@ -27,6 +27,7 @@ jobs:
     timeout-minutes: 35
     env:
       ORNITH_LES_CPU_CONTROL: '1'
+      TEST_RUNNER_ORNITH_LES_CPU_CONTROL: '1'
     steps:
       - uses: actions/checkout@v7
         with:
@@ -73,6 +74,7 @@ jobs:
           FLASH_LOCAL_ENABLE_LES: '1'
         run: |
           export ORNITH_LES_FIXTURE_ROOT="$PWD/.test-fixtures"
+          export TEST_RUNNER_ORNITH_LES_FIXTURE_ROOT="$ORNITH_LES_FIXTURE_ROOT"
           xcodebuild test -scheme minirun-Package -destination 'platform=macOS' \
             -only-testing:OrnithLESTests -skipPackagePluginValidation -skipMacroValidation \
             > .work/les-swift-tests.log 2>&1
