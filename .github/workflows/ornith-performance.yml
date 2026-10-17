@@ -30,8 +30,8 @@ jobs:
           sudo xcode-select -s /Applications/Xcode_26.2.app
           xcodebuild -version
           git clone --quiet https://github.com/Dhafen/flash-local-swiftlet.git .work/swiftlet-validation
-          git -C .work/swiftlet-validation checkout --detach 1388b08883d3d469addb5fdb88916ac7c5a19cd6
-          test "$(git -C .work/swiftlet-validation rev-parse HEAD)" = 1388b08883d3d469addb5fdb88916ac7c5a19cd6
+          git -C .work/swiftlet-validation checkout --detach 1e348e7b61289d70ba5bde2c212bcfa7867f4323
+          test "$(git -C .work/swiftlet-validation rev-parse HEAD)" = 1e348e7b61289d70ba5bde2c212bcfa7867f4323
           cp Experiments/OrnithPerformance/ValidationPackage.swift .work/swiftlet-validation/Package.swift
           # Test scheduling only: keep the original assertions, deadlines and
           # runtime sources intact. Blocking probe suites run in isolation.
@@ -63,6 +63,7 @@ jobs:
             -resultBundlePath swiftlet-tests.xcresult 2>&1 | tee swiftlet-tests.log | tail -70
           test "$(grep -c 'ORNITH_KV_PLACEMENT model=' swiftlet-tests.log)" -eq 3
           grep 'ORNITH_EXPERT_IO returnedBytesCounted=true hotHitsReadZero=true' swiftlet-tests.log
+          test "$(grep -c 'GROUPED_QPACK topK=' swiftlet-tests.log)" -eq 2
           # Run the semaphore/deadline lifecycle probes without concurrent
           # Metal compilation. They still execute and remain required gates.
           for suite in SwiftletSessionTests TextGeneratorTests; do
@@ -90,6 +91,7 @@ jobs:
             -resultBundlePath experiment-tests.xcresult 2>&1 | tee experiment-tests.log | tail -70
           grep 'ORNITH_QPACK_SOURCE layers=40 experts=256 topK=8 tensors=1757' experiment-tests.log
           grep 'ORNITH_MLX_TOKENIZER_PARITY cases=12 exactTokenIDs=true exactDecodedText=true' experiment-tests.log
+          grep 'ORNITH_KERNEL_CHECK exactReplay=true failClosed=true noChatPayload=true syntheticOnly=true' experiment-tests.log
       - name: Compile experiment for iOS Simulator
         if: ${{ !cancelled() && steps.core.outcome != 'skipped' }}
         working-directory: Experiments/OrnithPerformance
@@ -101,6 +103,7 @@ jobs:
         if: always()
         with:
           name: ornith-performance-text
+          include-hidden-files: true
           path: |
             .work/swiftlet-validation/swiftlet-tests.log
             .work/swiftlet-validation/SwiftletSessionTests.log

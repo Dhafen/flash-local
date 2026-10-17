@@ -8,7 +8,7 @@ let package = Package(
     products: [.library(name: "OrnithPerformance", targets: ["OrnithPerformance"])],
     dependencies: [
         .package(url: "https://github.com/Dhafen/flash-local-swiftlet.git",
-                 revision: "1388b08883d3d469addb5fdb88916ac7c5a19cd6"),
+                 revision: "1e348e7b61289d70ba5bde2c212bcfa7867f4323"),
         .package(url: "https://github.com/huggingface/swift-transformers", exact: "1.3.3"),
     ],
     targets: [

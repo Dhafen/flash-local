@@ -17,7 +17,7 @@ struct REAMRootView: View {
     @State private var performanceModel = OrnithPerformanceAppModel.live()
     var body: some View {
         NavigationStack {
-            REAMChatPage(model: model, discard: { confirmation = .discard })
+            REAMChatPage(model: model, discard: { confirmation = .discard }, openPerformance: openPerformance)
                 .navigationTitle("Flash Local")
                 .toolbar {
                     ToolbarItem(placement: .automatic) {
@@ -31,7 +31,7 @@ struct REAMRootView: View {
                                 ForEach(LocalChatModel.allCases) { target in Text(target.title).tag(target) }
                             }.disabled(!model.canSelectModel)
                             Button("Ornith QPack (testläge)") {
-                                Task { await model.pauseForAlternateRunner(); alternateRunner = .qpack }
+                                openPerformance()
                             }.disabled(!model.canOpenAlternateRunner)
                             NavigationLink("Om Flash Local") { AboutView() }
                             Button("Kontrollera numerik (kort test)") { model.checkNumerics() }
@@ -74,17 +74,37 @@ struct REAMRootView: View {
         }
         #endif
     }
+    private func openPerformance() {
+        guard model.canOpenAlternateRunner else { return }
+        Task { await model.pauseForAlternateRunner(); alternateRunner = .qpack }
+    }
 }
 
 /// Pure page content, separable from navigation/lifecycle for light/dark QA.
 struct REAMChatPage: View {
     @Bindable var model: REAMAppModel
     var discard: () -> Void = {}
+    var openPerformance: () -> Void = {}
     var body: some View {
         VStack(spacing: 0) {
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(spacing: 0) {
+                    Button(action: openPerformance) {
+                        HStack(spacing: 12) {
+                            Image(systemName: "cpu").font(.title2)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Ornith Performance").font(.headline)
+                                Text("Öppna modell och optimeringskontroll").font(.caption)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!model.canOpenAlternateRunner)
+                    .accessibilityIdentifier("open-ornith-performance")
+                    .padding(.bottom, 16)
                     modelCard
                     Divider()
                     LazyVStack(alignment: .leading, spacing: 20) {

@@ -35,6 +35,11 @@ final class OrnithPerformanceAppTests: XCTestCase {
         XCTAssertNil(app.error)
         XCTAssertFalse(app.isReady)
         XCTAssertFalse(app.canSend)
+        XCTAssertFalse(app.canCheckKernels)
+        app.checkAndActivateKernels()
+        app.useOriginalKernels()
+        XCTAssertEqual(app.kernelMode, .original)
+        XCTAssertNil(app.kernelCheck)
         XCTAssertFalse(app.hasInstalledFiles)
         XCTAssertEqual(app.expectedFileBytes, 19_509_024_201)
         app.draft = "A refused message"
@@ -46,5 +51,18 @@ final class OrnithPerformanceAppTests: XCTestCase {
         XCTAssertFalse(app.isBusy)
         XCTAssertEqual(try Data(contentsOf: existing), sentinel)
         XCTAssertFalse(FileManager.default.fileExists(atPath: privateRoot.appendingPathComponent("qpack-chat.json").path))
+    }
+    func testPreviewDoesNotRunKernelCheckOrEnableSending() async {
+        let app = OrnithPerformanceAppModel.reviewPreview()
+        XCTAssertTrue(app.isPreview)
+        XCTAssertFalse(app.canCheckKernels)
+        XCTAssertFalse(app.canSend)
+        app.checkAndActivateKernels()
+        app.useOriginalKernels()
+        XCTAssertEqual(app.kernelMode, .original)
+        XCTAssertNil(app.kernelCheck)
+        XCTAssertFalse(app.isBusy)
+        await app.shutdown()
+        XCTAssertFalse(app.isBusy)
     }
 }

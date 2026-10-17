@@ -10,14 +10,16 @@ import StorageCore
 private actor PerformanceAppRunner {
     private var engine: OrnithPerformanceEngine?
     private var session: OrnithPerformanceSession?
+    private var codec: OrnithChatCodec?
 
     func prepare(_ install: VerifiedQPackInstall, plan: QPackInstallPlan,
                  cancellation: PerformanceCancellation) async throws -> PerformanceMemoryPlan {
-        session = nil; engine = nil
+        session = nil; engine = nil; self.codec = nil
         let codec = try await OrnithChatCodec(localDirectory: install.directory, manifest: plan.source.manifest)
         guard !cancellation.isCancelled, !Task.isCancelled else { throw CancellationError() }
         let engine = try OrnithPerformanceEngine(install: install, plan: plan, contextTokens: 8192)
         self.engine = engine
+        self.codec = codec
         session = OrnithPerformanceSession(engine: engine, codec: codec)
         return await engine.memoryPlan
     }
@@ -28,7 +30,19 @@ private actor PerformanceAppRunner {
                                           thinking: false, cancellation: cancellation, onDelta: onDelta)
     }
     func reset() async { await session?.reset() }
-    func release() { session = nil; engine = nil }
+    func checkKernels(cancellation: PerformanceCancellation) async throws -> PerformanceKernelCheck {
+        guard let engine, let session, let codec else { throw OrnithPerformanceError.io("model is not open") }
+        await session.reset()
+        // Public, fixed diagnostic input. Private conversations never enter
+        // this replay, nor are its generated tokens exported.
+        let prompt = try codec.promptTokens(messages: [.init(role: .user, content: "Svara kort: vad är 50 + 5?")], thinking: false)
+        return try await engine.checkAndEnableGroupedExperts(prompt: prompt, cancellation: cancellation)
+    }
+    func useOriginalKernels() async {
+        await session?.reset()
+        await engine?.useOriginalKernels()
+    }
+    func release() { session = nil; engine = nil; codec = nil }
 }
 
 struct PerformanceAppReport: Encodable {
@@ -48,7 +62,9 @@ struct PerformanceAppReport: Encodable {
     let sourceIdentity: String
     let sourceShards: [Shard]
     let memoryPlan: PerformanceMemoryPlan
-    let generation: OrnithGenerationReport
+    let generation: OrnithGenerationReport?
+    let kernelCheck: PerformanceKernelCheck?
+    let kernelMode: PerformanceKernelMode
     let operatingSystem = ProcessInfo.processInfo.operatingSystemVersionString
     let physicalMemoryBytes = ProcessInfo.processInfo.physicalMemory
     let deviceIdentifier: String? = Sysctl.string("hw.machine")
@@ -65,7 +81,7 @@ struct PerformanceAppReport: Encodable {
 
 @Observable @MainActor
 final class OrnithPerformanceAppModel {
-    enum Activity { case idle, installing, opening, generating, stopping }
+    enum Activity { case idle, installing, opening, checking, generating, stopping }
     private(set) var activity = Activity.idle
     private(set) var status = "Ornith QPack är inte installerad."
     private(set) var error: String?
@@ -73,6 +89,8 @@ final class OrnithPerformanceAppModel {
     private(set) var progress: QPackInstallProgress?
     private(set) var memoryPlan: PerformanceMemoryPlan?
     private(set) var report: OrnithGenerationReport?
+    private(set) var kernelCheck: PerformanceKernelCheck?
+    private(set) var kernelMode: PerformanceKernelMode = .original
     private(set) var isReady = false
     private(set) var hasInstalledFiles = false
     private(set) var isPreview = false
@@ -84,6 +102,7 @@ final class OrnithPerformanceAppModel {
     @ObservationIgnored private let runner = PerformanceAppRunner()
     @ObservationIgnored private var plan: QPackInstallPlan?
     @ObservationIgnored private var reportMemoryPlan: PerformanceMemoryPlan?
+    @ObservationIgnored private var reportKernelCheck: PerformanceKernelCheck?
     @ObservationIgnored private var operation: Task<Void, Never>?
     @ObservationIgnored private var shutdownOperation: Task<Void, Never>?
     @ObservationIgnored private var cancellation: PerformanceCancellation?
@@ -91,6 +110,7 @@ final class OrnithPerformanceAppModel {
     @ObservationIgnored private var prepared = false
     var isBusy: Bool { activity != .idle || isShuttingDown }
     var canSend: Bool { isReady && !isBusy && !isPreview }
+    var canCheckKernels: Bool { isReady && !isBusy && !isPreview }
     var expectedFileBytes: Int { plan?.source.manifest.shards.reduce(0) { $0 + $1.byteCount } ?? 19_509_024_201 }
     private var chatFile: URL { privateRoot.appendingPathComponent("qpack-chat.json") }
 
@@ -131,6 +151,8 @@ final class OrnithPerformanceAppModel {
         let id = UUID(), control = PerformanceCancellation()
         activeID = id; cancellation = control; activity = .installing
         error = nil; progress = nil; isReady = false; memoryPlan = nil
+        kernelCheck = nil; kernelMode = .original; report = nil
+        reportMemoryPlan = nil; reportKernelCheck = nil; lastMeasurementURL = nil
         status = hasInstalledFiles ? "Verifierar installerade modellfiler…" : "Hämtar och installerar Ornith…"
         operation = Task {
             do {
@@ -149,9 +171,13 @@ final class OrnithPerformanceAppModel {
                 guard !control.isCancelled else { throw CancellationError() }
                 activity = .opening; status = "Öppnar lokal modell och planerar RAM…"
                 memoryPlan = try await runner.prepare(installed, plan: plan, cancellation: control)
+                activity = .checking; status = "Jämför originalet med optimerad beräkning…"
+                let check = try await runner.checkKernels(cancellation: control)
                 try Task.checkCancellation()
                 guard !control.isCancelled else { throw CancellationError() }
-                isReady = true; status = "Redo · lokal Metal-inferens · 8 192 token kontextgräns."
+                applyKernelCheck(check)
+                isReady = true
+                status = check.passed ? "Redo · optimerad lokal motor · kort kontroll godkänd." : "Redo · originalmotorn används efter avvikande kontroll."
             } catch {
                 await runner.release()
                 if control.isCancelled || Task.isCancelled { status = "Pausad. Hämtningen kan återupptas." }
@@ -160,11 +186,47 @@ final class OrnithPerformanceAppModel {
             finish(id)
         }
     }
+    func checkAndActivateKernels() {
+        guard canCheckKernels else { return }
+        let id = UUID(), control = PerformanceCancellation()
+        activeID = id; cancellation = control; activity = .checking
+        report = nil; reportMemoryPlan = nil; reportKernelCheck = nil; lastMeasurementURL = nil
+        kernelCheck = nil; kernelMode = .original; error = nil
+        status = "Jämför originalet med optimerad beräkning…"
+        operation = Task {
+            do {
+                let check = try await runner.checkKernels(cancellation: control)
+                try Task.checkCancellation()
+                guard !control.isCancelled else { throw CancellationError() }
+                applyKernelCheck(check)
+                status = check.passed ? "Optimerad motor aktiverad · kort kontroll godkänd." : "Kontrollen avvek · originalmotorn används."
+            } catch {
+                await runner.release(); isReady = false; kernelMode = .original
+                if control.isCancelled || Task.isCancelled { status = "Kontrollen avbröts. Öppna modellen igen." }
+                else { self.error = error.localizedDescription; status = "Kontrollen kunde inte slutföras." }
+            }
+            finish(id)
+        }
+    }
+    private func applyKernelCheck(_ check: PerformanceKernelCheck) {
+        kernelCheck = check; reportMemoryPlan = memoryPlan
+        kernelMode = check.passed ? .groupedExperts : .original
+    }
+    func useOriginalKernels() {
+        guard canCheckKernels else { return }
+        activity = .opening; report = nil; reportKernelCheck = nil; lastMeasurementURL = nil
+        operation = Task {
+            await runner.useOriginalKernels()
+            kernelMode = .original; status = "Originalmotor vald för jämförelse."
+            activity = .idle; operation = nil
+        }
+    }
     func send() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard canSend, !text.isEmpty else { return }
         let id = UUID(), control = PerformanceCancellation()
         let runMemoryPlan = memoryPlan
+        let runKernelCheck = kernelCheck
         activeID = id; cancellation = control; activity = .generating
         draft = ""; error = nil; report = nil; lastMeasurementURL = nil
         messages.append(REAMMessage(role: .user, text: text))
@@ -186,6 +248,7 @@ final class OrnithPerformanceAppModel {
                 }
                 report = result.report
                 reportMemoryPlan = runMemoryPlan
+                reportKernelCheck = runKernelCheck
                 status = result.report.finishReason == .cancelled ? "Genereringen avbröts." : "Klar · \(result.report.generatedTokens) genererade token."
             } catch {
                 self.error = error.localizedDescription
@@ -217,18 +280,20 @@ final class OrnithPerformanceAppModel {
         shutdownOperation = teardown
         await teardown.value
         isReady = false; memoryPlan = nil
+        kernelMode = .original
         if hasInstalledFiles { status = "Installerad modell finns. Öppna för att chatta." }
         shutdownOperation = nil; isShuttingDown = false
     }
     func clearMessages() {
         guard !isBusy, !isPreview else { return }
-        messages = []; report = nil; reportMemoryPlan = nil; lastMeasurementURL = nil
+        messages = []; report = nil; reportMemoryPlan = nil; reportKernelCheck = nil; lastMeasurementURL = nil
         saveHistory()
         activity = .opening
         operation = Task { await runner.reset(); activity = .idle; operation = nil }
     }
     func saveMeasurement() {
-        guard !isBusy, let report, let plan, let memoryPlan = reportMemoryPlan else { return }
+        guard !isBusy, report != nil || kernelCheck != nil,
+              let plan, let memoryPlan = reportMemoryPlan ?? self.memoryPlan else { return }
         do {
             let diagnostics = documents.appendingPathComponent("Diagnostics", isDirectory: true)
             try FileManager.default.createDirectory(at: diagnostics, withIntermediateDirectories: true)
@@ -236,7 +301,9 @@ final class OrnithPerformanceAppModel {
             let value = PerformanceAppReport(modelRepository: source.repository, modelRevision: source.revision,
                 sourceIdentity: try source.identity(), sourceShards: source.shards.map {
                     .init(name: $0.name, byteCount: $0.byteCount, sha256: $0.sha256)
-                }, memoryPlan: memoryPlan, generation: report)
+                }, memoryPlan: memoryPlan, generation: report,
+                kernelCheck: report == nil ? kernelCheck : reportKernelCheck,
+                kernelMode: report?.forwards.first?.kernelMode ?? self.kernelMode)
             let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             let file = diagnostics.appendingPathComponent("ornith-qpack-\(UUID().uuidString).json")
             try encoder.encode(value).write(to: file, options: .atomic)
@@ -255,6 +322,7 @@ final class OrnithPerformanceAppModel {
         let model = OrnithPerformanceAppModel(privateRoot: FileManager.default.temporaryDirectory,
                                              documents: FileManager.default.temporaryDirectory)
         model.isPreview = true
+        model.isReady = true
         model.status = "Förhandsvisning · ingen inferens eller uppmätt prestanda."
         model.messages = [REAMMessage(role: .user, text: "Vad är 50+5?"),
                           REAMMessage(role: .assistant, text: "55")]

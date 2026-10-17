@@ -117,6 +117,22 @@ class PerformanceAnalysisTests(unittest.TestCase):
         self.assertIsNone(result["decode"]["breakdown"]["evaluationBatches"])
         self.assertFalse(result["evidence"]["qualityEquivalenceEstablished"])
 
+    def test_kernel_mode_comes_from_forward_records_and_must_be_consistent(self):
+        report = qpack()
+        record = report["generation"]["forwards"][1]
+        record["kernelMode"] = "groupedExperts"
+        report["kernelMode"] = "groupedExperts"
+        self.assertEqual(analyze(report)["kernelMode"], "groupedExperts")
+        other = copy.deepcopy(record)
+        other["kernelMode"] = "original"
+        report["generation"]["forwards"].append(other)
+        with self.assertRaises(ValueError):
+            analyze(report)
+        report["generation"]["forwards"].pop()
+        report["kernelMode"] = "original"
+        with self.assertRaises(ValueError):
+            analyze(report)
+
 
 if __name__ == "__main__":
     unittest.main()

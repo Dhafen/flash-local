@@ -28,6 +28,7 @@ public struct PerformanceForwardMetrics: Codable, Sendable {
     public let deviceMetalAllocatedBytes: UInt64
     public let endDevice: PerformanceDeviceSample?
     public let sampledPeak: PerformanceSampledPeak
+    public let kernelMode: PerformanceKernelMode
     // No token IDs, text, prompts or logits are included in performance JSON.
 }
 
@@ -40,7 +41,7 @@ public struct PerformanceForwardResult: Sendable {
 /// CPU fallback can be selected through this adapter. REAM/GGUF stay outside
 /// the experiment, with no dependency on this package.
 public actor OrnithPerformanceEngine {
-    public static let swiftletRuntimeRevision = "1388b08883d3d469addb5fdb88916ac7c5a19cd6"
+    public static let swiftletRuntimeRevision = "1e348e7b61289d70ba5bde2c212bcfa7867f4323"
     public let memoryPlan: PerformanceMemoryPlan
     public let sourceIdentity: String
     private let model: QwenMetalModel
@@ -74,6 +75,30 @@ public actor OrnithPerformanceEngine {
 
     public var position: Int { state.position }
     public func reset() { state = QwenCPUModel.DecodeState() }
+    public var kernelMode: PerformanceKernelMode { model.groupExpertDispatches ? .groupedExperts : .original }
+
+    public func useOriginalKernels() {
+        model.groupExpertDispatches = false
+        reset()
+    }
+
+    public func checkAndEnableGroupedExperts(
+        prompt: [Int], cancellation: PerformanceCancellation
+    ) throws -> PerformanceKernelCheck {
+        let result = try PerformanceKernelProbe.run(prompt: prompt, sourceIdentity: sourceIdentity,
+            shouldCancel: { cancellation.isCancelled || Task.isCancelled },
+            resetMode: { mode in
+                self.model.groupExpertDispatches = mode == .groupedExperts
+                self.reset()
+            }, forward: { tokens, phase in
+                try self.forward(tokens, phase: phase, cancellation: cancellation)
+            })
+        // The probe always restores original mode and clears decode state.
+        // Activation happens only after every finite vocabulary value matches.
+        model.groupExpertDispatches = result.passed
+        lastForwardMetrics = nil
+        return result
+    }
 
     public func forward(_ tokens: [Int], phase: PerformanceForwardMetrics.Phase,
                         cancellation: PerformanceCancellation = .init()) throws -> PerformanceForwardResult {
@@ -139,7 +164,8 @@ public actor OrnithPerformanceEngine {
             expertCacheHits: step.cpuGap.expertFetchHits, expertCacheMisses: step.cpuGap.expertFetchMisses,
             expertCacheEvictions: cache.evictions - before.evictions, expertCacheAllocatedBytes: UInt64(cache.allocatedBytes),
             expertCacheBudgetBytes: UInt64(cache.budgetBytes), cacheReplacementCount: replacements,
-            deviceMetalAllocatedBytes: UInt64(device.currentAllocatedSize), endDevice: .current(), sampledPeak: sampled)
+            deviceMetalAllocatedBytes: UInt64(device.currentAllocatedSize), endDevice: .current(), sampledPeak: sampled,
+            kernelMode: kernelMode)
     }
 
     private func adaptCacheBeforeStep() throws {

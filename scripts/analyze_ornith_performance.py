@@ -35,6 +35,7 @@ def analyze(report):
         "A single export does not establish a controlled A/B or sustained speed.",
     ]
     breakdown = {}
+    kernel_mode = None
     if "forwards" in generation:
         if report.get("inferenceBackend") != "SwiftletCore Metal / local QPack":
             raise ValueError("QPack forward records require the QPack backend marker")
@@ -46,6 +47,16 @@ def analyze(report):
         if any(f.get("inputTokens") != 1 for f in decode):
             raise ValueError("multi-token decode needs an accepted-output metric")
         count = len(decode)
+        modes = {f.get("kernelMode") for f in decode}
+        if modes == {None} or not modes:
+            kernel_mode = None  # Legacy export; never infer mode from build.
+        elif len(modes) == 1 and modes <= {"original", "groupedExperts"}:
+            kernel_mode = modes.pop()
+        else:
+            raise ValueError("mixed or unsupported decode kernel modes")
+        declared_mode = report.get("kernelMode")
+        if declared_mode is not None and declared_mode != kernel_mode:
+            raise ValueError("kernel mode disagrees with forward records")
         seconds = sum(number(f.get("wallSeconds"), "wallSeconds", positive=True) for f in decode)
         read_bytes = sum(number(f.get("expertReturnedReadBytes"), "expertReturnedReadBytes", integer=True) for f in decode)
         for key in ("dispatches", "commandBuffers", "expertCacheHits", "expertCacheMisses"):
@@ -90,6 +101,7 @@ def analyze(report):
     return {
         "schemaVersion": 1,
         "backend": backend,
+        "kernelMode": kernel_mode,
         "appBuild": build,
         "contextCapacityTokens": number(context, "context capacity", integer=True, positive=True),
         "decode": {

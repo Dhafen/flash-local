@@ -12,7 +12,7 @@ struct OrnithPerformanceView: View {
     var body: some View {
         NavigationStack {
             OrnithPerformancePage(model: model)
-                .navigationTitle("Ornith QPack")
+                .navigationTitle("Ornith Performance")
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
                         Button("Stäng") { Task { await model.shutdown(); dismiss() } }
@@ -78,6 +78,8 @@ struct OrnithPerformancePage: View {
             Text("Ornith 1.5 · 35B-A3B · MLX 4-bit").font(.headline)
             Text("Testläge · intern lagring · 8K kontextgräns · 5,5 GB RAM-gräns")
                 .font(.caption).foregroundStyle(.secondary)
+            Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "–") (\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "–"))")
+                .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             Text(model.status).font(.caption).accessibilityIdentifier("ornith-qpack-status")
             if let error = model.error { Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled) }
             if model.isBusy {
@@ -95,8 +97,23 @@ struct OrnithPerformancePage: View {
             } else if !model.isReady {
                 Button(model.hasInstalledFiles ? "Öppna installerad modell" : "Hämta och installera · 19,51 GB") { model.installAndOpen() }
                     .buttonStyle(.borderedProminent).disabled(model.isPreview)
-                Text("Kräver cirka 20 GB ledigt utöver befintliga modeller. Installeras direkt i slutformatet. Hämtningen kan återupptas och körs när appen är öppen.")
+                Text("Kräver cirka 20 GB ledigt utöver befintliga modeller. Låt appen vara öppen. Efter installation jämförs den optimerade beräkningen med originalet innan den aktiveras.")
                     .font(.caption).foregroundStyle(.secondary)
+            }
+            if model.isReady {
+                Text(model.kernelMode == .groupedExperts ? "Motor: optimerad expertberäkning" : "Motor: original")
+                    .font(.caption.bold()).accessibilityIdentifier("ornith-kernel-mode")
+                if model.kernelMode == .groupedExperts {
+                    Button("Använd originalmotor för jämförelse") { model.useOriginalKernels() }
+                        .disabled(!model.canCheckKernels)
+                } else {
+                    Button("Kontrollera och aktivera optimering") { model.checkAndActivateKernels() }
+                        .disabled(!model.canCheckKernels)
+                }
+            }
+            if let check = model.kernelCheck {
+                Text(check.passed ? "Kort kontroll godkänd: identiska logits vid \(check.comparedLogitVectors) positioner." : "Kontrollen avvek. Originalberäkningen används.")
+                    .font(.caption).foregroundStyle(check.passed ? Color.secondary : Color.red)
             }
             if let plan = model.memoryPlan {
                 Text("Fasta vikter \(bytes(plan.residentDensePayloadBytes)) · expertcache \(bytes(plan.expertCacheBytes))")
@@ -110,9 +127,11 @@ struct OrnithPerformancePage: View {
                 Text(String(format: "Prompt %.2f s · %d återanvända token · expertläsning %@", report.prefillSeconds,
                             report.reusedPromptTokens, bytes(report.expertReturnedReadBytes)))
                     .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+            }
+            if model.report != nil || model.kernelCheck != nil {
                 Button("Spara mätning i Filer", systemImage: "chart.bar.doc.horizontal") { model.saveMeasurement() }
                     .disabled(model.isBusy)
-                Text("Sparar prestanda, minne, I/O och termiskt tillstånd lokalt. Ingen chatttext ingår.")
+                Text("Sparar kontroll, prestanda, minne och I/O lokalt. Ingen chatttext ingår.")
                     .font(.caption2).foregroundStyle(.secondary)
             }
             Text("Fullmodellens numerik, hastighet och långa kontext är ännu inte verifierade på iPhone.")

@@ -100,7 +100,7 @@ private actor ProbeEngine: PerformanceForwarding {
             expertCacheMisses: 0, expertCacheEvictions: 0, expertCacheAllocatedBytes: 0, expertCacheBudgetBytes: 0,
             cacheReplacementCount: 0, deviceMetalAllocatedBytes: 0, endDevice: nil,
             sampledPeak: .init(maximumObservedFootprintBytes: 0, minimumAvailableProcessBytes: nil,
-                               samples: 0, thermalStatesObserved: [])))
+                               samples: 0, thermalStatesObserved: []), kernelMode: .original))
     }
 }
 
