@@ -1,5 +1,9 @@
 # Ornith Performance Engine
 
+See the [10–15 token/s work plan](ORNITH-10-15-TPS-PLAN.md) for the measured
+build 94 **GGUF** baseline, code-level QPack bottlenecks, ordered experiments
+and numerical/quality gates. The target is not yet established on iPhone.
+
 The optional **Ornith QPack (testläge)** menu opens a separate chat and weight
 directory. The existing GGUF/REAM runners, source weights and conversations
 remain available. The app waits for one runner to release its model before
@@ -84,9 +88,15 @@ Swiftlet uses F32 activations; stored BF16 weight validation alone does not
 establish trained-model numerical parity.
 
 The user's GGUF build 80 measured 1.493 decode forwards/s; build 84 measured
-1.035 forwards/s, with 31 prompt tokens reused and approximately 304.5 MB
-returned reads per decode forward. Prompts/history differ, so this is not an
-isolated A/B result. No physical QPack speedup is claimed yet.
+1.035 forwards/s. Build 94 measured 1.184 forwards/s over nine forwards,
+31 reused prompt tokens, 22.023 s prefill for 21 newly evaluated tokens,
+approximately 290.6 MB returned reads per decode forward and a 3.878 GB
+observed footprint peak. Its model source remains the 21.7 GB GGUF with
+4,096 context capacity, not QPack. Prompts/history and thermal conditions
+are not controlled across these reports, so these are not isolated A/B
+results. No physical QPack speedup is claimed yet. The MLX checkpoint uses
+different quantization from GGUF Q4_K_M; byte-preserving QPack installation
+alone cannot establish equal model quality across that change.
 
 The MLX config mentions an MTP layer, but **none of the 1,757 published
 tensors contains MTP weights**. MTP decoding cannot be enabled from that
