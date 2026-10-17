@@ -1,4 +1,5 @@
 #include "FlashOrnithLES.h"
+#include "LoaderDiagnostics.h"
 #include "llama.h"
 #include "llama-context.h"
 #include "llama-moe-slot.h"
@@ -24,6 +25,11 @@ extern "C" void flash_omni_metal_snapshot(uint64_t *, uint64_t *, uint64_t *, ui
 static thread_local std::string last_error;
 static std::mutex owner;
 static std::once_flag initialized;
+static flash_local_loader_diagnostics loader_diagnostics;
+struct loader_log_scope {
+    loader_log_scope() { loader_diagnostics.begin(); }
+    ~loader_log_scope() { loader_diagnostics.end(); }
+};
 static void require(bool value, const char * message) {
     if (!value) throw std::runtime_error(message);
 }
@@ -162,6 +168,7 @@ flo_context * flo_open(int source, const char * directory, flo_options o, flo_ab
     try {
         last_error.clear(); auto result = std::make_unique<flo_context>();
         require(result->exclusive.owns_lock(), "Only one LES context may own the engine");
+        loader_log_scope diagnostic_scope;
         result->source.value = dup(source); require(result->source.value >= 0, "Cannot retain verified descriptor");
         const auto size = file_size(result->source.value); check_abort(abort, user);
         require(o.context_tokens >= 32 && o.context_tokens <= 65536 && o.memory_ceiling_bytes > 0 &&
@@ -218,7 +225,13 @@ flo_context * flo_open(int source, const char * directory, flo_options o, flo_ab
             std::ofstream out(result->manifest); out << manifest.dump(); out.close(); require(bool(out), "Session manifest write failed");
             manifest_path = result->manifest.string(); model_path = (fs::path(directory) / "dense.gguf").string();
         }
-        std::call_once(initialized, [] { llama_backend_init(); });
+        std::call_once(initialized, [] {
+            llama_log_set([](ggml_log_level level, const char * text, void *) {
+                if (text) fputs(text, stderr);
+                loader_diagnostics.record(level, text);
+            }, nullptr);
+            llama_backend_init();
+        });
         auto mp = llama_model_default_params();
         mp.n_gpu_layers = o.metal ? 999 : 0; mp.use_mmap = o.metal; mp.use_mlock = false; mp.use_extra_bufts = false;
         if (streaming) { mp.moe_experts_path = manifest_path.c_str(); mp.moe_slot_bank = o.prefill_slots; }
@@ -232,7 +245,8 @@ flo_context * flo_open(int source, const char * directory, flo_options o, flo_ab
         if (!result->model_file) { close(model_fd); throw std::runtime_error("Cannot retain LES model stream"); }
         require(fseek(result->model_file, 0, SEEK_SET) == 0, "Cannot rewind model stream");
         result->model = llama_model_load_from_file_ptr(result->model_file, mp);
-        require(result->model, "LES model loading failed"); check_abort(abort, user);
+        if (!result->model) throw std::runtime_error(loader_diagnostics.describe("LES model loading failed"));
+        check_abort(abort, user);
         auto cp = llama_context_default_params();
         cp.n_ctx = o.context_tokens; cp.n_batch = 32;
         cp.n_ubatch = streaming ? std::max(1, std::min(16, o.prefill_slots / 8)) : 1;
@@ -254,7 +268,8 @@ flo_context * flo_open(int source, const char * directory, flo_options o, flo_ab
                 c->routing_decisions += ids.size(); return true;
             };
         }
-        result->context = llama_init_from_model(result->model, cp); require(result->context, "LES context allocation failed");
+        result->context = llama_init_from_model(result->model, cp);
+        if (!result->context) throw std::runtime_error(loader_diagnostics.describe("LES context allocation failed"));
         result->vocabulary = llama_vocab_n_tokens(llama_model_get_vocab(result->model));
         result->batch = (int)cp.n_ubatch; result->capacity = o.context_tokens;
         check_abort(abort, user); return result.release();

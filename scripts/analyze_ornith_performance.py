@@ -95,6 +95,21 @@ def analyze(report):
     if count < 128:
         notes.append("Fewer than 128 decode forwards: smoke test, not the planned throughput benchmark.")
     footprint = optional_number(generation, "maximumObservedFootprintBytes")
+    total_reads = optional_number(generation, "ioBytesRead")
+    prefill_reads = optional_number(generation, "prefillIOBytesRead")
+    model_bytes = optional_number(report, "modelFileBytes")
+    if backend == "GGUF-packed" and total_reads is not None and prefill_reads is not None:
+        if total_reads != prefill_reads + read_bytes:
+            raise ValueError("generation read totals disagree with prefill and decode")
+    read_accounting = {
+        "scope": "cumulative returned reads within this generation",
+        "totalReturnedReadBytes": total_reads,
+        "modelFileBytes": model_bytes,
+        "readVolumeDividedByModelFileBytes": total_reads / model_bytes if total_reads is not None and model_bytes else None,
+        "measuresUniqueModelBytes": False,
+        "measuresPhysicalFlashTraffic": False,
+        "measuresDownloadBytes": False,
+    }
     build = report.get("appBuild")
     if not isinstance(build, str) or not build.isascii() or not build.isdigit():
         build = None
@@ -102,6 +117,7 @@ def analyze(report):
         "schemaVersion": 1,
         "backend": backend,
         "kernelMode": kernel_mode,
+        "readAccounting": read_accounting,
         "appBuild": build,
         "contextCapacityTokens": number(context, "context capacity", integer=True, positive=True),
         "decode": {
@@ -118,6 +134,8 @@ def analyze(report):
             "seconds": prefill_seconds,
             "evaluatedTokens": prompt_evaluated,
             "reusedTokens": optional_number(generation, "reusedPromptTokens"),
+            "returnedReadBytes": prefill_reads,
+            "returnedReadBytesPerEvaluatedToken": prefill_reads / prompt_evaluated if prefill_reads is not None and prompt_evaluated else None,
             "evaluatedTokensPerSecond": prompt_evaluated / prefill_seconds if prompt_evaluated is not None and prefill_seconds else None,
         },
         "maximumObservedFootprintBytes": footprint,

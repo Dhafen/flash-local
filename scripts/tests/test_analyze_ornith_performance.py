@@ -40,6 +40,18 @@ def qpack():
 
 
 class PerformanceAnalysisTests(unittest.TestCase):
+    def test_repeated_reads_can_exceed_model_size_without_claiming_download_or_unique_bytes(self):
+        report = gguf()
+        report["modelFileBytes"] = 100
+        report["generation"].update(ioBytesRead=1000, prefillIOBytesRead=800)
+        result = analyze(report)
+        self.assertEqual(result["readAccounting"]["readVolumeDividedByModelFileBytes"], 10)
+        self.assertEqual(result["prefill"]["returnedReadBytesPerEvaluatedToken"], 100)
+        for flag in ["measuresUniqueModelBytes", "measuresPhysicalFlashTraffic", "measuresDownloadBytes"]:
+            self.assertFalse(result["readAccounting"][flag])
+        report["generation"]["ioBytesRead"] = 999
+        with self.assertRaises(ValueError): analyze(report)
+
     def test_gguf_build_does_not_imply_qpack_and_targets_are_arithmetic(self):
         report = gguf()
         report["appBuild"] = "94"

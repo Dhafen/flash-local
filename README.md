@@ -6,12 +6,14 @@ Current target: the official 21.7 GB Ornith 1.5 35B-A3B Q4_K_M GGUF, a total pro
 
 ## Development status
 
-**Private TestFlight 0.1.0 (97) is now available**, adding the visible Ornith
-Performance entry and a fail-closed numerical guard for grouped QPack expert
-kernels. [Delivery and limits](docs/TESTFLIGHT.md). Existing GGUF/REAM paths
-remain available. No physical QPack or LES throughput has been verified.
-The separate LES investigation targets the installed GGUF without a model
-redownload.
+**Private TestFlight 0.1.0 (107) is available**, adding the isolated LES
+comparison for the installed GGUF. [Delivery and limits](docs/TESTFLIGHT.md).
+Host synthetic/reference gates pass, but the first phone comparison stopped
+at native model loading, before numerical checks or benchmarks. The ordinary
+GGUF chat report measures 1.931 decode forwards/s over 190 forwards and
+3.954 GB peak; this is not a controlled backend comparison. No physical
+QPack or LES throughput has been verified. Existing GGUF/REAM paths remain
+available and the LES experiment requires no model redownload.
 
 The [Ornith adapter and model switch](docs/ORNITH-IMPLEMENTATION.md) are delivered in **TestFlight 0.1.0 (84)**. They implement the actual `qwen35moe` trunk, including SiLU GDN gating, ordinary residual/norm blocks, shared/routed experts, pinned tokenization and correct exclusion of the stored MTP block. Small K/V projections use bounded pinned CPU kernels to preserve reference rounding; other projections and experts stay on Metal. Ornith is the default, with separate persisted chats and a model picker retaining REAM. Build 84 pairs eligible gate/up projections without changing their per-row arithmetic; phone performance for that optimization is pending.
 

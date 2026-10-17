@@ -26,6 +26,12 @@ def patched_files(source):
 
     replace("src/llama-moe-experts.h", "    int32_t layer = -1;",
             "    bool tensor_major = false; // Flash Local: byte-identical GGUF source spans\n    int32_t layer = -1;")
+    replace("src/llama-moe-experts.cpp", '#include "llama-moe-experts.h"',
+            '#include "llama-moe-experts.h"\n#include "VerifiedDescriptor.h"')
+    replace("src/llama-moe-experts.cpp", "fs::file_size(entry.path, error)",
+            "flash_local_expert_file_size(entry.path, error)")
+    replace("src/llama-moe-slot.cpp", '#include "llama-moe-slot.h"',
+            '#include "llama-moe-slot.h"\n#include "VerifiedDescriptor.h"')
     replace("src/llama-moe-experts.cpp",
             'layout != "layer_major_expert" && layout != "expert_major"',
             'layout != "layer_major_expert" && layout != "expert_major" && layout != "gguf_tensor_major"')
@@ -76,18 +82,7 @@ def patched_files(source):
     replace("src/llama-moe-slot.cpp", """        const int fd = open(path.c_str(), O_RDONLY | O_CLOEXEC);
         if (experts_nocache_desired() && fcntl(fd, F_NOCACHE, 1) != 0) {
             moe_log("F_NOCACHE 设置失败: %s", std::strerror(errno));
-        }""", """        int fd = -1;
-        if (path.rfind("/dev/fd/", 0) == 0) {
-            size_t consumed = 0;
-            const int source = std::stoi(path.substr(8), &consumed);
-            if (source < 0 || consumed != path.size() - 8)
-                throw std::runtime_error("Invalid verified expert descriptor");
-            // Retain the capability directly; do not rely on /dev/fd opens
-            // being permitted inside the iPhone application sandbox.
-            fd = fcntl(source, F_DUPFD_CLOEXEC, 0);
-        } else {
-            fd = open(path.c_str(), O_RDONLY | O_CLOEXEC);
-        }
+        }""", """        const int fd = flash_local_open_experts(path);
         // A preceding production TileReader may have set F_NOCACHE on a dup
         // of this same source. Explicitly clear it for page-cache trials.
         if (fd >= 0 && fcntl(fd, F_NOCACHE, experts_nocache_desired() ? 1 : 0) != 0) {

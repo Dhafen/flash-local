@@ -18,6 +18,7 @@ if(NOT EXISTS "${OMNI_SOURCE}/flash-local-source.json")
   message(FATAL_ERROR "Use scripts/prepare_ornith_les.py for the pinned reviewed source")
 endif()
 add_subdirectory("${OMNI_SOURCE}" omni)
+target_include_directories(llama PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 # Two llama runtimes must coexist. A dynamic framework exports ONLY flo_*;
 # the old tokenizer/reference runtime retains its own statically linked symbols.
 add_library(FlashOrnithLES SHARED FlashOrnithLES.cpp FlashOrnithLES.h MetalTelemetry.m)
@@ -33,7 +34,7 @@ set_target_properties(FlashOrnithLES PROPERTIES FRAMEWORK TRUE FRAMEWORK_VERSION
   INSTALL_NAME_DIR "@rpath" XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED NO)
 if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
   add_executable(ornith-les-control control.cpp)
-  target_include_directories(ornith-les-control PRIVATE "${OMNI_SOURCE}/vendor")
+  target_include_directories(ornith-les-control PRIVATE "${OMNI_SOURCE}/vendor" "${OMNI_SOURCE}/ggml/include")
   target_link_libraries(ornith-les-control PRIVATE FlashOrnithLES)
   add_executable(ornith-les-mixed-fixture "${CMAKE_CURRENT_SOURCE_DIR}/../../../Tests/ReferenceHarness/mixed.cpp" MetalTelemetry.m)
   target_link_libraries(ornith-les-mixed-fixture PRIVATE llama "-framework Metal")

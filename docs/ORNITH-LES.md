@@ -66,8 +66,8 @@ toward admission. No static MiniCPM expert-frequency/prewarm table is reused.
 
 | Candidate | Current evidence | Next decision |
 | --- | --- | --- |
-| A: existing packed GGUF/MLX | Phone build 94: 1.184 decode forwards/s, nine forwards; 3.878 GB peak | Same fixed prompt, at least 128 decode steps |
-| B: llama.cpp-omni LES | Isolated source adapter and native control harness implemented; build/numerics pending | Whole-graph CPU/Metal, routing, reset, then phone |
+| A: existing packed GGUF/MLX | Phone build 107: 1.931 decode forwards/s, 190 forwards; 3.954 GB peak; uncontrolled prompt/cache | Same fixed prompt, at least 128 decode steps per mode |
+| B: llama.cpp-omni LES | Build 107 host/reference gates pass; first phone model load fails before numerical check | Resolve native loading, then trained Metal/reference gate and phone comparison |
 | C: Flash-MoE pipeline | Code inspected; fused expert/pointwise kernels, deferred command buffers, parallel pread; no redistribution license found | Do not copy; compare permitted independently implemented techniques |
 | Swiftlet/QPack | Build 97 delivered, grouped kernels conditionally activated after four-position replay; no phone result | Different checkpoint quantization, so cannot be an identical-weight A/B |
 
@@ -131,3 +131,41 @@ It cannot enable CPU streaming on iPhone. No mathematical operator or routing
 is changed. Metal is compiled for all three platforms but its runtime numerics
 remain a physical-device gate. The app always uses Metal and must compare its
 trained logits with the existing CPU reference before benchmarking.
+
+## Build 107 phone evidence
+
+The user-provided ordinary GGUF export reports 190 decode forwards in
+98.381 seconds (1.931 forwards/s), 28,962,661,120 returned read bytes during
+decode (152.435 MB/forward), and 3,953,939,248 bytes sampled peak footprint.
+Prefill evaluates 26 new tokens while reusing 270: 17.701 seconds and
+6,023,248,128 returned read bytes. Total source reads for this generation are
+34,985,909,248 bytes. The screenshot shows a different, longer prefill with
+506 of 511 prompt tokens completed and 90.09 GB returned reads.
+
+The read counter is a cumulative per-generation sum of completed source
+reads, including repeated extents and prefetched bytes. It is neither unique
+file coverage, newly downloaded/storage bytes nor simultaneously resident
+memory. Repeated expert eviction and token-at-a-time prefill can make it much
+larger than the 21,713,463,040-byte file. Explicit reads can also be served by
+the OS cache; these counters cannot establish physical flash traffic. The
+existing chat backend keeps approximately 1.39 GB fixed weights plus 2.11 GB
+evictable weights within its 3.5 GB packed-weight capacity. Further memory
+holds activations, KV/SSM state, runtime and UI. Increasing history can require
+many repeated reads even when the visible user message is short.
+
+The separate LES export has zero measurements and reports `LES model loading
+failed`, with a 356 MB observed footprint. Thus the above throughput belongs
+to the existing engine. No LES speed, trained-model parity or fastest-backend
+claim follows from these reports.
+
+The loader investigation found another pathname operation on the verified
+descriptor: manifest extent validation used `filesystem::file_size` on
+`/dev/fd/N`, although expert reads already retained the descriptor directly.
+The candidate fix uses `fstat` for extent validation and `F_DUPFD_CLOEXEC`
+for retention, without traversing `/dev/fd`. This addresses a possible iOS
+sandbox restriction; the generic build-107 report does not prove it caused
+the observed failure. Bounded error-only native diagnostics now preserve the
+loader's actual cause with local paths removed. Descriptor parsing/retention,
+diagnostic limits/privacy and an invalid-header C-API regression join the
+native controls. Physical confirmation remains required. No weights, router
+selection, quantization or production GGUF/REAM computation are changed.

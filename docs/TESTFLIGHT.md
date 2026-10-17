@@ -1,6 +1,27 @@
 # Private internal TestFlight delivery
 
-Latest version **0.1.0 (97)**, app source
+Latest version **0.1.0 (107)**, app source
+`bbbb693799d6109bada90974fd29fcbec4c11677`, is available to the existing
+private internal group. [Full delivery run 39054946058](https://github.com/Dhafen/flash-local/actions/runs/39054946058)
+passed native CPU streaming/cache/LES/page-cache controls, mixed Q4_K/Q6_K
+and 256-expert/top-8 controls, independent old CPU reference comparisons,
+nine Swift LES tests, all three symbol-isolated Apple slices, the unchanged
+186 Swiftlet and 24 QPack controls, twelve tokenizer cases, 576 app tests,
+474 package invocations (nine environment-gated skips), 28 reviewed light/dark
+Mac/iOS captures, device archive, signing and private upload. A fresh read-only
+Apple audit confirms `VALID`, `INTERNAL_ONLY`, `IN_BETA_TESTING`, nonexpired,
+the exact private group and unchanged sole-owner membership. The sealed IPA is
+`ee903892e5989f21b7ecd4604f766d009cbff1c4c3597901e0ef953284a7e48a`.
+
+The first user-provided phone LES report stops with `LES model loading failed`:
+no trained numerical comparison or LES benchmark completed. The separate
+ordinary chat export measures 1.931 decode forwards/s over 190 forwards;
+this does not establish a controlled improvement over build 94. See the
+[read accounting and loader investigation](ORNITH-LES.md#build-107-phone-evidence).
+
+## Previous build 97
+
+Version **0.1.0 (97)**, app source
 `bcad87da52735a3ec6fca799a6b6bf47aa0fc92e`, is available to the existing
 private internal group. [Full delivery run 39030060624](https://github.com/Dhafen/flash-local/actions/runs/39030060624)
 passed all gates: 186 Swiftlet control functions, 24 QPack tests, twelve

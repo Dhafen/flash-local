@@ -1,4 +1,6 @@
 #include "FlashOrnithLES.h"
+#include "VerifiedDescriptor.h"
+#include "LoaderDiagnostics.h"
 #include <nlohmann/json.hpp>
 #include <fcntl.h>
 #include <unistd.h>
@@ -60,7 +62,45 @@ int main(int argc, char ** argv) {
         if (!fs::create_directory(dir)) throw std::runtime_error("Control output must be new");
         const int fd = open(argv[1], O_RDONLY | O_NOFOLLOW);
         if (fd < 0) return 3;
+        const std::string capability = "/dev/fd/" + std::to_string(fd);
+        std::error_code descriptor_error;
+        if (flash_local_expert_file_size(capability, descriptor_error) != fs::file_size(argv[1]) || descriptor_error)
+            throw std::runtime_error("Verified descriptor length changed");
+        const int retained = flash_local_open_experts(capability);
+        if (retained < 0 || retained == fd) throw std::runtime_error("Verified descriptor was not retained");
+        close(retained);
+        for (const char * invalid : {"/dev/fd/", "/dev/fd/-1", "/dev/fd/+1", "/dev/fd/1suffix"}) {
+            bool rejected = false;
+            try { (void) flash_local_verified_descriptor(invalid); }
+            catch (const std::runtime_error &) { rejected = true; }
+            if (!rejected) throw std::runtime_error("Malformed descriptor capability was accepted");
+        }
+        flash_local_loader_diagnostics diagnostic;
+        diagnostic.begin();
+        diagnostic.record(GGML_LOG_LEVEL_INFO, "must not be exported");
+        diagnostic.record(GGML_LOG_LEVEL_ERROR, "tensor 'x' unavailable in /private/container/model.gguf\n");
+        std::string message = diagnostic.describe("load failed");
+        if (message.find("tensor 'x'") == std::string::npos || message.find("/private") != std::string::npos ||
+            message.find("must not be exported") != std::string::npos)
+            throw std::runtime_error("Native loader error privacy regression");
+        diagnostic.end(); diagnostic.begin();
+        if (diagnostic.describe("next load") != "next load") throw std::runtime_error("Stale native loader error");
+        diagnostic.record(GGML_LOG_LEVEL_ERROR, std::string(8192, 'x').c_str());
+        if (diagnostic.describe("load").size() > 2054) throw std::runtime_error("Unbounded native loader error");
+        diagnostic.end();
         if (flo_prepare(fd, dir.c_str(), nullptr, nullptr)) throw std::runtime_error(flo_last_error());
+        const fs::path invalid = dir / "invalid-header";
+        fs::create_directory(invalid);
+        fs::copy_file(dir / "manifest-template.json", invalid / "manifest-template.json");
+        { std::ofstream broken(invalid / "dense.gguf", std::ios::binary); broken << "BAD!"; }
+        bool native_cause_exported = false;
+        try { evaluate(fd, invalid.c_str(), false, 0, 1); }
+        catch (const std::runtime_error & error) {
+            const std::string reason = error.what();
+            native_cause_exported = reason.rfind("LES model loading failed: ", 0) == 0 &&
+                reason.size() <= 2200 && reason.find(invalid.string()) == std::string::npos;
+        }
+        if (!native_cause_exported) throw std::runtime_error("Missing bounded native loader cause");
         const int steps = fs::path(argv[1]).filename().string().find("top8") == std::string::npos ? 5 : 128;
         std::ifstream manifest_input(dir / "manifest-template.json");
         json manifest; manifest_input >> manifest;
@@ -83,6 +123,8 @@ int main(int argc, char ** argv) {
             {"residentCPUReference", true}, {"cpuStreamingMaximumAbsoluteError", error},
             {"metalExecutionVerified", false}, {"actualRoutingIdentical", true},
             {"invalidLookaheadRejected", true},
+            {"verifiedDescriptorMetadata", true}, {"boundedPrivateLoaderErrors", true},
+            {"nativeLoaderCauseExported", true},
             {"resetBitwiseIdentical", true}, {"sameGreedy", true}, {"modelRequantized", false},
             {"gpuTimestampsAvailable", false},
             {"expertPayloadCopied", false}, {"positions", steps}, {"cpuLogits", cpu.logits}};
