@@ -1,0 +1,56 @@
+name: Ornith LES isolated validation
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/ornith-les-backend]
+    paths:
+      - 'Experiments/OrnithLES/**'
+      - 'scripts/*ornith_les*'
+      - '.github/workflows/ornith-les.yml'
+  pull_request:
+    paths:
+      - 'Experiments/OrnithLES/**'
+      - 'scripts/*ornith_les*'
+      - '.github/workflows/ornith-les.yml'
+permissions:
+  contents: read
+concurrency:
+  group: ornith-les-${{ github.ref }}
+  cancel-in-progress: true
+defaults:
+  run:
+    shell: bash
+jobs:
+  native-controls:
+    runs-on: macos-26
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Select pinned Apple host
+        run: |
+          test "$(uname -m)" = arm64
+          sudo xcode-select -s /Applications/Xcode_26.2.app
+      - name: Build isolated original-math LES runtime (Mac, iPhone, Simulator)
+        run: python3 scripts/build_ornith_les.py
+      - name: Generate small untrained Ornith fixture
+        run: python3 scripts/make_qwen4exp_test_model.py --ornith
+      - name: Compare resident, streamed and lookahead execution on CPU and Metal
+        run: |
+          .work/ornith-les-macos/bin/ornith-les-control \
+            .test-fixtures/synthetic-ornith.gguf .work/les-control-f32 .work/les-control-f32.json \
+            > .work/les-controls.log 2>&1
+          cat .work/les-controls.log | tail -8
+          grep 'ORNITH_LES_CONTROL.*routing=true.*syntheticOnly=true' .work/les-controls.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ornith-les-controls
+          include-hidden-files: true
+          path: |
+            .work/ornith-les-runtime/build.log
+            .work/ornith-les-runtime/build-manifest.json
+            .work/les-controls.log
+            .work/les-control-f32.json
+          retention-days: 7
