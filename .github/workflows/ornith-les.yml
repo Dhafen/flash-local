@@ -35,8 +35,8 @@ jobs:
         run: |
           test "$(uname -m)" = arm64
           sudo xcode-select -s /Applications/Xcode_26.2.app
-      - name: Build isolated original-math LES runtime (Mac, iPhone, Simulator)
-        run: python3 scripts/build_ornith_les.py
+      - name: Build isolated Mac runtime for fast numerical controls
+        run: python3 scripts/build_ornith_les.py --mac-only
       - name: Generate small untrained Ornith fixture
         run: python3 scripts/make_qwen4exp_test_model.py --ornith
       - name: Compare resident, streamed and lookahead execution with the CPU oracle
@@ -64,6 +64,8 @@ jobs:
           tail -8 .work/les-top8-controls.log
       - name: Compare both complete synthetic graphs with the existing pinned CPU reference
         run: python3 scripts/run_ornith_les_reference.py
+      - name: Build isolated original-math LES runtime (Mac, iPhone, Simulator)
+        run: python3 scripts/build_ornith_les.py
       - name: Build unchanged tokenizer for the Swift adapter checks
         run: python3 scripts/build_tokenizer_xcframework.py
       - name: Swift memory, comparison and aggregate export controls

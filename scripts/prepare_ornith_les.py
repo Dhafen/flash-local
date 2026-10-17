@@ -77,18 +77,16 @@ def patched_files(source):
     llama_moe_slot_runtime * flash_local_slots() const { return moe_slots.get(); }""")
     replace("src/llama-model.cpp", '#include "llama-model.h"',
             '#include "llama-model.h"\n#if defined(__APPLE__)\n#include <TargetConditionals.h>\n#endif')
-    replace("src/llama-model.cpp", "    if (!fn) {\n        return nullptr;\n    }", """    if (!fn) {
-#if defined(__APPLE__) && TARGET_OS_OSX
-        // CI has no usable Metal reduction device. Only bounded synthetic
-        // CPU controls opt in; mmap is disabled for this allocation path.
-        const char * control = std::getenv("ORNITH_LES_CPU_CONTROL");
-        if (control && std::strcmp(control, "1") == 0 &&
-            ggml_backend_dev_type(dev) == GGML_BACKEND_DEVICE_TYPE_CPU) {
-            return ggml_backend_cpu_buffer_type();
-        }
+    replace("src/llama-model.cpp", "    // calculate the split points", """#if defined(__APPLE__) && TARGET_OS_OSX
+    // Host-only synthetic control: no mmap, no trained-model fallback. CPU
+    // devices are not in the GPU-device loop that registers alloc-only bufts.
+    const char * control = std::getenv("ORNITH_LES_CPU_CONTROL");
+    if (control && std::strcmp(control, "1") == 0 && n_gpu_layers == 0) {
+        pimpl->alloc_only_buft.emplace(cpu_dev, ggml_backend_cpu_buffer_type());
+        pimpl->cpu_buft_list = {{cpu_dev, ggml_backend_cpu_buffer_type()}};
+    }
 #endif
-        return nullptr;
-    }""")
+    // calculate the split points""")
     replace("src/models/qwen35moe.cpp", "il + 1 < n_layer && model.layers[il + 1].ffn_gate_inp != nullptr",
             "il + 1 < n_transformer_layers && model.layers[il + 1].ffn_gate_inp != nullptr")
     file = "ggml/src/ggml-metal/ggml-metal-context.m"
