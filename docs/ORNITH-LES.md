@@ -22,7 +22,8 @@ Reviewed source snapshots:
 
 The [publisher's 13+ token/s iPhone claim](https://github.com/OpenBMB/MiniCPM-V)
 does not supply an exact reproducible prompt/run/thermal/configuration record.
-The [LES ablation table](https://github.com/tc-mb/llama.cpp-omni/blob/96bbf61710d44421ea54e63f5194f9b17c20d877/docs/les/lookahead-expert-scheduling.md)+is explicitly for **iPad M4 16 GB**: 2.97 baseline, 9.81 scheduling/layout,
+The [LES ablation table](https://github.com/tc-mb/llama.cpp-omni/blob/96bbf61710d44421ea54e63f5194f9b17c20d877/docs/les/lookahead-expert-scheduling.md)
+is explicitly for **iPad M4 16 GB**: 2.97 baseline, 9.81 scheduling/layout,
 14.92 with mixed quantization, 17.39 with DSpark. These are publisher results,
 not Ornith measurements. The current app defaults to Q3_K experts, top-8,
 4096 context, lookahead depth 8, mmap dense weights and DSpark **off**.
@@ -92,12 +93,10 @@ disabled; no quality/distribution equivalence is claimed. The foreground
 LAN API remains a follow-up after correctness and decode speed.
 
 
-The native streamed path requires Metal's alloc-only buffer type; CPU-only
-streamed synthesis is explicitly unsupported by this upstream loader. Controls
-use the complete resident tiny CPU model as oracle and compare resident Metal,
-streamed Metal, lookahead and page-cache variants. This does not require a CPU
-streaming implementation. A separate check compares the unchanged original
-pinned CPU reference. The 256-expert/top-8 fixture repeats 128 teacher-forced
+The iPhone streamed path requires Metal's alloc-only buffer type. Host controls
+use a bounded CPU allocation adapter, while production continues to require
+Metal. A separate check compares the unchanged original pinned CPU reference.
+The 256-expert/top-8 fixture repeats 128 teacher-forced
 positions to exercise eviction and prefetch races without trained weights.
 
 The opt-in app benchmark uses the existing verified file capability, prepares

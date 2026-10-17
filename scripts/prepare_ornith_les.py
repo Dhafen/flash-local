@@ -87,6 +87,20 @@ def patched_files(source):
     }
 #endif
     // calculate the split points""")
+    replace("src/llama-model.cpp", """    const auto it = dev ? pimpl->alloc_only_buft.find(dev) : pimpl->alloc_only_buft.end();
+    if (it == pimpl->alloc_only_buft.end()) {
+        throw std::runtime_error(format(""", """#if defined(__APPLE__) && TARGET_OS_OSX
+    // ggml's plain CPU buffer intentionally has device=nullptr. Only this
+    // bounded host control uses the assigned CPU device instead of that buft.
+    const char * control = std::getenv("ORNITH_LES_CPU_CONTROL");
+    if (!dev && tn.bid >= 0 && params.n_gpu_layers == 0 &&
+        control && std::strcmp(control, "1") == 0) {
+        dev = pimpl->dev_layer.at(tn.bid).dev;
+    }
+#endif
+    const auto it = dev ? pimpl->alloc_only_buft.find(dev) : pimpl->alloc_only_buft.end();
+    if (it == pimpl->alloc_only_buft.end()) {
+        throw std::runtime_error(format(""")
     replace("src/models/qwen35moe.cpp", "il + 1 < n_layer && model.layers[il + 1].ffn_gate_inp != nullptr",
             "il + 1 < n_transformer_layers && model.layers[il + 1].ffn_gate_inp != nullptr")
     file = "ggml/src/ggml-metal/ggml-metal-context.m"

@@ -13,7 +13,10 @@ public struct LESLogitComparison: Codable, Sendable, Equatable {
     public let maximumAbsoluteError: Double
     public let relativeL2Error: Double
     public let sameGreedy: Bool
-    public var passed: Bool { positions == 4 && maximumAbsoluteError <= 0.01 && relativeL2Error <= 0.001 && sameGreedy }
+    public var passed: Bool {
+        positions == 4 && maximumAbsoluteError.isFinite && relativeL2Error.isFinite &&
+            (0...0.01).contains(maximumAbsoluteError) && (0...0.001).contains(relativeL2Error) && sameGreedy
+    }
 }
 public struct LESNumericalCheck: Codable, Sendable {
     public let modelSHA256: String
@@ -45,6 +48,12 @@ public struct LESBenchmarkRun: Codable, Sendable {
     public let metricsBefore: LESMetrics?
     public let metricsAfterPrefill: LESMetrics?
     public let metricsAfter: LESMetrics?
+    public let originalProjectionsBefore: GGUFProjectionStatistics?
+    public let originalProjectionsAfterPrefill: GGUFProjectionStatistics?
+    public let originalProjectionsAfter: GGUFProjectionStatistics?
+    public let originalCacheBefore: GGUFResidentWeightCacheStatistics?
+    public let originalCacheAfterPrefill: GGUFResidentWeightCacheStatistics?
+    public let originalCacheAfter: GGUFResidentWeightCacheStatistics?
     public var decodeTokensPerSecond: Double { Double(decodeForwardPasses) / max(decodeForwardSeconds, 1e-12) }
     public var prefillTokensPerSecond: Double { Double(promptTokens) / max(prefillSeconds, 1e-12) }
     public var hasRequiredLength: Bool { generatedTokens >= 128 && decodeForwardPasses >= 128 }
@@ -152,6 +161,7 @@ public enum LESBenchmark {
             let thermal = ProcessInfo.processInfo.thermalState.rawValue
             var worstThermal = thermal, peak = ProcessFootprint.current()?.footprintBytes ?? 0
             let before = native?.metrics, startBytes = reads(), started = MonotonicClock.now()
+            let originalBefore = original?.projectionStatistics, originalCacheBefore = original?.residentCacheStatistics
             var logits: [Float] = []
             let batchSize = native == nil ? 1 : 4
             for first in stride(from: 0, to: prompt.count, by: batchSize) {
@@ -162,6 +172,7 @@ public enum LESBenchmark {
                 peak = max(peak, ProcessFootprint.current()?.footprintBytes ?? 0)
             }
             let prefillSeconds = MonotonicClock.seconds(since: started), prefillBytes = reads(), afterPrefill = native?.metrics
+            let originalAfterPrefill = original?.projectionStatistics, originalCacheAfterPrefill = original?.residentCacheStatistics
             var generated: [Int] = [], forwardSeconds = 0.0, forwards = 0, stop = "maximumTokens"
             for index in 0..<128 {
                 let token = try greedy(logits)
@@ -182,7 +193,10 @@ public enum LESBenchmark {
                 decodeIOBytes: reads() - prefillBytes, prefillIOBytes: prefillBytes - startBytes,
                 outputTokenSHA256: FileDigestComputer.sha256(of: idBytes), maximumObservedFootprintBytes: peak,
                 thermalStateAtStart: thermal, maximumThermalState: worstThermal, stopReason: stop,
-                memoryPlan: nativePlan, metricsBefore: before, metricsAfterPrefill: afterPrefill, metricsAfter: native?.metrics))
+                memoryPlan: nativePlan, metricsBefore: before, metricsAfterPrefill: afterPrefill, metricsAfter: native?.metrics,
+                originalProjectionsBefore: originalBefore, originalProjectionsAfterPrefill: originalAfterPrefill,
+                originalProjectionsAfter: original?.projectionStatistics, originalCacheBefore: originalCacheBefore,
+                originalCacheAfterPrefill: originalCacheAfterPrefill, originalCacheAfter: original?.residentCacheStatistics))
         }
         return results
     }
