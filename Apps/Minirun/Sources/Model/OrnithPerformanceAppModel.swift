@@ -201,7 +201,9 @@ final class OrnithPerformanceAppModel {
         if activity != .stopping { status = "Genererar lokalt…" }
     }
     func stop() {
-        guard isBusy else { return }
+        // Shutdown itself blocks the UI through isShuttingDown. It must not
+        // invent a worker to stop when no operation is active.
+        guard activity != .idle else { return }
         activity = .stopping; status = "Stoppar…"
         cancellation?.cancel()
         operation?.cancel()
