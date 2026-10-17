@@ -209,3 +209,21 @@ for simulated 4.3 GB and 4.1 GB ceilings, with eight demand slots plus three or
 zero prediction slots, respectively; a 4.0 GB example must still fail. These
 are policy inputs, not measurements of the phone's actual available memory.
 Physical confirmation of the change remains pending.
+
+## Validated private build 112
+
+[Run 39073532467](https://github.com/Dhafen/flash-local/actions/runs/39073532467)
+delivered version 0.1.0 (112) from
+`207b5334df8661f62222af954717fb041a01311d`. The native controls, 18 selected
+Swift tests (10 LES and 8 tokenizer/reasoning tests), QPack controls, 580 app
+tests and 474 package tests passed; the package run had 9 environment skips.
+All 36 exported iOS Simulator/macOS captures were reviewed in light and dark
+appearances. The arm64 device archive, signing, memory entitlements, privacy
+checks and internal-only delivery also passed. A fresh Apple audit confirmed
+availability to the unchanged sole-owner private group.
+
+The build includes streamed thinking and the adaptive memory admission above.
+The ordinary chat still uses its existing runner; LES is an opt-in comparison.
+Phone confirmation of the memory change, trained Metal/reference agreement,
+comparable 128-token performance and a fastest-backend result remain pending.
+Hosted tests and reviewed simulator captures do not establish these results.
