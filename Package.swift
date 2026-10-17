@@ -97,7 +97,7 @@ let package = Package(
         .binaryTarget(name: "FlashOrnithLES", path: ".work/ornith-les-runtime/FlashOrnithLES.xcframework"),
         .target(name: "OrnithLES", dependencies: ["FlashOrnithLES", "ModelAdapters", "GGUFCore", "MinirunKit", "StorageCore",
             .product(name: "MLX", package: "mlx-swift")], path: "Experiments/OrnithLES/Sources/OrnithLES"),
-        .testTarget(name: "OrnithLESTests", dependencies: ["OrnithLES", "GGUFCore", "StorageCore", "ModelAdapters"],
+        .testTarget(name: "OrnithLESTests", dependencies: ["OrnithLES", "GGUFCore", "StorageCore", "ModelAdapters", "MinirunKit"],
             path: "Experiments/OrnithLES/Tests/OrnithLESTests")
     ] : [])
 )
