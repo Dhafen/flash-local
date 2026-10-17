@@ -17,7 +17,11 @@ final class REAMChatRenderTests: XCTestCase {
                 // ImageRenderer omits ScrollView contents and replaces native
                 // text fields with yellow placeholders. Host real controls in
                 // a real window before capturing, so a PNG proves actual UI.
+                #if canImport(OrnithLES)
+                let content = REAMChatPage(model: model, openLES: {}).environment(\.colorScheme, scheme)
+                #else
                 let content = REAMChatPage(model: model).environment(\.colorScheme, scheme)
+                #endif
                 let data: Data
                 #if canImport(UIKit)
                 let host = UIHostingController(rootView: content)

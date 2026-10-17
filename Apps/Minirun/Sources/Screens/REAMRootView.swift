@@ -11,13 +11,19 @@ struct REAMRootView: View {
     @State private var confirmation: Confirmation?
     private enum AlternateRunner: String, Identifiable {
         case qpack
+        #if canImport(OrnithLES)
+        case les
+        #endif
         var id: String { rawValue }
     }
     @State private var alternateRunner: AlternateRunner?
     @State private var performanceModel = OrnithPerformanceAppModel.live()
+    #if canImport(OrnithLES)
+    @State private var lesModel = OrnithLESAppModel.live()
+    #endif
     var body: some View {
         NavigationStack {
-            REAMChatPage(model: model, discard: { confirmation = .discard }, openPerformance: openPerformance)
+            REAMChatPage(model: model, discard: { confirmation = .discard }, openPerformance: openPerformance, openLES: lesAction)
                 .navigationTitle("Flash Local")
                 .toolbar {
                     ToolbarItem(placement: .automatic) {
@@ -33,6 +39,10 @@ struct REAMRootView: View {
                             Button("Ornith QPack (testläge)") {
                                 openPerformance()
                             }.disabled(!model.canOpenAlternateRunner)
+                            #if canImport(OrnithLES)
+                            Button("Jämför LES med befintlig GGUF") { openLES() }
+                                .disabled(!model.canOpenAlternateRunner)
+                            #endif
                             NavigationLink("Om Flash Local") { AboutView() }
                             Button("Kontrollera numerik (kort test)") { model.checkNumerics() }
                                 .disabled(!model.canRunNumerics)
@@ -58,8 +68,21 @@ struct REAMRootView: View {
                 }
         }
         .sheet(item: $alternateRunner, onDismiss: {
-            Task { await performanceModel.shutdown(); model.resumeAfterAlternateRunner() }
-        }) { _ in OrnithPerformanceView(model: performanceModel) }
+            Task {
+                await performanceModel.shutdown()
+                #if canImport(OrnithLES)
+                await lesModel.shutdown()
+                #endif
+                model.resumeAfterAlternateRunner()
+            }
+        }) { runner in
+            switch runner {
+            case .qpack: OrnithPerformanceView(model: performanceModel)
+            #if canImport(OrnithLES)
+            case .les: OrnithLESView(model: lesModel, existing: model.verifiedOrnithForAlternateRunner())
+            #endif
+            }
+        }
         .tint(MRColor.tierPinned)
         .task { model.prepare() }
         .onChange(of: scenePhase) { _, phase in
@@ -78,6 +101,19 @@ struct REAMRootView: View {
         guard model.canOpenAlternateRunner else { return }
         Task { await model.pauseForAlternateRunner(); alternateRunner = .qpack }
     }
+    private var lesAction: (() -> Void)? {
+        #if canImport(OrnithLES)
+        return { openLES() }
+        #else
+        return nil
+        #endif
+    }
+    #if canImport(OrnithLES)
+    private func openLES() {
+        guard model.canOpenAlternateRunner else { return }
+        Task { await model.pauseForAlternateRunner(); alternateRunner = .les }
+    }
+    #endif
 }
 
 /// Pure page content, separable from navigation/lifecycle for light/dark QA.
@@ -85,11 +121,17 @@ struct REAMChatPage: View {
     @Bindable var model: REAMAppModel
     var discard: () -> Void = {}
     var openPerformance: () -> Void = {}
+    var openLES: (() -> Void)? = nil
     var body: some View {
         VStack(spacing: 0) {
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(spacing: 0) {
+                    if let openLES {
+                        Button("Jämför LES med befintlig modell", systemImage: "speedometer", action: openLES)
+                            .buttonStyle(.borderedProminent).disabled(!model.canOpenAlternateRunner)
+                            .accessibilityIdentifier("open-ornith-les").padding(.bottom, 12)
+                    }
                     Button(action: openPerformance) {
                         HStack(spacing: 12) {
                             Image(systemName: "cpu").font(.title2)

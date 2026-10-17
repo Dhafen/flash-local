@@ -9,6 +9,10 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
+      ornith_les:
+        description: 'Include the isolated GGUF LES benchmark after all native/reference controls'
+        type: boolean
+        default: false
       release_archive:
         description: 'Also build and inspect an unsigned Release archive for device iOS; does not upload'
         type: boolean
@@ -53,6 +57,9 @@ env:
   XCODEBUILD_FLAGS: -skipPackagePluginValidation -skipMacroValidation
 
 jobs:
+  les-validation:
+    if: ${{ inputs.ornith_les && !inputs.provisioning_only && !inputs.check_delivery_tools && !inputs.regenerate_project_only }}
+    uses: ./.github/workflows/ornith-les.yml
   qpack-validation:
     if: ${{ !inputs.check_delivery_tools && !inputs.regenerate_project_only && !inputs.provisioning_only }}
     uses: ./.github/workflows/ornith-performance.yml
@@ -105,15 +112,29 @@ jobs:
           retention-days: 7
 
   build-and-test:
-    needs: [qpack-validation]
-    if: ${{ !cancelled() && !inputs.check_delivery_tools && !inputs.regenerate_project_only && (needs.qpack-validation.result == 'success' || inputs.provisioning_only) }}
+    needs: [qpack-validation, les-validation]
+    if: ${{ !cancelled() && !inputs.check_delivery_tools && !inputs.regenerate_project_only && (needs.qpack-validation.result == 'success' || inputs.provisioning_only) && (!inputs.ornith_les || needs.les-validation.result == 'success') }}
     name: ${{ inputs.provisioning_only && 'device archive · signing probe (no test coverage)' || 'streaming tests · app tests · package tests · iOS build' }}
     runs-on: macos-26
     timeout-minutes: ${{ inputs.upload_private_testflight && 120 || 90 }}
+    env:
+      FLASH_LOCAL_ENABLE_LES: ${{ inputs.ornith_les && '1' || '0' }}
+      ORNITH_LES_CPU_CONTROL: ${{ inputs.ornith_les && '1' || '0' }}
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+
+      - name: Download numerically gated isolated LES runtime
+        if: inputs.ornith_les
+        uses: actions/download-artifact@v4
+        with:
+          name: ornith-les-runtime
+          path: .work/ornith-les-runtime
+
+      - name: Verify LES runtime belongs to this exact source
+        if: inputs.ornith_les
+        run: python3 scripts/verify_ornith_les_runtime.py
 
       - name: Validate private delivery configuration before any build
         if: github.event_name == 'workflow_dispatch' && inputs.upload_private_testflight
@@ -235,6 +256,9 @@ jobs:
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee app-tests.log | tail -40
           grep 'REAM_APP_SESSION_PARITY exactPromptIDs=true exactGeneratedIDs=true exactText=true saved=true stopRecovery=true' app-tests.log
           grep 'ORNITH_APP_SESSION exactPromptIDs=true exactGeneratedIDs=true localCPUComparison=true syntheticOnly=true' app-tests.log
+          if test "$FLASH_LOCAL_ENABLE_LES" = 1; then
+            grep 'ORNITH_LES_APP visibleEntry=true guardedOwnership=true previewCannotInfer=true trainedInference=false' app-tests.log
+          fi
 
       - name: macOS brand review in light and dark
         if: github.event_name != 'workflow_dispatch' || !inputs.provisioning_only
@@ -244,6 +268,7 @@ jobs:
             -only-testing:MinirunTests/ForkBrandRenderTests -resultBundlePath mac-brand.xcresult \
             -only-testing:MinirunTests/REAMChatRenderTests \
             -only-testing:MinirunTests/OrnithPerformanceRenderTests \
+            -only-testing:MinirunTests/OrnithLESRenderTests \
             2>&1 | tee mac-brand.log | tail -50
           grep -E 'ForkBrandRenderTests.*passed' mac-brand.log
           xcrun xcresulttool export attachments --path mac-brand.xcresult --output-path brand-macos
@@ -304,6 +329,7 @@ jobs:
             -only-testing:MinirunIOSTests/ForkBrandRenderTests -resultBundlePath ios-brand.xcresult \
             -only-testing:MinirunIOSTests/REAMChatRenderTests \
             -only-testing:MinirunIOSTests/OrnithPerformanceRenderTests \
+            -only-testing:MinirunIOSTests/OrnithLESRenderTests \
             2>&1 | tee ios-brand.log | tail -60
           grep -E 'ForkBrandRenderTests.*passed' ios-brand.log
           xcrun xcresulttool export attachments --path ios-brand.xcresult --output-path brand-ios

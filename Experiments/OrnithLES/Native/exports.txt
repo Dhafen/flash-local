@@ -1,0 +1,9 @@
+_flo_prepare
+_flo_open
+_flo_close
+_flo_vocabulary_size
+_flo_decode
+_flo_reset
+_flo_snapshot
+_flo_last_error
+_flo_revision
