@@ -50,7 +50,8 @@ answer or token IDs are included in this performance export.
 
 ## Evidence and remaining gates
 
-Run **38954531421**, source `eafa2da636536c22a8dd4b4eaf3aeef3e95bb4bf`:
+[Run **39020475546**](https://github.com/Dhafen/flash-local/actions/runs/39020475546),
+runtime source `b8dd75d1e553111ab53655eeaf52ca2effc895d1`:
 182 Swiftlet Core tests, 18 package tests, iOS Simulator compilation passed.
 The two blocking lifecycle probe suites ran separately with only the
 `.serialized` scheduling trait added in the validation harness. Original
@@ -59,7 +60,24 @@ matched CPU output with maximum absolute logit error 2.2351742e-8 and the
 same greedy choice. Twelve public tokenizer/template cases matched pinned
 Python Transformers in both thinking modes.
 
-These are small synthetic and metadata tests. Trained Ornith logits against
+The full app run also passed 572 app tests with zero failures and 474 package
+test invocations with nine expected environment-gated skips and zero failures.
+The close-before-open regression and exclusive model ownership checks passed.
+Twenty exported iOS Simulator/macOS captures were visually reviewed in both
+appearances. The device Release archive, Apple signature, memory entitlements
+and privacy manifest passed inspection. Model payload is downloaded separately.
+
+**Flash Local 0.1.0 (94)** is available in the existing private TestFlight
+group. A separate read-only Apple audit on 2026-10-17 confirmed `VALID`,
+`INTERNAL_ONLY`, `IN_BETA_TESTING`, nonexpired, and the exact existing group
+and sole-owner membership. The signed IPA SHA-256 is
+`d0243dc5de8e78678302112b9043f26319e62cd29257625cb668cae806647376`.
+Update the existing installation, then open **ⓘ → Ornith QPack (testläge)**
+and install its approximately 19.51 GB MLX checkpoint while the app is open.
+This QPack checkpoint is separate from the existing GGUF file.
+
+The numerical comparisons use small synthetic fixtures and public metadata.
+Trained Ornith logits against
 the publisher's reference dtype, sustained speed on iPhone, offline operation,
 8K/32K/65K evaluated context, and coding/agent quality remain unverified.
 Swiftlet uses F32 activations; stored BF16 weight validation alone does not
