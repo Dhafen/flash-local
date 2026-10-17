@@ -73,6 +73,28 @@ def patched_files(source):
     c.process  = pimpl->process_ns.load(std::memory_order_relaxed);""")
     # Cache mode is a per-context experiment, not a process-first-call setting.
     replace("src/llama-moe-slot.cpp", "        static const int m = [] {", "        const int m = [] {")
+    replace("src/llama-moe-slot.cpp", """        const int fd = open(path.c_str(), O_RDONLY | O_CLOEXEC);
+        if (experts_nocache_desired() && fcntl(fd, F_NOCACHE, 1) != 0) {
+            moe_log("F_NOCACHE 设置失败: %s", std::strerror(errno));
+        }""", """        int fd = -1;
+        if (path.rfind("/dev/fd/", 0) == 0) {
+            size_t consumed = 0;
+            const int source = std::stoi(path.substr(8), &consumed);
+            if (source < 0 || consumed != path.size() - 8)
+                throw std::runtime_error("Invalid verified expert descriptor");
+            // Retain the capability directly; do not rely on /dev/fd opens
+            // being permitted inside the iPhone application sandbox.
+            fd = fcntl(source, F_DUPFD_CLOEXEC, 0);
+        } else {
+            fd = open(path.c_str(), O_RDONLY | O_CLOEXEC);
+        }
+        // A preceding production TileReader may have set F_NOCACHE on a dup
+        // of this same source. Explicitly clear it for page-cache trials.
+        if (fd >= 0 && fcntl(fd, F_NOCACHE, experts_nocache_desired() ? 1 : 0) != 0) {
+            const int saved = errno;
+            close(fd);
+            throw std::runtime_error(format("Cannot apply expert page-cache policy: %s", std::strerror(saved)));
+        }""")
     replace("src/llama-context.h", "struct llama_context {", """struct llama_context {
     llama_moe_slot_runtime * flash_local_slots() const { return moe_slots.get(); }""")
     replace("src/llama-model.cpp", '#include "llama-model.h"',

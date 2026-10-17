@@ -87,6 +87,15 @@ context remain device gates. An empty application expert cache is not a
 guaranteed cold OS page cache. No winning backend is selected before those
 measurements. The first speed milestone is 3 token/s, then 5 or 8 if proven.
 
+The existing backend requests `F_NOCACHE=1` on a duplicate of the verified
+descriptor. Native trials explicitly apply `F_NOCACHE=0`, including when the
+descriptor inherits that flag from an earlier reader. Failure to apply the
+policy stops the native trial. Native cache and LES modes use both the OS
+page cache and their own windows; the OS-only mode drops the decode windows.
+This first comparison does not isolate a native own-cache-only policy. All
+reported read bytes are explicit source reads; dense mmap page faults are
+not included. Actual physical flash traffic is not exposed by these counters.
+
 DSpark needs a matching trained draft, target verification and recurrent
 rollback. MiniCPM's draft is not an Ornith draft. Speculative decoding is
 disabled; no quality/distribution equivalence is claimed. The foreground

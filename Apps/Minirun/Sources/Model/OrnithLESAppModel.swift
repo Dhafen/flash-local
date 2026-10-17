@@ -42,6 +42,8 @@ private struct LESAppReport: Encodable {
     let lowPowerModeEnabled: Bool
     let userDeclaredAirplaneMode: Bool
     let networkInferenceUsed = false
+    let nativeExpertCachePolicy = "OS page cache explicitly enabled; own decode windows vary by mode"
+    let originalExpertCachePolicy = "Existing TileReader F_NOCACHE=1 advisory; original backend preserved"
     let fullModelNumericsVerified = false
     let promptID = LESBenchmark.promptID
     let contextCapacityTokens = 4096
