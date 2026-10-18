@@ -68,6 +68,32 @@ class LESAnalysisTests(unittest.TestCase):
         self.assertFalse(result["shortNumericalGatePassed"])
         self.assertTrue(all(value["fastestComparableBackend"] is None for value in result["comparisons"]))
 
+    def test_legacy_short_gate_does_not_invent_batched_routing_evidence(self):
+        result = analyze(report())
+        self.assertTrue(result["shortNumericalGatePassed"])
+        self.assertFalse(result["canonicalBatchedRoutingVerified"])
+
+    def test_canonical_trace_requires_all_three_matching_routes_and_counts(self):
+        data = report()
+        for key in ("noLookahead", "lookahead", "batchedPrefill"):
+            data["numericalCheck"][key]["canonicalRoutingDigest"] = 2**64 - 1
+        result = analyze(data)
+        self.assertTrue(result["shortNumericalGatePassed"])
+        self.assertTrue(result["canonicalBatchedRoutingVerified"])
+        # The old order-dependent digest is intentionally different in batch.
+        data["numericalCheck"]["batchedPrefill"]["routingDigest"] = 21
+        self.assertTrue(analyze(data)["shortNumericalGatePassed"])
+        for field, value in (("canonicalRoutingDigest", None), ("canonicalRoutingDigest", 5),
+                             ("routingDecisions", None), ("routingDecisions", 319), ("routingDecisions", 0)):
+            changed = copy.deepcopy(data)
+            changed["numericalCheck"]["batchedPrefill"][field] = value
+            result = analyze(changed)
+            self.assertFalse(result["shortNumericalGatePassed"])
+            self.assertFalse(result["canonicalBatchedRoutingVerified"])
+            self.assertTrue(all(item["fastestComparableBackend"] is None for item in result["comparisons"]))
+        data["numericalCheck"]["lookahead"]["canonicalRoutingDigest"] = 2**64
+        with self.assertRaises(ValueError): analyze(data)
+
     def test_rejected_plan_recovers_only_numeric_reservations_and_live_samples(self):
         data = report()
         data["memoryAdmissions"] = [dict(phase="numerics.prediction4.prefill1",

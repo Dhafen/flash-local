@@ -16,6 +16,7 @@ public struct LESLogitComparison: Codable, Sendable, Equatable {
     public let sameGreedy: Bool
     public var routingDigest: UInt64? = nil
     public var routingDecisions: UInt64? = nil
+    public var canonicalRoutingDigest: UInt64? = nil
     public var activeLookaheadDepth: Int? = nil
     public var passed: Bool {
         positions == 4 && maximumAbsoluteError.isFinite && relativeL2Error.isFinite &&
@@ -30,11 +31,23 @@ public struct LESNumericalCheck: Codable, Sendable {
     public let lookahead: LESLogitComparison
     public let batchedPrefill: LESLogitComparison
     public let fullModelNumericsVerified = false
+    public var canonicalBatchedRoutingVerified: Bool {
+        noLookahead.canonicalRoutingDigest != nil &&
+            noLookahead.routingDecisions.map({ $0 > 0 }) == true &&
+            noLookahead.canonicalRoutingDigest == lookahead.canonicalRoutingDigest &&
+            noLookahead.canonicalRoutingDigest == batchedPrefill.canonicalRoutingDigest &&
+            noLookahead.routingDecisions == lookahead.routingDecisions &&
+            noLookahead.routingDecisions == batchedPrefill.routingDecisions
+    }
     public var passed: Bool {
         noLookahead.passed && lookahead.passed && batchedPrefill.passed &&
             noLookahead.routingDecisions.map({ $0 > 0 }) == true &&
             noLookahead.routingDigest != nil && noLookahead.routingDigest == lookahead.routingDigest &&
-            noLookahead.routingDecisions == lookahead.routingDecisions
+            noLookahead.routingDecisions == lookahead.routingDecisions &&
+            // Archived reports before this observer had no canonical checksum.
+            // A partially present or inconsistent new trace cannot pass.
+            ([noLookahead, lookahead, batchedPrefill].allSatisfy { $0.canonicalRoutingDigest == nil } ||
+                canonicalBatchedRoutingVerified)
     }
 }
 public struct LESBenchmarkRun: Codable, Sendable {
@@ -146,6 +159,7 @@ public enum LESBenchmark {
         return LESLogitComparison(positions: 4, maximumAbsoluteError: absolute,
             relativeL2Error: sqrt(squared / max(referenceSquared, 1e-30)), sameGreedy: same,
             routingDigest: context.metrics.routingDigest, routingDecisions: context.metrics.routingDecisions,
+            canonicalRoutingDigest: context.metrics.canonicalRoutingDigest,
             activeLookaheadDepth: memory.lookaheadDepth)
     }
     public static func check(artifact: VerifiedGGUFArtifact, prepared: URL, control: LESControl,
@@ -178,7 +192,9 @@ public enum LESBenchmark {
                                progress: @Sendable (String) -> Void = { _ in },
                                onAdmission: (LESMemoryAdmission) -> Void = { _ in }) throws -> [LESBenchmarkRun] {
         guard check.modelSHA256 == artifact.manifest.sha256,
-              backend == .existingGGUF || check.passed else { throw GGUFError.invalid("LES numerical check has not passed") }
+              backend == .existingGGUF || (check.passed && check.canonicalBatchedRoutingVerified) else {
+            throw GGUFError.invalid("LES numerical and batched routing checks have not passed")
+        }
         let tokenizer = try CanonicalQwen35Tokenizer(artifact: artifact)
         let prompt = try tokenizer.chat([.init(role: .user, content: Self.prompt)], maximumTokens: 512).tokenIDs
         let nativePlan: LESMemoryPlan?
@@ -225,6 +241,7 @@ public enum LESBenchmark {
                 else { logits = try step(prompt[first], projecting: end == prompt.count) ?? [] }
                 progress("\(backend.rawValue) · \(warm ? "varm" : "tom appcache") · prompt \(end)/\(prompt.count)")
                 peak = max(peak, ProcessFootprint.current()?.footprintBytes ?? 0)
+                worstThermal = max(worstThermal, ProcessInfo.processInfo.thermalState.rawValue)
             }
             let prefillSeconds = MonotonicClock.seconds(since: started), prefillBytes = reads(), afterPrefill = native?.metrics
             let originalAfterPrefill = original?.projectionStatistics, originalCacheAfterPrefill = original?.residentCacheStatistics

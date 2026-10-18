@@ -60,6 +60,8 @@ jobs:
             > .work/les-controls.log 2>&1
           cat .work/les-controls.log | tail -8
           grep 'ORNITH_LES_CONTROL.*routing=true.*syntheticOnly=true' .work/les-controls.log
+          grep 'ORNITH_ROUTING_TRACE paddedRows=true batchOrderIndependent=true changedExpertDetected=true invalidInputAtomic=true' .work/les-controls.log
+          grep 'ORNITH_BATCH_CONTROL prefixCases=5 steps=5 .*canonicalRouting=true reset=true syntheticOnly=true' .work/les-controls.log
       - name: Mixed Q4_K/Q6_K expert controls
         run: |
           python3 scripts/make_qwen4exp_test_model.py --ornith --mixed
@@ -69,6 +71,8 @@ jobs:
             .test-fixtures/synthetic-ornith-mixed.gguf .work/les-control-mixed .work/les-control-mixed.json \
             > .work/les-mixed-controls.log 2>&1
           tail -8 .work/les-mixed-controls.log
+          grep 'ORNITH_ROUTING_TRACE paddedRows=true batchOrderIndependent=true changedExpertDetected=true invalidInputAtomic=true' .work/les-mixed-controls.log
+          grep 'ORNITH_BATCH_CONTROL prefixCases=5 steps=5 .*canonicalRouting=true reset=true syntheticOnly=true' .work/les-mixed-controls.log
       - name: Real routing cardinality without trained weights
         run: |
           python3 scripts/make_qwen4exp_test_model.py --ornith --wide-experts
@@ -76,6 +80,8 @@ jobs:
             .test-fixtures/synthetic-ornith-top8.gguf .work/les-control-top8 .work/les-control-top8.json \
             > .work/les-top8-controls.log 2>&1
           tail -8 .work/les-top8-controls.log
+          grep 'ORNITH_ROUTING_TRACE paddedRows=true batchOrderIndependent=true changedExpertDetected=true invalidInputAtomic=true' .work/les-top8-controls.log
+          grep 'ORNITH_BATCH_CONTROL prefixCases=11 steps=128 .*canonicalRouting=true reset=true syntheticOnly=true' .work/les-top8-controls.log
       - name: Compare both complete synthetic graphs with the existing pinned CPU reference
         run: python3 scripts/run_ornith_les_reference.py
       - name: Both thinking modes against the pinned Ornith template
@@ -110,6 +116,7 @@ jobs:
           grep 'ORNITH_REAL_HEADER_MEMORY selectedExperts=8 requestedPrediction=4 adaptivePrediction=3 demandOnlyPrediction=0 insufficientDemandRejected=true metadataOnly=true' .work/les-swift-tests.log
           grep 'ORNITH_PREPARATION_ADMISSION phaseCaptured=true beforeAndAfterCaptured=true syntheticOnly=true' .work/les-swift-tests.log
           grep 'ORNITH_NATIVE_LIFETIME explicitClose=true wrapperStillAlive=true repeatedOwners=3 noLiveBuffers=true syntheticOnly=true' .work/les-swift-tests.log
+          grep 'ORNITH_CANONICAL_ROUTING completeBatchTrace=true partialRejected=true changedExpertRejected=true legacyPreserved=true' .work/les-swift-tests.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:

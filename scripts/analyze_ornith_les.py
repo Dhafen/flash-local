@@ -76,6 +76,20 @@ def memory_admission(item):
         marginAfterEightDemandSlots=plan["processCeilingBytes"] - minimum if minimum is not None else None)
 
 
+def canonical_batched_routing(check):
+    if not isinstance(check, dict):
+        return False
+    traces = [check.get(key) for key in ("noLookahead", "lookahead", "batchedPrefill")]
+    if any(not isinstance(trace, dict) or trace.get("canonicalRoutingDigest") is None or
+           trace.get("routingDecisions") is None for trace in traces):
+        return False
+    digests = [number(trace["canonicalRoutingDigest"], "canonicalRoutingDigest", integer=True) for trace in traces]
+    counts = [number(trace["routingDecisions"], "routingDecisions", integer=True) for trace in traces]
+    if any(digest > 2**64 - 1 for digest in digests) or any(count > 2**64 - 1 for count in counts):
+        raise ValueError("routing trace exceeds UInt64")
+    return len(set(digests)) == 1 and len(set(counts)) == 1 and counts[0] > 0
+
+
 def numerical_gate(check):
     if not isinstance(check, dict) or check.get("modelSHA256") != MODEL:
         return False
@@ -91,7 +105,13 @@ def numerical_gate(check):
     off, on = check["noLookahead"], check["lookahead"]
     if any(value.get(key) is None for value in (off, on) for key in ("routingDigest", "routingDecisions")):
         return False
-    return (number(off.get("routingDecisions"), "routingDecisions", integer=True) > 0 and
+    traces = [check[key] for key in ("noLookahead", "lookahead", "batchedPrefill")]
+    # Legacy phone reports did not normalize routing observation order across
+    # batched prefill. Preserve their old short gate without inventing this
+    # stronger evidence; any partially present new trace must fail closed.
+    canonical_valid = all(trace.get("canonicalRoutingDigest") is None for trace in traces) or \
+        canonical_batched_routing(check)
+    return (canonical_valid and number(off.get("routingDecisions"), "routingDecisions", integer=True) > 0 and
         off["routingDecisions"] == on.get("routingDecisions") and
         number(off.get("routingDigest"), "routingDigest", integer=True) ==
         number(on.get("routingDigest"), "routingDigest", integer=True))
@@ -239,7 +259,9 @@ def analyze(report):
     build = build if isinstance(build, str) and re.fullmatch(r"[0-9]{1,16}", build) else None
     return dict(schemaVersion=1, appBuild=build, contextCapacityTokens=context, failedReport=report.get("failure") is not None,
         sampledPeakFootprintBytes=optional_number(report, "maximumObservedFootprintBytes"),
-        shortNumericalGatePassed=gate, fullModelNumericsVerified=False,
+        shortNumericalGatePassed=gate,
+        canonicalBatchedRoutingVerified=canonical_batched_routing(report.get("numericalCheck")),
+        fullModelNumericsVerified=False,
         memoryAdmissions=[memory_admission(item) for item in admissions], runs=runs, comparisons=comparisons,
         recommendedAppBackend=None, reportAuthenticityVerified=False, offlineExecutionVerified=False,
         scope="single fixed prompt; four reference positions; no automatic backend selection",

@@ -1,7 +1,9 @@
 #include "FlashOrnithLES.h"
 #include "LoaderDiagnostics.h"
+#include "RoutingTrace.h"
 #include "llama.h"
 #include "llama-context.h"
+#include "llama-model.h"
 #include "llama-moe-slot.h"
 #include "gguf.h"
 #include <nlohmann/json.hpp>
@@ -154,8 +156,8 @@ struct flo_context {
     llama_context * context = nullptr;
     flo_abort abort = nullptr; void * user = nullptr;
     int vocabulary = 0, batch = 0, position = 0, capacity = 0;
-    bool poisoned = false;
-    uint64_t routing_digest = 14695981039346656037ULL, routing_decisions = 0;
+    bool poisoned = false, routing_failed = false;
+    flash_local_routing_trace routing;
     explicit flo_context() : exclusive(owner, std::try_to_lock) { live_contexts.fetch_add(1, std::memory_order_relaxed); }
     ~flo_context() {
         // Complete queued GPU work before releasing recurrent state and model
@@ -263,16 +265,18 @@ flo_context * flo_open(int source, const char * directory, flo_options o, flo_ab
         if (o.trace_routing) {
             cp.cb_eval_user_data = result.get();
             cp.cb_eval = [](ggml_tensor * tensor, bool ask, void * data) {
-                const bool selected = tensor->type == GGML_TYPE_I32 &&
-                    std::string(ggml_get_name(tensor)).rfind("ffn_moe_topk-", 0) == 0 &&
-                    ggml_nelements(tensor) <= 8192;
+                const bool selected = std::string(ggml_get_name(tensor)).rfind("ffn_moe_topk-", 0) == 0;
                 if (ask) return selected;
                 if (!selected) return true;
                 auto * c = static_cast<flo_context *>(data);
-                std::vector<int32_t> ids(ggml_nelements(tensor));
-                ggml_backend_tensor_get(tensor, ids.data(), 0, ids.size() * sizeof(int32_t));
-                for (int32_t id : ids) { c->routing_digest ^= (uint32_t)id; c->routing_digest *= 1099511628211ULL; }
-                c->routing_decisions += ids.size(); return true;
+                const bool valid = tensor->type == GGML_TYPE_I32 && tensor->ne[2] == 1 && tensor->ne[3] == 1 &&
+                    c->routing.append(ggml_get_name(tensor), c->position, tensor->ne[0], tensor->ne[1],
+                        tensor->nb[1], c->model->hparams.n_expert,
+                        [tensor](int32_t * row, size_t offset, size_t bytes) {
+                            ggml_backend_tensor_get(tensor, row, offset, bytes);
+                        });
+                c->routing_failed = c->routing_failed || !valid;
+                return valid;
             };
         }
         result->context = llama_init_from_model(result->model, cp);
@@ -292,7 +296,10 @@ int flo_decode(flo_context * c, const int32_t * tokens, int32_t count, float * o
         for (int first = 0; first < count; first += c->batch) {
             check_abort(c->abort, c->user); const int n = std::min(c->batch, count - first);
             auto batch = llama_batch_get_one(const_cast<int32_t *>(tokens + first), n);
-            require(llama_decode(c->context, batch) == 0, "LES forward failed"); c->position += n;
+            require(llama_decode(c->context, batch) == 0, "LES forward failed");
+            // ggml's evaluation callback can stop a split without returning an
+            // error status. Never export logits from an invalid trace.
+            require(!c->routing_failed, "LES routing observation failed"); c->position += n;
         }
         const float * logits = llama_get_logits_ith(c->context, -1); require(logits, "LES logits unavailable");
         for (int i = 0; i < capacity; ++i) require(std::isfinite(logits[i]), "Non-finite LES logit");
@@ -302,12 +309,15 @@ int flo_decode(flo_context * c, const int32_t * tokens, int32_t count, float * o
 void flo_reset(flo_context * c) {
     if (c && !c->poisoned) {
         llama_memory_clear(llama_get_memory(c->context), true); c->position = 0;
-        c->routing_digest = 14695981039346656037ULL; c->routing_decisions = 0;
+        c->routing = {};
     }
 }
 flo_metrics flo_snapshot(const flo_context * c) {
     flo_metrics out{};
-    if (c) { out.routing_digest = c->routing_digest; out.routing_decisions = c->routing_decisions; }
+    if (c) {
+        out.routing_digest = c->routing.sequential; out.routing_decisions = c->routing.decisions;
+        out.canonical_routing_digest = c->routing.canonical;
+    }
     if (c && c->context->flash_local_slots()) {
         const auto s = c->context->flash_local_slots()->counters_snapshot();
         out.io_bytes = s.all_bytes; out.io_calls = s.all_calls; out.misses = s.miss; out.selected_experts = s.unique;

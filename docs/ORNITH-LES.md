@@ -297,6 +297,23 @@ Hosted tests and reviewed simulator captures do not establish these results.
 
 ## Local analysis of phone exports
 
+The routing observer reads each top-8 row with the tensor's actual row
+stride. In this pinned ggml, top-k is a view of a full expert sort, so batched
+rows are not necessarily packed consecutively. The expert loader already
+honours that stride; this corrects diagnostics without changing model routing.
+A new canonical checksum includes token position, layer, rank and selected
+expert. It permits comparison across token-major decode and layer-major
+prefill. Missing, partial or differing new checksums cannot admit a native
+benchmark. Legacy reports retain their original short gate and explicitly
+lack this additional batch-routing evidence.
+
+Native host controls now replay uneven prompt prefixes with batch size four,
+then hand off to single-token decode through 128 teacher-forced positions.
+Resident CPU logits, greedy choices and canonical routes must agree with
+cache, lookahead and page-cache modes. Batch size four was already used by
+the shipped native benchmark. These are additional correctness controls;
+they do not establish a new phone speed or a new TestFlight delivery.
+
 Run `python3 scripts/analyze_ornith_les.py REPORT.json` on an exported LES
 report. It only reads the local JSON and prints whitelisted aggregates.
 Failed admissions retain before/after footprint and recover published numeric

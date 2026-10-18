@@ -17,6 +17,7 @@ typedef struct {
     // physical footprint. Device bytes may include other app Metal users.
     uint64_t live_contexts, live_metal_buffers, owned_metal_bytes, mapped_metal_bytes, device_allocated_bytes;
     bool metal_device_observed;
+    uint64_t canonical_routing_digest;
 } flo_metrics;
 typedef struct {
     int32_t context_tokens, prefill_slots, cache_slots_per_layer;

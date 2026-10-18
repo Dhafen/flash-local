@@ -110,6 +110,23 @@ final class LESPolicyTests: XCTestCase {
         let encoded = String(decoding: try JSONEncoder().encode(check), as: UTF8.self)
         for key in ["promptTokenIDs", "generatedTokenIDs", "logits", "chat", "messages"] { XCTAssertFalse(encoded.contains("\"" + key + "\"")) }
         XCTAssertTrue(check.passed); XCTAssertFalse(check.fullModelNumericsVerified)
+        XCTAssertFalse(check.canonicalBatchedRoutingVerified)
+        var traced = result; traced.canonicalRoutingDigest = .max
+        var batch = traced; batch.routingDigest = 21 // Layer-major observation order differs.
+        func tracedCheck(_ last: LESLogitComparison) -> LESNumericalCheck {
+            LESNumericalCheck(modelSHA256: "same", referenceRevision: "reference", nativeRevision: "candidate",
+                noLookahead: traced, lookahead: traced, batchedPrefill: last)
+        }
+        XCTAssertTrue(tracedCheck(batch).passed)
+        XCTAssertTrue(tracedCheck(batch).canonicalBatchedRoutingVerified)
+        var partial = batch; partial.canonicalRoutingDigest = nil
+        var changedRoute = batch; changedRoute.canonicalRoutingDigest = 1
+        var changedCount = batch; changedCount.routingDecisions = 47
+        for invalid in [partial, changedRoute, changedCount, result] {
+            XCTAssertFalse(tracedCheck(invalid).passed)
+            XCTAssertFalse(tracedCheck(invalid).canonicalBatchedRoutingVerified)
+        }
+        print("ORNITH_CANONICAL_ROUTING completeBatchTrace=true partialRejected=true changedExpertRejected=true legacyPreserved=true")
         var different = result; different.routingDigest = 20
         XCTAssertFalse(LESNumericalCheck(modelSHA256: "same", referenceRevision: "reference", nativeRevision: "candidate",
             noLookahead: result, lookahead: different, batchedPrefill: result).passed)
