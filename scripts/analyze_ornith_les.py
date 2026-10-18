@@ -25,6 +25,7 @@ FAILURE_FIELDS = dict(baseline="baselineFootprintBytes", available="baselineAvai
     ceiling="processCeilingBytes", dense="denseBytes", KV="kvBytes", SSM="ssmBytes",
     reserve="runtimeReserveBytes", staging="prefillAllocationBytes", bytesPerSlot="expertBytesPerSlot",
     window="totalWindowSlots", requestedPrediction="requestedLookaheadDepth")
+NATIVE_MEMORY_FIELDS = ("liveContexts", "liveMetalBuffers", "ownedMetalBytes", "mappedMetalBytes", "deviceAllocatedBytes")
 
 
 def optional_number(obj, key, *, integer=True):
@@ -61,10 +62,16 @@ def memory_admission(item):
         "runtimeReserveBytes", "prefillAllocationBytes", "expertBytesPerSlot", "processCeilingBytes")
     minimum = sum(plan[k] for k in required[:-2]) + 8 * plan["expertBytesPerSlot"] \
         if all(plan.get(k) is not None for k in required) else None
+    native = item.get("nativeMemory")
+    if native is not None and not isinstance(native, dict):
+        raise ValueError("invalid native memory sample")
+    native = {key: optional_number(native, key) for key in NATIVE_MEMORY_FIELDS if key in native} \
+        if native is not None else None
     return dict(phase=phase if known_phase else None, failureReported=failure is not None,
         beforeFootprintBytes=before_bytes, afterFootprintBytes=after_bytes,
         reclaimedFootprintBytes=before_bytes - after_bytes if before_bytes is not None and after_bytes is not None else None,
         availableAfterBytes=optional_number(after, "availableBytes"), plan=plan,
+        nativeMemory=native,
         minimumProcessBytesForEightDemandSlots=minimum,
         marginAfterEightDemandSlots=plan["processCeilingBytes"] - minimum if minimum is not None else None)
 

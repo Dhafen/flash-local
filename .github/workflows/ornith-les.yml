@@ -38,6 +38,11 @@ jobs:
           sudo xcode-select -s /Applications/Xcode_26.2.app
       - name: Build isolated Mac runtime for fast numerical controls
         run: python3 scripts/build_ornith_les.py --mac-only
+      - name: VM page buffers release their touched mappings
+        run: |
+          .work/ornith-les-macos/bin/ornith-les-allocation-control > .work/les-allocation-controls.log 2>&1
+          cat .work/les-allocation-controls.log
+          grep 'ORNITH_VM_ALLOCATION pageAligned=true touchedMappingsReleased=true cycles=9 modelLoaded=false physicalPhone=false' .work/les-allocation-controls.log
       - name: Real checkpoint tensor shapes without trained weights
         run: |
           python3 scripts/fetch_ornith_metadata.py
@@ -104,6 +109,7 @@ jobs:
           tail -12 .work/les-swift-tests.log
           grep 'ORNITH_REAL_HEADER_MEMORY selectedExperts=8 requestedPrediction=4 adaptivePrediction=3 demandOnlyPrediction=0 insufficientDemandRejected=true metadataOnly=true' .work/les-swift-tests.log
           grep 'ORNITH_PREPARATION_ADMISSION phaseCaptured=true beforeAndAfterCaptured=true syntheticOnly=true' .work/les-swift-tests.log
+          grep 'ORNITH_NATIVE_LIFETIME explicitClose=true wrapperStillAlive=true repeatedOwners=3 noLiveBuffers=true syntheticOnly=true' .work/les-swift-tests.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -113,6 +119,7 @@ jobs:
             .work/ornith-les-runtime/build.log
             .work/ornith-les-runtime/build-manifest.json
             .work/les-controls.log
+            .work/les-allocation-controls.log
             .work/les-control-f32.json
             .work/les-mixed-controls.log
             .work/les-control-mixed.json

@@ -67,7 +67,7 @@ toward admission. No static MiniCPM expert-frequency/prewarm table is reused.
 | Candidate | Current evidence | Next decision |
 | --- | --- | --- |
 | A: existing packed GGUF/MLX | Phone build 107: 1.931 decode forwards/s, 190 forwards; 3.954 GB peak; uncontrolled prompt/cache | Same fixed prompt, at least 128 decode steps per mode |
-| B: llama.cpp-omni LES | Build 112 delivered after host/reference gates; build 108 phone attempt stopped at memory admission | Confirm adaptive admission on phone, then trained Metal/reference gate and 128-token comparison |
+| B: llama.cpp-omni LES | Phone build 112: first native admission at 114 MB, next blocked at 2.216 GB; no benchmark completed | Validate VM-buffer release, then trained Metal/reference gate and 128-token comparison |
 | C: Flash-MoE pipeline | Code inspected; fused expert/pointwise kernels, deferred command buffers, parallel pread; no redistribution license found | Do not copy; compare permitted independently implemented techniques |
 | Swiftlet/QPack | Build 97 delivered, grouped kernels conditionally activated after four-position replay; no phone result | Different checkpoint quantization, so cannot be an identical-weight A/B |
 
@@ -187,6 +187,44 @@ no trained weight payload was present. The synthetic numerical tests and
 three-platform framework compilation also passed in that run.
 
 ## Adaptive prediction window follow-up
+
+### Build 112 physical admission report and VM-buffer correction
+
+The next phone report provides phase-boundary measurements: the first
+`numerics.prediction0.prefill1` admission starts at 114,067,512 bytes after
+idle cleanup and reserves 5,119,385,051 bytes in total. The following
+`numerics.prediction4.prefill1` admission measures 2,216,480,384 bytes,
+unchanged by allocator relief. That is 2,102,412,872 bytes above the first
+baseline. It leaves only two window slots; admitting all eight real demand
+slots would require 5,891,965,987 bytes, exceeding the ceiling by 391,965,987.
+No numerical check or timing run completed, and the report cannot identify
+whether retained allocation ownership or allocator/VM accounting caused it.
+
+The pinned source uses `posix_memalign/free` for iOS page buffers but
+`vm_allocate/vm_deallocate` for the same buffers on macOS. A recent
+[upstream iOS report](https://github.com/ggml-org/llama.cpp/issues/30556)
+describes elevated footprint after ownership was released, including zero
+allocator relief; its proposed VM path is a plausible match, not proof of
+the cause on this phone. The isolated patch enables the existing Apple VM
+path symmetrically for both Metal host buffers and CPU aligned buffers.
+It does not change file-backed dense mappings, tensors or mathematical ops.
+
+Native close synchronizes queued work before destruction. Swift explicitly
+closes at the end of a numerical variant or complete cold/warm pair, with
+idempotent close tests retaining the old wrapper while creating new owners.
+Admissions include native live-context/buffer counts, owned and mapped Metal
+span bytes, and device allocation when observed. A new plan rejects any
+remaining native owner. These counters are separate from physical footprint;
+mapped spans are not resident RAM, and device allocation includes other app
+Metal users. No live buffer or page is discarded during inference.
+
+The added host allocator control touches nine bounded allocations, including
+partial-page sizes, and checks that their VM regions disappear after free.
+Host execution and three-platform compilation still cannot establish iOS
+footprint recovery or trained Metal parity. The next physical acceptance
+requires zero owners/buffers at every transition, recovered baseline, the
+trained routing/logit gate and complete 128-token runs. The eight real
+experts and 5.5 GB ceiling remain unchanged. Validation is in progress.
 
 The build-108 phone attempt stops at Swift memory admission with no completed
 numerical check or benchmark; observed process peak is 2,279,560,368 bytes.

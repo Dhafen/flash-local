@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include <TargetConditionals.h>
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -22,6 +23,8 @@
 using json = nlohmann::json;
 namespace fs = std::filesystem;
 extern "C" void flash_omni_metal_snapshot(uint64_t *, uint64_t *, uint64_t *, uint64_t *);
+extern "C" void flash_omni_memory_snapshot(uint64_t *, uint64_t *, uint64_t *, uint64_t *, bool *);
+static std::atomic<uint64_t> live_contexts{0};
 static thread_local std::string last_error;
 static std::mutex owner;
 static std::once_flag initialized;
@@ -153,12 +156,16 @@ struct flo_context {
     int vocabulary = 0, batch = 0, position = 0, capacity = 0;
     bool poisoned = false;
     uint64_t routing_digest = 14695981039346656037ULL, routing_decisions = 0;
-    explicit flo_context() : exclusive(owner, std::try_to_lock) {}
+    explicit flo_context() : exclusive(owner, std::try_to_lock) { live_contexts.fetch_add(1, std::memory_order_relaxed); }
     ~flo_context() {
+        // Complete queued GPU work before releasing recurrent state and model
+        // buffers, including failed/cancelled forward paths.
+        if (context) llama_synchronize(context);
         if (context) llama_free(context);
         if (model) llama_model_free(model);
         if (model_file) fclose(model_file);
         if (!manifest.empty()) { std::error_code ignored; fs::remove(manifest, ignored); }
+        live_contexts.fetch_sub(1, std::memory_order_relaxed);
     }
 };
 static void environment(const char * name, int value) {
@@ -308,7 +315,11 @@ flo_metrics flo_snapshot(const flo_context * c) {
         out.process_ns = s.process; out.install_ns = s.install;
         out.demand_hits = s.demand_hits; out.demand_misses = s.demand_misses;
     }
-    flash_omni_metal_snapshot(&out.dispatches, &out.command_buffers, &out.gpu_ns, &out.timestamped_command_buffers); return out;
+    flash_omni_metal_snapshot(&out.dispatches, &out.command_buffers, &out.gpu_ns, &out.timestamped_command_buffers);
+    out.live_contexts = live_contexts.load(std::memory_order_relaxed);
+    flash_omni_memory_snapshot(&out.live_metal_buffers, &out.owned_metal_bytes, &out.mapped_metal_bytes,
+        &out.device_allocated_bytes, &out.metal_device_observed);
+    return out;
 }
 const char * flo_last_error() { return last_error.c_str(); }
 const char * flo_revision() { return "96bbf61710d44421ea54e63f5194f9b17c20d877+flash-local-tensor-major-v1"; }

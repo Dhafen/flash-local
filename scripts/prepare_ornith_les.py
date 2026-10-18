@@ -138,6 +138,29 @@ def patched_files(source):
     result[file], count = re.subn(pattern, r"\1flash_omni_commit(\2);", result[file])
     if count != 5:
         raise ValueError(f"Pinned Metal copy/fill commit sites changed: {count}")
+    # Keep allocation/free symmetric. iOS 27 can leave freed malloc-backed
+    # page buffers charged to phys_footprint even after allocator relief.
+    # Reuse ggml's existing macOS VM path, including CPU aligned buffers.
+    # See ggml-org/llama.cpp#30556; phone confirmation remains a release gate.
+    replace("ggml/src/ggml.c", "  #elif TARGET_OS_OSX\n    GGML_UNUSED(alignment);",
+            "  #elif defined(__APPLE__)\n    GGML_UNUSED(alignment);")
+    replace("ggml/src/ggml.c", "#elif TARGET_OS_OSX\n    if (ptr != NULL) {\n        vm_deallocate",
+            "#elif defined(__APPLE__)\n    if (ptr != NULL) {\n        vm_deallocate")
+    replace(file, "#if TARGET_OS_OSX\n    kern_return_t err = vm_allocate",
+            "#if defined(__APPLE__)\n    kern_return_t err = vm_allocate")
+    replace(file, "#if TARGET_OS_OSX\n        vm_deallocate((vm_map_t)mach_task_self(), (vm_address_t)buf->all_data, buf->all_size);",
+            "#if defined(__APPLE__)\n        vm_deallocate((vm_map_t)mach_task_self(), (vm_address_t)buf->all_data, buf->all_size);")
+    replace(file, 'extern void flash_omni_commit(id<MTLCommandBuffer>);',
+            'extern void flash_omni_commit(id<MTLCommandBuffer>);\n'
+            'extern void flash_omni_buffer_lifetime(id<MTLDevice>, bool, bool, size_t);')
+    # Count only successfully created buffers, and pair the free before the
+    # wrapper disappears. Mapped bytes are address spans, not physical RAM.
+    replace(file, "    ggml_metal_device_rsets_add(dev, res->rset);",
+            "    flash_omni_buffer_lifetime(dev->mtl_device, true, res->owned, res->all_size);\n"
+            "    ggml_metal_device_rsets_add(dev, res->rset);", count=2)
+    replace(file, "    free(buf);\n}\n\nbool ggml_metal_buffer_park",
+            "    flash_omni_buffer_lifetime(buf->dev->mtl_device, false, buf->owned, buf->all_size);\n"
+            "    free(buf);\n}\n\nbool ggml_metal_buffer_park")
     return result
 
 
@@ -170,7 +193,8 @@ def prepare(root, run=None):
     record.write_text(json.dumps(dict(revision=REVISION, repository=REPOSITORY,
         patchScriptSHA256=script_hash,
         patchedSHA256={name: hashlib.sha256((source / name).read_bytes()).hexdigest() for name in files},
-        changes=["tensor-major direct GGUF reads", "aggregate I/O and Metal telemetry", "exclude unused MTP prediction"],
+        changes=["tensor-major direct GGUF reads", "aggregate I/O and Metal telemetry", "exclude unused MTP prediction",
+                 "Apple VM-backed page buffers with symmetric deallocation", "native buffer lifetime accounting"],
         routingChanged=False, quantizationChanged=False), indent=2) + "\n")
     return source
 

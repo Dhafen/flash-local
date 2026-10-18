@@ -98,6 +98,21 @@ class LESAnalysisTests(unittest.TestCase):
         data = report(); data["measurements"].append(copy.deepcopy(data["measurements"][0]))
         with self.assertRaises(ValueError): analyze(data)
 
+    def test_native_ownership_is_separate_from_footprint_and_private_data(self):
+        data = report()
+        data["memoryAdmissions"] = [dict(phase="numerics.prediction4.prefill1",
+            beforeReclaim=dict(footprintBytes=2_200_000_000), afterReclaim=dict(footprintBytes=2_200_000_000),
+            nativeMemory=dict(liveContexts=0, liveMetalBuffers=0, ownedMetalBytes=0,
+                mappedMetalBytes=0, deviceAllocatedBytes=1_000_000, path="private", messages="private"))]
+        sample = analyze(data)["memoryAdmissions"][0]
+        self.assertEqual(sample["nativeMemory"]["liveMetalBuffers"], 0)
+        self.assertEqual(sample["afterFootprintBytes"], 2_200_000_000)
+        self.assertNotIn("private", json.dumps(sample))
+        data["memoryAdmissions"][0]["nativeMemory"]["deviceAllocatedBytes"] = None
+        self.assertIsNone(analyze(data)["memoryAdmissions"][0]["nativeMemory"]["deviceAllocatedBytes"])
+        data["memoryAdmissions"][0]["nativeMemory"]["ownedMetalBytes"] = -1
+        with self.assertRaises(ValueError): analyze(data)
+
     def test_all_reference_positions_routing_and_greedy_must_agree(self):
         for key, value in (("positions", 3), ("sameGreedy", False), ("maximumAbsoluteError", .02),
                            ("relativeL2Error", .002), ("routingDigest", 20), ("routingDecisions", 319)):

@@ -91,4 +91,5 @@ public struct LESMemoryAdmission: Codable, Sendable {
     public let afterReclaim: ProcessFootprint?
     public let plan: LESMemoryPlan?
     public let failure: String?
+    public var nativeMemory: LESRuntimeMemory? = nil
 }

@@ -22,6 +22,7 @@ static output evaluate(int fd, const char * dir, bool metal, int depth, int step
     options.metal = metal; options.trace_routing = true; options.memory_ceiling_bytes = 5500000000ULL;
     flo_context * context = flo_open(fd, dir, options, nullptr, nullptr);
     if (!context) throw std::runtime_error(flo_last_error());
+    if (flo_snapshot(nullptr).live_contexts != 1) throw std::runtime_error("Missing live native context ownership");
     output out;
     try {
         const int32_t tokens[] = {1, 2, 3, 15, 4};
@@ -38,7 +39,11 @@ static output evaluate(int fd, const char * dir, bool metal, int depth, int step
         if (flo_decode(context, &first, 1, replay.data(), (int)replay.size()) || replay != out.logits[0])
             throw std::runtime_error("Reset did not restore the complete recurrent/KV state");
     } catch (...) { flo_close(context); throw; }
-    flo_close(context); return out;
+    flo_close(context);
+    const auto released = flo_snapshot(nullptr);
+    if (released.live_contexts || released.live_metal_buffers || released.owned_metal_bytes || released.mapped_metal_bytes)
+        throw std::runtime_error("Native context or buffer ownership survived close");
+    return out;
 }
 static double compare(const output & a, const output & b) {
     if (a.metrics.routing_digest != b.metrics.routing_digest || a.metrics.routing_decisions != b.metrics.routing_decisions)
@@ -124,7 +129,7 @@ int main(int argc, char ** argv) {
             {"metalExecutionVerified", false}, {"actualRoutingIdentical", true},
             {"invalidLookaheadRejected", true},
             {"verifiedDescriptorMetadata", true}, {"boundedPrivateLoaderErrors", true},
-            {"nativeLoaderCauseExported", true},
+            {"nativeLoaderCauseExported", true}, {"nativeOwnersReleasedAfterEachContext", true},
             {"resetBitwiseIdentical", true}, {"sameGreedy", true}, {"modelRequantized", false},
             {"gpuTimestampsAvailable", false},
             {"expertPayloadCopied", false}, {"positions", steps}, {"cpuLogits", cpu.logits}};

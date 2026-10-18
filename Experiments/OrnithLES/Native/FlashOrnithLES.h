@@ -13,6 +13,10 @@ typedef struct {
     uint64_t routing_digest, routing_decisions;
     uint64_t demand_hits, demand_misses;
     uint64_t timestamped_command_buffers;
+    // Process-global LES ownership. Mapped spans/device allocations are not
+    // physical footprint. Device bytes may include other app Metal users.
+    uint64_t live_contexts, live_metal_buffers, owned_metal_bytes, mapped_metal_bytes, device_allocated_bytes;
+    bool metal_device_observed;
 } flo_metrics;
 typedef struct {
     int32_t context_tokens, prefill_slots, cache_slots_per_layer;

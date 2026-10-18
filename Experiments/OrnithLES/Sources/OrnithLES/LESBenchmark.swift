@@ -91,15 +91,20 @@ public enum LESBenchmark {
                              pageCache: Bool = false, phase: String,
                              onAdmission: (LESMemoryAdmission) -> Void) throws -> LESMemoryPlan {
         let samples = reclaimIdleBuffers()
+        let nativeMemory = LESContext.runtimeMemory
         do {
+            guard nativeMemory.liveContexts == 0, nativeMemory.liveMetalBuffers == 0 else {
+                throw GGUFError.limit("Previous LES owner has not released its native buffers")
+            }
             guard let footprint = samples.1 else { throw GGUFError.limit("LES memory sample unavailable") }
             let result = try LESMemoryPlan(index: artifact.index, contextTokens: context, footprint: footprint,
                 lookaheadDepth: depth, pageCacheOnly: pageCache)
-            onAdmission(.init(phase: phase, beforeReclaim: samples.0, afterReclaim: samples.1, plan: result, failure: nil))
+            onAdmission(.init(phase: phase, beforeReclaim: samples.0, afterReclaim: samples.1, plan: result, failure: nil,
+                nativeMemory: nativeMemory))
             return result
         } catch {
             onAdmission(.init(phase: phase, beforeReclaim: samples.0, afterReclaim: samples.1, plan: nil,
-                failure: error.localizedDescription))
+                failure: error.localizedDescription, nativeMemory: nativeMemory))
             throw GGUFError.limit("\(phase): \(error.localizedDescription)")
         }
     }
@@ -121,6 +126,7 @@ public enum LESBenchmark {
         let memory = try plan(artifact, context: 128, depth: depth,
             phase: "numerics.prediction\(depth).prefill\(prefillBatch)", onAdmission: onAdmission)
         let context = try LESContext(artifact: artifact, prepared: prepared, plan: memory, control: control, traceRouting: true)
+        defer { context.close() }
         var logits: [Float] = []
         for first in stride(from: 0, to: replay.prompt.count, by: prefillBatch) {
             logits = try context.logits(tokens: Array(replay.prompt[first..<min(first + prefillBatch, replay.prompt.count)]))
@@ -179,7 +185,7 @@ public enum LESBenchmark {
         if backend == .existingGGUF {
             let samples = reclaimIdleBuffers()
             onAdmission(.init(phase: "benchmark.existingGGUF", beforeReclaim: samples.0,
-                afterReclaim: samples.1, plan: nil, failure: nil))
+                afterReclaim: samples.1, plan: nil, failure: nil, nativeMemory: LESContext.runtimeMemory))
             nativePlan = nil
         } else {
             nativePlan = try plan(artifact, context: 4096, depth: backend == .omniLookahead ? 4 : 0,
@@ -190,6 +196,7 @@ public enum LESBenchmark {
         }
         var original: GGUFStreamedDecoder?
         var native: LESContext?
+        defer { native?.close() }
         if let nativePlan { native = try LESContext(artifact: artifact, prepared: prepared, plan: nativePlan, control: control) }
         else {
             original = try GGUFStreamedDecoder(artifact: artifact, contextTokens: 4096, budgetBytes: 5_500_000_000,

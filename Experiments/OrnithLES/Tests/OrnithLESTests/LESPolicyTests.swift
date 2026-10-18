@@ -144,6 +144,8 @@ final class LESPolicyTests: XCTestCase {
         print("ORNITH_PREPARATION_ADMISSION phaseCaptured=true beforeAndAfterCaptured=true syntheticOnly=true")
         let plan = try LESMemoryPlan(index: artifact.index, contextTokens: 32, footprint: XCTUnwrap(ProcessFootprint.current()))
         let candidate = try LESContext(artifact: artifact, prepared: prepared, plan: plan, control: control, syntheticCPUControl: true)
+        defer { candidate.close() }
+        XCTAssertEqual(LESContext.runtimeMemory.liveContexts, 1)
         for (index, token) in [1, 2].enumerated() {
             let actual = try candidate.logits(tokens: [token])
             XCTAssertEqual(actual.count, expected[index].count)
@@ -151,5 +153,27 @@ final class LESPolicyTests: XCTestCase {
         }
         try artifact.assertUnchanged()
         XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent("synthetic.gguf")), data)
+        candidate.close(); candidate.close()
+        XCTAssertThrowsError(try candidate.logits(tokens: [1]))
+        // Keep the Swift wrapper alive while admitting its next native owner.
+        // ARC scope or an outer autorelease pool must not govern this boundary.
+        for _ in 0..<3 {
+            XCTAssertEqual(LESContext.runtimeMemory.liveContexts, 0)
+            XCTAssertEqual(LESContext.runtimeMemory.liveMetalBuffers, 0)
+            let next = try LESContext(artifact: artifact, prepared: prepared, plan: plan,
+                control: control, syntheticCPUControl: true)
+            defer { next.close() }
+            XCTAssertEqual(LESContext.runtimeMemory.liveContexts, 1)
+            let logits = try next.logits(tokens: [1])
+            XCTAssertLessThanOrEqual(zip(logits, expected[0]).map { abs($0 - $1) }.max() ?? .infinity, 0.01)
+            next.close()
+        }
+        withExtendedLifetime(candidate) {
+            XCTAssertEqual(LESContext.runtimeMemory.liveContexts, 0)
+            XCTAssertEqual(LESContext.runtimeMemory.liveMetalBuffers, 0)
+            XCTAssertEqual(LESContext.runtimeMemory.ownedMetalBytes, 0)
+            XCTAssertEqual(LESContext.runtimeMemory.mappedMetalBytes, 0)
+        }
+        print("ORNITH_NATIVE_LIFETIME explicitClose=true wrapperStillAlive=true repeatedOwners=3 noLiveBuffers=true syntheticOnly=true")
     }
 }

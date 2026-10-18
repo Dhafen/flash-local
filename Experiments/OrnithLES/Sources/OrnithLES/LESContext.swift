@@ -42,12 +42,24 @@ public struct LESMetrics: Codable, Sendable, Equatable {
     }
 }
 
+/// Ownership counters are separate from process footprint: a mapped file span
+/// is not resident RAM, and device allocation includes other Metal backends.
+public struct LESRuntimeMemory: Codable, Sendable, Equatable {
+    public let liveContexts, liveMetalBuffers, ownedMetalBytes, mappedMetalBytes: UInt64
+    public let deviceAllocatedBytes: UInt64?
+    init(_ value: flo_metrics) {
+        liveContexts = value.live_contexts; liveMetalBuffers = value.live_metal_buffers
+        ownedMetalBytes = value.owned_metal_bytes; mappedMetalBytes = value.mapped_metal_bytes
+        deviceAllocatedBytes = value.metal_device_observed ? value.device_allocated_bytes : nil
+    }
+}
+
 /// Confine to one serial inference executor. Its C runtime enforces a single
 /// owner and is symbol-isolated from the existing tokenizer/CPU reference.
 public final class LESContext {
     private let artifact: VerifiedGGUFArtifact
     private let control: LESControl
-    private let handle: OpaquePointer
+    private var handle: OpaquePointer?
     public let vocabularySize: Int
     public let plan: LESMemoryPlan
     public init(artifact: VerifiedGGUFArtifact, prepared: URL, plan: LESMemoryPlan,
@@ -76,9 +88,18 @@ public final class LESContext {
         do { try artifact.assertUnchanged() } catch { flo_close(handle); throw error }
         self.handle = handle; vocabularySize = Int(flo_vocabulary_size(handle))
     }
-    deinit { flo_close(handle) }
+    deinit { close() }
+    /// End native ownership at a phase boundary, regardless of ARC lifetime
+    /// extension. Idempotent, on the same serial executor as inference.
+    public func close() {
+        guard let handle else { return }
+        self.handle = nil
+        flo_close(handle)
+    }
+    public static var runtimeMemory: LESRuntimeMemory { LESRuntimeMemory(flo_snapshot(nil)) }
     public func logits(tokens: [Int]) throws -> [Float] {
         try artifact.assertUnchanged()
+        guard let handle else { throw GGUFError.invalid("LES context is closed") }
         guard !tokens.isEmpty, tokens.count <= 32, tokens.allSatisfy({ (0..<vocabularySize).contains($0) }),
               !control.shouldAbort() else { throw CancellationError() }
         let ids = tokens.map(Int32.init)

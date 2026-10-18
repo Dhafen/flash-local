@@ -38,7 +38,8 @@ def main():
                         '-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY',
                         '-DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO']
                 run(command)
-                targets = ['FlashOrnithLES'] + (['ornith-les-control', 'ornith-les-mixed-fixture', 'ornith-les-header-control'] if name == 'macos' else [])
+                targets = ['FlashOrnithLES'] + (['ornith-les-control', 'ornith-les-mixed-fixture', 'ornith-les-header-control',
+                    'ornith-les-allocation-control'] if name == 'macos' else [])
                 run(['cmake', '--build', build, '--config', 'Release', '--target', *targets, '--parallel', '3'])
                 # Xcode also creates an EagerLinkingTBDs .framework directory
                 # containing only a text stub. Select an actual Mach-O product.
