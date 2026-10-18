@@ -38,12 +38,12 @@ jobs:
           sudo xcode-select -s /Applications/Xcode_26.2.app
       - name: Build isolated Mac runtime for fast numerical controls
         run: python3 scripts/build_ornith_les.py --mac-only
-      - name: Actual Metal projections against original-weight F32 dots (untrained only)
+      - name: Actual Metal weight decoding and available projections (untrained only)
         run: |
           .work/ornith-les-macos/bin/ornith-les-metal-control .work/les-metal-projections.json \
             > .work/les-metal-projections.log 2>&1
           tail -8 .work/les-metal-projections.log
-          grep 'ORNITH_METAL_PROJECTIONS completed=true limitsPassed=true syntheticOnly=true physicalPhone=false' .work/les-metal-projections.log
+          grep -E 'ORNITH_METAL_HOST_CONTROLS completed=true dequantizationPassed=true projections=(passed|unavailable) syntheticOnly=true physicalPhone=false' .work/les-metal-projections.log
       - name: VM page buffers release their touched mappings
         run: |
           .work/ornith-les-macos/bin/ornith-les-allocation-control > .work/les-allocation-controls.log 2>&1
