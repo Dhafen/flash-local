@@ -24,6 +24,7 @@ struct flr_context {
     int32_t vocabulary = 0, position = 0, limit = 0;
     bool poisoned = false, checkpoint_failed = false;
     std::string checkpoint_error;
+    std::string last_checkpoint;
     ~flr_context() {
         if (context) llama_free(context);
         if (model) llama_model_free(model);
@@ -193,6 +194,12 @@ static flr_context * create_reference(int descriptor, int32_t context_tokens, fl
                 auto * owner = static_cast<flr_context *>(user);
                 const bool valid = flash_local_checkpoint::emit(tensor, owner->checkpoint, owner->checkpoint_user,
                     &owner->checkpoint_error);
+                // Only fixed, fully parsed names admitted by identify() reach
+                // here. No arbitrary model names, tensor data or paths.
+                const std::string current = std::string(ggml_get_name(tensor)) +
+                    " op=" + std::to_string(tensor->op);
+                if (!valid) owner->checkpoint_error += "; previous=" + owner->last_checkpoint + "; current=" + current;
+                else owner->last_checkpoint = current;
                 owner->checkpoint_failed = owner->checkpoint_failed || !valid;
                 return valid;
             };

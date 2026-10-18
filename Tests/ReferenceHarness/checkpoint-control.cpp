@@ -57,7 +57,7 @@ int main(int argc, char ** argv) {
         t.points.clear(); t.bytes = 0;
         std::vector<float> row(size);
         if (flr_step(observed, tokens[step], row.data(), size) != size) {
-            std::cerr << flr_last_error() << " " << t.failure << '\n'; flr_free(observed); return 8;
+            std::cerr << flr_last_error() << " " << t.failure << " step=" << step << '\n'; flr_free(observed); return 8;
         }
         if (row != expected[step] || t.points.size() <= 20) {
             std::cerr << "Checkpoint replay differs or is incomplete\n"; flr_free(observed); return 9;
