@@ -15,6 +15,7 @@
 #include <stdexcept>
 #include <array>
 #include <cstring>
+#include <set>
 namespace fs = std::filesystem;
 using json = nlohmann::json;
 struct output { std::vector<std::vector<float>> logits; std::vector<int> positions; flo_metrics metrics; };
@@ -58,12 +59,37 @@ static void routing_trace_control() {
         throw std::runtime_error("Invalid top-k tensor geometry accepted");
     std::cout << "ORNITH_ROUTING_TRACE paddedRows=true batchOrderIndependent=true changedExpertDetected=true invalidInputAtomic=true\n";
 }
-static output evaluate(int fd, const char * dir, bool metal, int depth, int steps, int cache = 8, int prefill = 0) {
+struct layer_trace {
+    std::set<uint64_t> points, expected;
+    size_t bytes = 0;
+    static uint64_t key(uint32_t stage, int32_t layer) { return uint64_t(stage) << 32 | uint32_t(layer); }
+    layer_trace() {
+        // All generated native controls have four main layers and one unused
+        // MTP block. Check the whole diagnostic contract before Swift builds.
+        for (uint32_t stage : {2u, 5u, 6u, 7u, 8u})
+            for (int layer = 0; layer < 4; ++layer) expected.insert(key(stage, layer));
+        for (uint64_t id : {key(1, -1), key(3, 0), key(4, 0), key(9, -1), key(10, 0)}) expected.insert(id);
+    }
+    void reset() { points.clear(); bytes = 0; }
+    static bool capture(uint32_t stage, int32_t layer, const float * values, int32_t count, void * user) {
+        auto & t = *static_cast<layer_trace *>(user);
+        const auto id = key(stage, layer);
+        if (!values || count < 1 || count > 16384 || t.bytes + size_t(count) * 4 > (4u << 20) ||
+            !t.expected.count(id) || !t.points.insert(id).second) return false;
+        t.bytes += size_t(count) * 4;
+        return true;
+    }
+};
+static output evaluate(int fd, const char * dir, bool metal, int depth, int steps, int cache = 8, int prefill = 0,
+                       bool trace_layers = false) {
+    if (trace_layers && prefill) throw std::runtime_error("Layer controls use single-token forwards");
+    layer_trace trace;
     flo_options options{};
     options.context_tokens = steps > 5 ? 256 : 32; options.prefill_slots = prefill > 0 ? 32 : 16;
     options.cache_slots_per_layer = cache;
     options.lookahead_depth = depth; options.io_threads = 2; options.cpu_threads = 2;
     options.metal = metal; options.trace_routing = true; options.memory_ceiling_bytes = 5500000000ULL;
+    if (trace_layers) { options.checkpoint = layer_trace::capture; options.checkpoint_user = &trace; }
     flo_context * context = flo_open(fd, dir, options, nullptr, nullptr);
     if (!context) throw std::runtime_error(flo_last_error());
     if (flo_snapshot(nullptr).live_contexts != 1) throw std::runtime_error("Missing live native context ownership");
@@ -75,7 +101,9 @@ static output evaluate(int fd, const char * dir, bool metal, int depth, int step
             int32_t chunk[4]{};
             for (int i = 0; i < count; ++i) chunk[i] = tokens[(first + i) % 5];
             std::vector<float> row(flo_vocabulary_size(context));
+            trace.reset();
             if (flo_decode(context, chunk, count, row.data(), (int)row.size())) throw std::runtime_error(flo_last_error());
+            if (trace_layers && trace.points != trace.expected) throw std::runtime_error("Incomplete native semantic layer trace");
             out.logits.push_back(row);
             first += count; out.positions.push_back(first - 1);
         }
@@ -84,8 +112,10 @@ static output evaluate(int fd, const char * dir, bool metal, int depth, int step
         flo_reset(context);
         const int first_count = prefill > 0 ? std::min(4, prefill) : 1;
         std::vector<float> replay(out.logits[0].size());
+        trace.reset();
         if (flo_decode(context, tokens, first_count, replay.data(), (int)replay.size()) || replay != out.logits[0])
             throw std::runtime_error("Reset did not restore the complete recurrent/KV state");
+        if (trace_layers && trace.points != trace.expected) throw std::runtime_error("Reset lost native semantic layer trace");
     } catch (...) { flo_close(context); throw; }
     flo_close(context);
     const auto released = flo_snapshot(nullptr);
@@ -173,6 +203,9 @@ int main(int argc, char ** argv) {
         }
         if (!invalid_depth_rejected) throw std::runtime_error("Invalid lookahead was not rejected before graph construction");
         const auto cpu = evaluate(fd, nullptr, false, 0, steps);
+        const auto observed = evaluate(fd, dir.c_str(), false, 0, steps, 8, 0, true);
+        const double layer_error = compare(cpu, observed);
+        if (layer_error > 1e-6) throw std::runtime_error("Layer observation changed native control logits");
         const auto streamed = evaluate(fd, dir.c_str(), false, 0, steps);
         const auto ahead = evaluate(fd, dir.c_str(), false, 2, steps);
         const auto page = evaluate(fd, dir.c_str(), false, 0, steps, 0);
@@ -197,6 +230,7 @@ int main(int argc, char ** argv) {
             {"verifiedDescriptorMetadata", true}, {"boundedPrivateLoaderErrors", true},
             {"nativeLoaderCauseExported", true}, {"nativeOwnersReleasedAfterEachContext", true},
             {"canonicalBatchedRoutingIdentical", true}, {"batchPrefillTokens", 4},
+            {"completeLayerCheckpointTrace", true}, {"layerCheckpointMaximumAbsoluteError", layer_error},
             {"batchPrefixLengths", prefixes}, {"batchedPrefillMaximumAbsoluteError", batch_error},
             {"resetBitwiseIdentical", true}, {"sameGreedy", true}, {"modelRequantized", false},
             {"gpuTimestampsAvailable", false},
@@ -206,6 +240,8 @@ int main(int argc, char ** argv) {
                   << " routing=true reset=true noRequantization=true noExpertCopy=true syntheticOnly=true\n";
         std::cout << "ORNITH_BATCH_CONTROL prefixCases=" << prefixes.size() << " steps=" << steps
                   << " maxAbs=" << batch_error << " canonicalRouting=true reset=true syntheticOnly=true\n";
+        std::cout << "ORNITH_LAYER_CONTROL mainLayers=4 complete=true rawDeltaNetDistinct=true finalLayerMatched=true maxAbs="
+                  << layer_error << " syntheticOnly=true\n";
         return 0;
     } catch (const std::exception & e) { std::cerr << e.what() << '\n'; return 1; }
 }

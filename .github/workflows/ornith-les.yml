@@ -82,6 +82,9 @@ jobs:
           tail -8 .work/les-top8-controls.log
           grep 'ORNITH_ROUTING_TRACE paddedRows=true batchOrderIndependent=true changedExpertDetected=true invalidInputAtomic=true' .work/les-top8-controls.log
           grep 'ORNITH_BATCH_CONTROL prefixCases=11 steps=128 .*canonicalRouting=true reset=true syntheticOnly=true' .work/les-top8-controls.log
+          for log in .work/les-controls.log .work/les-mixed-controls.log .work/les-top8-controls.log; do
+            grep 'ORNITH_LAYER_CONTROL mainLayers=4 complete=true rawDeltaNetDistinct=true finalLayerMatched=true ' "$log"
+          done
       - name: Compare both complete synthetic graphs with the existing pinned CPU reference
         run: |
           python3 scripts/run_ornith_les_reference.py

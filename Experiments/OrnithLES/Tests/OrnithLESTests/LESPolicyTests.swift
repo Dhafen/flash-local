@@ -193,9 +193,13 @@ final class LESPolicyTests: XCTestCase {
             let actual = try candidate.logits(tokens: [token])
             XCTAssertEqual(actual.count, expected[index].count)
             XCTAssertLessThanOrEqual(zip(actual, expected[index]).map { abs($0 - $1) }.max() ?? .infinity, 0.01)
-            try layers.compare(referencePoints[index], collector.take(), position: index)
+            let actualPoints = try collector.take()
+            XCTAssertEqual(Set(actualPoints.map(\.key)), Set(referencePoints[index].map(\.key)),
+                "Both runtimes must expose the same semantic checkpoints at position \(index)")
+            try layers.compare(referencePoints[index], actualPoints, position: index)
         }
-        XCTAssertTrue(layers.result.complete)
+        XCTAssertTrue(layers.result.complete,
+            "Missing points: \(layers.result.missingPoints); shape mismatches: \(layers.result.shapeMismatches)")
         XCTAssertGreaterThan(layers.result.comparedPoints, 20)
         XCTAssertLessThan(layers.result.maximumAbsoluteError, 1e-6)
         XCTAssertNil(layers.result.firstDivergence)

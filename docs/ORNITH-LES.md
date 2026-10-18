@@ -321,7 +321,11 @@ embedding, attention, FFN and layer outputs; detailed QKV/convolution points
 are limited to layer zero. The raw layer-zero DeltaNet result (stage 10)
 is distinct from the final attention projection (stage 5): the upstream
 base class and model graph reuse `attn_output` for different operations.
-No point is silently overwritten or accepted as a duplicate. Only scalar errors, missing/shape counts and the
+No point is silently overwritten or accepted as a duplicate. The newer
+graph's `h_pre_norm` alias maps to the actual last main-layer output, excluding
+the stored MTP block. Early native controls require all 25 semantic points
+in each generated four-layer forward and after reset, alongside unchanged
+full-vocabulary logits. Only scalar errors, missing/shape counts and the
 first divergent position/stage/layer are exported. Raw activation vectors
 remain ephemeral. A first-layer, 16-row matched-input probe compares observed
 and ordinary CPU results independently with a dequantized-weight double-dot

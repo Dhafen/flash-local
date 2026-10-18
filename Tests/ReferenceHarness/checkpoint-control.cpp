@@ -36,6 +36,8 @@ int main(int argc, char ** argv) {
     using flash_local_checkpoint::identify;
     if (identify("attn_output-0").stage != 10 || identify("linear_attn_out-0").stage != 5 ||
         identify("attn_output-3").stage != 5 || identify("attn_output-1").stage != 0 ||
+        identify("h_pre_norm", 3).stage != 8 || identify("h_pre_norm", 3).layer != 3 ||
+        identify("h_pre_norm").stage != 0 || identify("h_pre_norm", 40).stage != 0 ||
         identify("linear_attn_out-0 (reshaped)").stage != 0) return 10;
     const int fd = open(argv[1], O_RDONLY);
     if (fd < 0) return 3;

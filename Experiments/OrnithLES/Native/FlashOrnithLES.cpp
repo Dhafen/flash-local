@@ -273,17 +273,18 @@ flo_context * flo_open(int source, const char * directory, flo_options o, flo_ab
             cp.cb_eval = [](ggml_tensor * tensor, bool ask, void * data) {
                 auto * c = static_cast<flo_context *>(data);
                 const bool routed = std::string(ggml_get_name(tensor)).rfind("ffn_moe_topk-", 0) == 0;
-                const bool checkpoint = c->checkpoint && flash_local_checkpoint::identify(ggml_get_name(tensor)).stage != 0;
+                const int32_t final_layer = int32_t(c->model->hparams.n_layer) - int32_t(c->model->hparams.nextn_predict_layers) - 1;
+                const auto key = c->checkpoint ? flash_local_checkpoint::identify(ggml_get_name(tensor), final_layer) : flash_local_checkpoint::key{};
+                const bool checkpoint = key.stage != 0;
                 const bool selected = routed || checkpoint;
                 if (ask) return selected;
                 if (!selected) return true;
                 if (checkpoint) {
-                    const auto key = flash_local_checkpoint::identify(ggml_get_name(tensor));
                     if (c->position == 0 && key.stage == 3 && !c->projection_probe.samples) {
                         // Unsupported layouts remain explicitly unmeasured.
                         (void)c->projection_probe.run(tensor);
                     }
-                    const bool valid = flash_local_checkpoint::emit(tensor, c->checkpoint, c->checkpoint_user);
+                    const bool valid = flash_local_checkpoint::emit(tensor, c->checkpoint, c->checkpoint_user, nullptr, final_layer);
                     c->routing_failed = c->routing_failed || !valid;
                     return valid;
                 }

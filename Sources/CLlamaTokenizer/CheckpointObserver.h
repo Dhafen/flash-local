@@ -14,9 +14,12 @@
 // tensor names or activation arrays are serialized by this observer.
 namespace flash_local_checkpoint {
 struct key { uint32_t stage = 0; int32_t layer = -1; };
-inline key identify(std::string_view name) {
+inline key identify(std::string_view name, int32_t final_layer = -1) {
     if (name == "model.input_embed") return {1, -1};
     if (name == "result_norm") return {9, -1};
+    // The newer graph renames the last l_out tensor when exposing its MTP
+    // seed. The owner supplies the actual main-stack boundary, never MTP.
+    if (name == "h_pre_norm" && final_layer >= 0 && final_layer < 40) return {8, final_layer};
     const std::pair<std::string_view, uint32_t> prefixes[] = {
         {"attn_norm-", 2}, {"linear_attn_qkv_mixed-", 3}, {"conv_output_raw-", 4},
         {"linear_attn_out-", 5}, {"attn_output-", 5}, {"attn_post_norm-", 6},
@@ -39,8 +42,9 @@ inline key identify(std::string_view name) {
     return {};
 }
 template <typename Callback>
-inline bool emit(const ggml_tensor * tensor, Callback callback, void * user, std::string * failure = nullptr) {
-    const auto id = identify(ggml_get_name(tensor));
+inline bool emit(const ggml_tensor * tensor, Callback callback, void * user, std::string * failure = nullptr,
+                 int32_t final_layer = -1) {
+    const auto id = identify(ggml_get_name(tensor), final_layer);
     const auto count = ggml_nelements(tensor);
     const auto reject = [&](const char * reason) {
         if (failure) *failure = "Layer checkpoint stage=" + std::to_string(id.stage) +
