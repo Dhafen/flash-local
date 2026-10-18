@@ -77,10 +77,17 @@ struct LESCheckpointAccumulator {
         missing += candidate.count
     }
     var result: LESCheckpointComparison {
-        let layers = sums.values.map {
-            LESCheckpointDifference(stage: $0.stage, layer: $0.layer, positions: $0.positions,
-                maximumAbsoluteError: $0.absolute, relativeL2Error: sqrt($0.squared / max($0.reference, 1e-30)))
-        }.sorted { $0.layer == $1.layer ? $0.stage < $1.stage : $0.layer < $1.layer }
+        var layers: [LESCheckpointDifference] = []
+        for sum in sums.values {
+            let relative = sqrt(sum.squared / max(sum.reference, 1e-30))
+            let difference = LESCheckpointDifference(stage: sum.stage, layer: sum.layer,
+                positions: sum.positions, maximumAbsoluteError: sum.absolute, relativeL2Error: relative)
+            layers.append(difference)
+        }
+        layers.sort { left, right in
+            if left.layer != right.layer { return left.layer < right.layer }
+            return left.stage < right.stage
+        }
         return LESCheckpointComparison(comparedPoints: compared, missingPoints: missing, shapeMismatches: mismatched,
             maximumAbsoluteError: sums.values.map(\.absolute).max() ?? 0,
             relativeL2Error: sqrt(sums.values.reduce(0) { $0 + $1.squared } / max(sums.values.reduce(0) { $0 + $1.reference }, 1e-30)),
