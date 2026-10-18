@@ -86,6 +86,7 @@ jobs:
         run: |
           python3 scripts/run_ornith_les_reference.py
           grep 'ORNITH_PROJECTION_PROBE matchedInput=true cpuRoundingDistinguished=true changedResultDetected=true syntheticOnly=true gpuExecuted=false' .work/les-reference.log
+          test "$(grep -c 'ORNITH_CHECKPOINT_REFERENCE wrapperTrace=true exactLogits=true steps=5 ' .work/les-reference.log)" = 2
       - name: Both thinking modes against the pinned Ornith template
         run: |
           python3 scripts/make_tokenizer_reference_fixture.py --ornith

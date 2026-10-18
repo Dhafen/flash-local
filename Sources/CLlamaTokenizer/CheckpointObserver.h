@@ -5,6 +5,7 @@
 #include <charconv>
 #include <cmath>
 #include <cstdint>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -32,14 +33,21 @@ inline key identify(std::string_view name) {
     return {};
 }
 template <typename Callback>
-inline bool emit(const ggml_tensor * tensor, Callback callback, void * user) {
+inline bool emit(const ggml_tensor * tensor, Callback callback, void * user, std::string * failure = nullptr) {
     const auto id = identify(ggml_get_name(tensor));
     const auto count = ggml_nelements(tensor);
-    if (!id.stage || tensor->type != GGML_TYPE_F32 || !ggml_is_contiguous(tensor) ||
-        count < 1 || count > 16384) return false;
+    const auto reject = [&](const char * reason) {
+        if (failure) *failure = "Layer checkpoint stage=" + std::to_string(id.stage) +
+            " layer=" + std::to_string(id.layer) + " rejected: " + reason;
+        return false;
+    };
+    if (!id.stage || tensor->type != GGML_TYPE_F32) return reject("tensor type");
+    if (!ggml_is_contiguous(tensor)) return reject("tensor layout");
+    if (count < 1 || count > 16384) return reject("tensor size");
     std::vector<float> values(static_cast<size_t>(count));
     ggml_backend_tensor_get(tensor, values.data(), 0, values.size() * sizeof(float));
-    if (!std::all_of(values.begin(), values.end(), [](float value) { return std::isfinite(value); })) return false;
-    return callback(id.stage, id.layer, values.data(), int32_t(count), user);
+    if (!std::all_of(values.begin(), values.end(), [](float value) { return std::isfinite(value); })) return reject("nonfinite value");
+    if (!callback(id.stage, id.layer, values.data(), int32_t(count), user)) return reject("collector callback");
+    return true;
 }
 }

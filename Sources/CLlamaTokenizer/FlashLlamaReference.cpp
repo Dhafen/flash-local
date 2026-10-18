@@ -23,6 +23,7 @@ struct flr_context {
     void * checkpoint_user = nullptr;
     int32_t vocabulary = 0, position = 0, limit = 0;
     bool poisoned = false, checkpoint_failed = false;
+    std::string checkpoint_error;
     ~flr_context() {
         if (context) llama_free(context);
         if (model) llama_model_free(model);
@@ -190,7 +191,8 @@ static flr_context * create_reference(int descriptor, int32_t context_tokens, fl
                 if (ask) return selected;
                 if (!selected) return true;
                 auto * owner = static_cast<flr_context *>(user);
-                const bool valid = flash_local_checkpoint::emit(tensor, owner->checkpoint, owner->checkpoint_user);
+                const bool valid = flash_local_checkpoint::emit(tensor, owner->checkpoint, owner->checkpoint_user,
+                    &owner->checkpoint_error);
                 owner->checkpoint_failed = owner->checkpoint_failed || !valid;
                 return valid;
             };
@@ -222,7 +224,8 @@ int32_t flr_step(flr_context * value, int32_t token, float * output, int32_t cap
         value->poisoned = true;
         if (aborted(value) || llama_decode(value->context, llama_batch_get_one(&token, 1)) ||
             value->checkpoint_failed || aborted(value)) {
-            reference_error = "CPU decode failed or governor stopped it"; return -1;
+            reference_error = value->checkpoint_failed ? value->checkpoint_error : "CPU decode failed or governor stopped it";
+            return -1;
         }
         const float * logits = llama_get_logits_ith(value->context, -1);
         if (!logits || !std::all_of(logits, logits + value->vocabulary, [](float x) { return std::isfinite(x); })) {

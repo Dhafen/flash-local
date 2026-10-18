@@ -19,13 +19,15 @@ def main():
             run(['cmake', '-S', root/'Tests/ReferenceHarness', '-B', build, f'-DLLAMA_SOURCE={source}',
                 '-DCMAKE_BUILD_TYPE=Release', '-DCMAKE_OSX_ARCHITECTURES=arm64', '-DGGML_NATIVE=OFF',
                 '-DGGML_CPU_ARM_ARCH=armv8-a', '-DGGML_ACCELERATE=OFF', '-DGGML_CPU_KLEIDIAI=OFF', '-DGGML_LLAMAFILE=OFF'])
-            run(['cmake', '--build', build, '--target', 'flash-local-reference', 'flash-local-projection-probe-control', '--parallel', '3'])
+            run(['cmake', '--build', build, '--target', 'flash-local-reference', 'flash-local-projection-probe-control',
+                'flash-local-checkpoint-control', '--parallel', '3'])
             run([build/'flash-local-projection-probe-control'])
             for mixed in [False, True]:
                 suffix = '-mixed' if mixed else ''
                 model = root/'.test-fixtures'/f'synthetic-ornith{suffix}.gguf'
                 if model.stat().st_size > 32 << 20:
                     raise ValueError('Only bounded generated random fixtures may run')
+                run([build/'flash-local-checkpoint-control', model])
                 oracle = work/f'les-oracle{suffix}.json'
                 run([build/'flash-local-reference', model, oracle])
                 expected = json.loads(oracle.read_text())['logits']
