@@ -32,7 +32,8 @@ public struct LESNumericalCheck: Codable, Sendable {
     public let noLookahead: LESLogitComparison
     public let lookahead: LESLogitComparison
     public let batchedPrefill: LESLogitComparison
-    public var referenceCheckpointPayloadBytes: Int? = nil
+    public var diagnostics: LESNumericalDiagnostics? = nil
+    public var diagnosticsUnavailable: Bool? = nil
     public let fullModelNumericsVerified = false
     public var canonicalBatchedRoutingVerified: Bool {
         noLookahead.canonicalRoutingDigest != nil &&
@@ -96,6 +97,20 @@ public enum LESBenchmark {
         guard !values.isEmpty, values.allSatisfy(\.isFinite) else { throw GGUFError.invalid("Non-finite benchmark logits") }
         return values.indices.max { values[$0] < values[$1] }!
     }
+    private static func observerEffect(_ before: [[Float]], _ after: [[Float]]) throws -> LESLogitComparison {
+        guard before.count == 4, after.count == 4 else { throw GGUFError.invalid("Incomplete observer comparison") }
+        var absolute = 0.0, squared = 0.0, reference = 0.0, same = true
+        for (a, b) in zip(before, after) {
+            guard a.count == b.count else { throw GGUFError.invalid("Observer vocabulary shape") }
+            same = try same && greedy(a) == greedy(b)
+            for (x, y) in zip(a, b) {
+                let d = Double(x) - Double(y)
+                absolute = max(absolute, abs(d)); squared += d * d; reference += Double(x) * Double(x)
+            }
+        }
+        return LESLogitComparison(positions: 4, maximumAbsoluteError: absolute,
+            relativeL2Error: sqrt(squared / max(reference, 1e-30)), sameGreedy: same)
+    }
     private static func reclaimIdleBuffers() -> (ProcessFootprint?, ProcessFootprint?) {
         let before = ProcessFootprint.current()
         // Called only after the preceding inference owner and its autorelease
@@ -125,14 +140,17 @@ public enum LESBenchmark {
             throw GGUFError.limit("\(phase): \(error.localizedDescription)")
         }
     }
-    private static func reference(artifact: VerifiedGGUFArtifact, prompt: [Int], control: LESControl) throws -> Replay {
-        let collector = GGUFCheckpointCollector()
+    private static func reference(artifact: VerifiedGGUFArtifact, prompt: [Int], control: LESControl,
+                                  traceLayers: Bool = false, forcedTokens: [Int]? = nil) throws -> Replay {
+        guard forcedTokens == nil || forcedTokens?.count == 3 else { throw GGUFError.invalid("Diagnostic forced sequence length") }
+        let collector = traceLayers ? GGUFCheckpointCollector() : nil
         let context = try Qwen4ExpCPUReference(artifact: artifact, contextTokens: 128, budgetBytes: 5_500_000_000,
             checkpoints: collector,
             cancellationRequested: { control.shouldAbort() })
         var logits: [Float] = []
         var checkpoints: [[GGUFCheckpoint]] = [], checkpointBytes = 0
         func capture() throws {
+            guard let collector else { return }
             let step = try collector.take()
             let bytes = step.reduce(0) { $0 + $1.values.count * 4 }
             guard checkpointBytes <= (64 << 20) - bytes else { throw GGUFError.limit("Reference layer trace exceeds 64 MiB") }
@@ -140,18 +158,22 @@ public enum LESBenchmark {
         }
         for token in prompt { logits = try context.logits(for: token); try capture() }
         var vectors = [logits], forced: [Int] = []
-        for _ in 0..<3 {
-            let token = try greedy(logits); forced.append(token)
+        for index in 0..<3 {
+            let token: Int
+            if let forcedTokens { token = forcedTokens[index] } else { token = try greedy(logits) }
+            forced.append(token)
             logits = try context.logits(for: token); vectors.append(logits); try capture()
         }
         return Replay(prompt: prompt, forced: forced, logits: vectors, checkpoints: checkpoints)
     }
     private static func compare(_ replay: Replay, artifact: VerifiedGGUFArtifact, prepared: URL,
-                                depth: Int, prefillBatch: Int = 1, control: LESControl,
-                                onAdmission: (LESMemoryAdmission) -> Void) throws -> LESLogitComparison {
+                                depth: Int, prefillBatch: Int = 1, traceLayers: Bool = false,
+                                phase: String = "numerics", control: LESControl,
+                                onAdmission: (LESMemoryAdmission) -> Void,
+                                recordLogits: (([Float]) -> Void)? = nil) throws -> LESLogitComparison {
         let memory = try plan(artifact, context: 128, depth: depth,
-            phase: "numerics.prediction\(depth).prefill\(prefillBatch)", onAdmission: onAdmission)
-        let collector = prefillBatch == 1 ? GGUFCheckpointCollector() : nil
+            phase: "\(phase).prediction\(depth).prefill\(prefillBatch)", onAdmission: onAdmission)
+        let collector = traceLayers && prefillBatch == 1 ? GGUFCheckpointCollector() : nil
         let context = try LESContext(artifact: artifact, prepared: prepared, plan: memory, control: control,
             traceRouting: true, checkpoints: collector)
         defer { context.close() }
@@ -171,6 +193,7 @@ public enum LESBenchmark {
                 }
             }
             let expected = replay.logits[position]
+            recordLogits?(logits)
             guard logits.count == expected.count else { throw GGUFError.invalid("LES reference vocabulary shape") }
             same = try same && greedy(logits) == greedy(expected)
             for (a, b) in zip(logits, expected) {
@@ -195,18 +218,49 @@ public enum LESBenchmark {
         progress("Jämför hela modellgrafen med CPU-referensen…")
         let replay = try autoreleasepool { try reference(artifact: artifact, prompt: tokens, control: control) }
         progress("Kontrollerar LES utan förläsning…")
+        var unobserved: [[Float]] = []
         let off = try autoreleasepool { try compare(replay, artifact: artifact, prepared: prepared, depth: 0,
-            control: control, onAdmission: onAdmission) }
+            control: control, onAdmission: onAdmission, recordLogits: { unobserved.append($0) }) }
         progress("Kontrollerar LES med förläsning…")
         let on = try autoreleasepool { try compare(replay, artifact: artifact, prepared: prepared, depth: 4,
             control: control, onAdmission: onAdmission) }
         progress("Kontrollerar batchad promptbearbetning…")
         let batch = try autoreleasepool { try compare(replay, artifact: artifact, prepared: prepared, depth: 0,
             prefillBatch: 4, control: control, onAdmission: onAdmission) }
-        return LESNumericalCheck(modelSHA256: artifact.manifest.sha256,
+        var result = LESNumericalCheck(modelSHA256: artifact.manifest.sha256,
             referenceRevision: Qwen4ExpCPUReference.sourceRevision, nativeRevision: LESContext.revision,
-            noLookahead: off, lookahead: on, batchedPrefill: batch,
-            referenceCheckpointPayloadBytes: replay.checkpoints.reduce(0) { $0 + $1.reduce(0) { $0 + $1.values.count * 4 } })
+            noLookahead: off, lookahead: on, batchedPrefill: batch)
+        if !result.passed {
+            // Observation can alter backend fusion. It is never the run that
+            // admits timing; retain the original failed gate unchanged.
+            progress("Lokaliserar avvikelsen med separat lagerdiagnostik…")
+            do {
+                let diagnosticReplay = try autoreleasepool {
+                    try reference(artifact: artifact, prompt: tokens, control: control, traceLayers: true, forcedTokens: replay.forced)
+                }
+                var observed: [[Float]] = []
+                let comparison = try autoreleasepool {
+                    try compare(diagnosticReplay, artifact: artifact, prepared: prepared, depth: 0,
+                        traceLayers: true, phase: "diagnostics", control: control, onAdmission: onAdmission,
+                        recordLogits: { observed.append($0) })
+                }
+                let nativeEffect = try observerEffect(unobserved, observed)
+                let referenceEffect = try observerEffect(replay.logits, diagnosticReplay.logits)
+                result.diagnostics = LESNumericalDiagnostics(instrumentedComparison: comparison,
+                    instrumentationMaximumAbsoluteError: nativeEffect.maximumAbsoluteError,
+                    instrumentationRelativeL2Error: nativeEffect.relativeL2Error,
+                    instrumentationSameGreedy: nativeEffect.sameGreedy,
+                    referenceInstrumentationMaximumAbsoluteError: referenceEffect.maximumAbsoluteError,
+                    referenceInstrumentationRelativeL2Error: referenceEffect.relativeL2Error,
+                    referenceInstrumentationSameGreedy: referenceEffect.sameGreedy,
+                    referenceCheckpointPayloadBytes: diagnosticReplay.checkpoints.reduce(0) { $0 + $1.reduce(0) { $0 + $1.values.count * 4 } })
+            } catch {
+                // Preserve the complete original numerical failure even when
+                // extra diagnostics cannot fit or are unsupported/cancelled.
+                result.diagnosticsUnavailable = true
+            }
+        }
+        return result
     }
 
     /// Fresh state on every run. Two runs on the same engine distinguish an

@@ -329,6 +329,13 @@ Timing runs do not enable either observer. Weights, top-8, ordinary chat,
 prepared file format and acceptance thresholds remain unchanged. New Apple
 validation and device evidence remain pending.
 
+The original CPU/native/prefill-four checks run without extra layer or
+projection observation. Only after their gate fails is a separate diagnostic
+replay performed, using the original fixed prompt and the same forced tokens.
+Both CPU and native logit changes caused by observation are measured. A good
+instrumented result cannot admit timing or replace the failed original check;
+an unavailable diagnostic still preserves the original failure report.
+
 The routing observer reads each top-8 row with the tensor's actual row
 stride. In this pinned ggml, top-k is a view of a full expert sort, so batched
 rows are not necessarily packed consecutively. The expert loader already

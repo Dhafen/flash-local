@@ -26,6 +26,16 @@ public struct LESCheckpointComparison: Codable, Sendable, Equatable {
     public let layers: [LESCheckpointDifference]
     public var complete: Bool { comparedPoints > 0 && missingPoints == 0 && shapeMismatches == 0 }
 }
+public struct LESNumericalDiagnostics: Codable, Sendable {
+    public let instrumentedComparison: LESLogitComparison
+    public let instrumentationMaximumAbsoluteError: Double
+    public let instrumentationRelativeL2Error: Double
+    public let instrumentationSameGreedy: Bool
+    public let referenceInstrumentationMaximumAbsoluteError: Double
+    public let referenceInstrumentationRelativeL2Error: Double
+    public let referenceInstrumentationSameGreedy: Bool
+    public let referenceCheckpointPayloadBytes: Int
+}
 
 // Diagnostic only: never weakens or replaces the full-vocabulary/routing gate.
 struct LESCheckpointAccumulator {

@@ -120,6 +120,7 @@ jobs:
           grep 'ORNITH_NATIVE_LIFETIME explicitClose=true wrapperStillAlive=true repeatedOwners=3 noLiveBuffers=true syntheticOnly=true' .work/les-swift-tests.log
           grep 'ORNITH_CANONICAL_ROUTING completeBatchTrace=true partialRejected=true changedExpertRejected=true legacyPreserved=true' .work/les-swift-tests.log
           grep 'ORNITH_LAYER_CHECKPOINTS exactReplay=true bounded=true failClosed=true noPayload=true syntheticOnly=true' .work/les-swift-tests.log
+          grep 'ORNITH_DIAGNOSTIC_GATE originalFailurePreserved=true observedSuccessCannotAdmit=true syntheticOnly=true' .work/les-swift-tests.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:

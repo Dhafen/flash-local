@@ -133,6 +133,19 @@ final class LESPolicyTests: XCTestCase {
         var untraced = result; untraced.routingDecisions = 0
         XCTAssertFalse(LESNumericalCheck(modelSHA256: "same", referenceRevision: "reference", nativeRevision: "candidate",
             noLookahead: untraced, lookahead: untraced, batchedPrefill: result).passed)
+        let failed = LESLogitComparison(positions: 4, maximumAbsoluteError: 3.12, relativeL2Error: 0.066,
+            sameGreedy: true, routingDigest: 19, routingDecisions: 48)
+        var originalFailure = LESNumericalCheck(modelSHA256: "same", referenceRevision: "reference", nativeRevision: "candidate",
+            noLookahead: failed, lookahead: result, batchedPrefill: result)
+        originalFailure.diagnostics = LESNumericalDiagnostics(instrumentedComparison: result,
+            instrumentationMaximumAbsoluteError: 3.12, instrumentationRelativeL2Error: 0.066,
+            instrumentationSameGreedy: true, referenceInstrumentationMaximumAbsoluteError: 0,
+            referenceInstrumentationRelativeL2Error: 0, referenceInstrumentationSameGreedy: true,
+            referenceCheckpointPayloadBytes: 0)
+        XCTAssertFalse(originalFailure.passed)
+        originalFailure.diagnostics = nil; originalFailure.diagnosticsUnavailable = true
+        XCTAssertFalse(originalFailure.passed)
+        print("ORNITH_DIAGNOSTIC_GATE originalFailurePreserved=true observedSuccessCannotAdmit=true syntheticOnly=true")
     }
     func testOldCPUReferenceAndIsolatedLESCoexistAndPreserveSource() throws {
         let fixtures = try XCTUnwrap(ProcessInfo.processInfo.environment["ORNITH_LES_FIXTURE_ROOT"])

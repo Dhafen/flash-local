@@ -115,6 +115,21 @@ class LESAnalysisTests(unittest.TestCase):
         data["numericalCheck"]["lookahead"]["canonicalRoutingDigest"] = 2**64
         with self.assertRaises(ValueError): analyze(data)
 
+    def test_observed_success_does_not_replace_failed_standard_gate(self):
+        data = report()
+        observed = copy.deepcopy(data["numericalCheck"]["noLookahead"])
+        data["numericalCheck"]["noLookahead"].update(maximumAbsoluteError=3.12, relativeL2Error=.066)
+        data["numericalCheck"]["diagnostics"] = dict(instrumentedComparison=observed,
+            instrumentationMaximumAbsoluteError=3.12, instrumentationRelativeL2Error=.066,
+            referenceInstrumentationMaximumAbsoluteError=0, referenceInstrumentationRelativeL2Error=0,
+            referenceCheckpointPayloadBytes=1024, values="PRIVATE_MARKER")
+        result = analyze(data)
+        self.assertEqual(result["numericalComparisons"][-1]["mode"], "diagnosticsOnly")
+        self.assertEqual(result["numericalComparisons"][-1]["observerEffect"]["instrumentationMaximumAbsoluteError"], 3.12)
+        self.assertFalse(result["shortNumericalGatePassed"])
+        self.assertTrue(all(item["fastestComparableBackend"] is None for item in result["comparisons"]))
+        self.assertNotIn("PRIVATE_MARKER", json.dumps(result))
+
     def test_rejected_plan_recovers_only_numeric_reservations_and_live_samples(self):
         data = report()
         data["memoryAdmissions"] = [dict(phase="numerics.prediction4.prefill1",

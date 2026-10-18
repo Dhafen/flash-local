@@ -44,7 +44,7 @@ def memory_admission(item):
         raise ValueError("invalid memory admission")
     phase = item.get("phase")
     known_phase = isinstance(phase, str) and re.fullmatch(
-        r"preparation|numerics\.prediction\d{1,2}\.prefill\d{1,2}|benchmark\.(?:existingGGUF|omniCache|omniLookahead|omniPageCache)", phase)
+        r"preparation|(?:numerics|diagnostics)\.prediction\d{1,2}\.prefill\d{1,2}|benchmark\.(?:existingGGUF|omniCache|omniLookahead|omniPageCache)", phase)
     before, after = item.get("beforeReclaim") or {}, item.get("afterReclaim") or {}
     if not isinstance(before, dict) or not isinstance(after, dict):
         raise ValueError("invalid footprint sample")
@@ -121,13 +121,22 @@ def numerical_summaries(check):
     if not isinstance(check, dict):
         return []
     result = []
-    for mode in ("noLookahead", "lookahead", "batchedPrefill"):
-        item = check.get(mode)
+    entries = [(mode, check.get(mode)) for mode in ("noLookahead", "lookahead", "batchedPrefill")]
+    diagnostics = check.get("diagnostics")
+    if diagnostics is not None:
+        if not isinstance(diagnostics, dict): raise ValueError("invalid numerical diagnostic")
+        entries.append(("diagnosticsOnly", diagnostics.get("instrumentedComparison")))
+    for mode, item in entries:
         if not isinstance(item, dict):
             continue
         value = dict(mode=mode, positions=optional_number(item, "positions"), sameGreedy=item.get("sameGreedy") is True,
             maximumAbsoluteError=optional_number(item, "maximumAbsoluteError", integer=False),
             relativeL2Error=optional_number(item, "relativeL2Error", integer=False))
+        if mode == "diagnosticsOnly":
+            value["observerEffect"] = {key: optional_number(diagnostics, key, integer=False) for key in (
+                "instrumentationMaximumAbsoluteError", "instrumentationRelativeL2Error",
+                "referenceInstrumentationMaximumAbsoluteError", "referenceInstrumentationRelativeL2Error")}
+            value["referenceCheckpointPayloadBytes"] = optional_number(diagnostics, "referenceCheckpointPayloadBytes")
         trace = item.get("layerCheckpoints")
         if trace is not None:
             if not isinstance(trace, dict):
