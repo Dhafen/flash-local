@@ -318,7 +318,10 @@ future timing comparison also needs that mode disabled.
 The new opt-in diagnostic retains at most 64 MiB of fixed-test checkpoint
 payload, with a 4 MiB/256-point per-forward cap. Both runtimes observe known
 embedding, attention, FFN and layer outputs; detailed QKV/convolution points
-are limited to layer zero. Only scalar errors, missing/shape counts and the
+are limited to layer zero. The raw layer-zero DeltaNet result (stage 10)
+is distinct from the final attention projection (stage 5): the upstream
+base class and model graph reuse `attn_output` for different operations.
+No point is silently overwritten or accepted as a duplicate. Only scalar errors, missing/shape counts and the
 first divergent position/stage/layer are exported. Raw activation vectors
 remain ephemeral. A first-layer, 16-row matched-input probe compares observed
 and ordinary CPU results independently with a dequantized-weight double-dot

@@ -11,7 +11,12 @@ public struct GGUFCheckpoint: Sendable {
         self.stage = stage; self.layer = layer; self.values = values
     }
     public var key: UInt64 { UInt64(stage) << 32 | UInt64(UInt32(bitPattern: layer)) }
-    public var order: Int { stage == 1 ? -1 : stage == 9 ? 10000 : (Int(layer) + 1) * 10 + Int(stage) }
+    public var order: Int {
+        if stage == 1 { return -1 }
+        if stage == 9 { return 10000 }
+        let rank = stage == 10 ? 5 : stage >= 5 ? Int(stage) + 1 : Int(stage)
+        return (Int(layer) + 1) * 16 + rank
+    }
 }
 
 /// One serial forward at a time; the lock also protects the C callback boundary.
@@ -25,8 +30,8 @@ public final class GGUFCheckpointCollector: @unchecked Sendable {
     public init() {}
     public func capture(stage: UInt32, layer: Int32, values: UnsafePointer<Float>?, count: Int32) -> Bool {
         lock.lock(); defer { lock.unlock() }
-        guard !failed, (1...9).contains(stage),
-              ((stage == 1 || stage == 9) ? layer == -1 : (0..<40).contains(layer)),
+        guard !failed, (1...10).contains(stage),
+              (stage == 10 ? layer == 0 : ((stage == 1 || stage == 9) ? layer == -1 : (0..<40).contains(layer))),
               count > 0, count <= 16384, let values,
               points.count < 256, bytes <= (4 << 20) - Int(count) * 4 else {
             failed = true; return false

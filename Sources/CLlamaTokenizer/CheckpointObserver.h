@@ -28,6 +28,12 @@ inline key identify(std::string_view name) {
         if (parsed.ec != std::errc{} || parsed.ptr != name.data() + name.size() || layer < 0 || layer >= 40)
             return {};
         if ((item.second == 3 || item.second == 4) && layer != 0) return {};
+        // In this fixed Ornith 3-GDN/1-attention stack, delta-net-base also
+        // calls its unprojected recurrent result "attn_output". It is not the
+        // model's final attention projection. Keep that extra layer-zero
+        // diagnostic distinct instead of colliding with linear_attn_out.
+        if (item.first == "attn_output-" && layer % 4 != 3)
+            return layer == 0 ? key{10, 0} : key{};
         return {item.second, layer};
     }
     return {};

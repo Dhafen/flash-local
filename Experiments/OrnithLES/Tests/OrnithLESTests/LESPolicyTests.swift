@@ -236,7 +236,7 @@ final class LESPolicyTests: XCTestCase {
     }
     func testLayerCheckpointBoundsAndFirstDivergence() throws {
         let values: [Float] = [1, 2, 3]
-        for (stage, layer, count) in [(UInt32(0), Int32(0), Int32(3)), (10, 0, 3), (2, 40, 3), (1, 0, 3), (2, 0, 16385)] {
+        for (stage, layer, count) in [(UInt32(0), Int32(0), Int32(3)), (11, 0, 3), (10, 1, 3), (2, 40, 3), (1, 0, 3), (2, 0, 16385)] {
             let collector = GGUFCheckpointCollector()
             XCTAssertFalse(values.withUnsafeBufferPointer { collector.capture(stage: stage, layer: layer, values: $0.baseAddress, count: count) })
             XCTAssertThrowsError(try collector.take())
@@ -260,6 +260,14 @@ final class LESPolicyTests: XCTestCase {
         XCTAssertTrue(difference.result.complete)
         XCTAssertEqual(difference.result.firstDivergence?.stage, 2)
         XCTAssertEqual(difference.result.firstDivergence?.position, 7)
+        let recurrent = GGUFCheckpoint(stage: 10, layer: 0, values: values)
+        let projected = GGUFCheckpoint(stage: 5, layer: 0, values: values)
+        XCTAssertLessThan(recurrent.order, projected.order)
+        var attention = LESCheckpointAccumulator()
+        try attention.compare([projected, recurrent], [
+            GGUFCheckpoint(stage: 5, layer: 0, values: [2, 2, 3]),
+            GGUFCheckpoint(stage: 10, layer: 0, values: [1, 2, 3.1])], position: 0)
+        XCTAssertEqual(attention.result.firstDivergence?.stage, 10)
         var missing = LESCheckpointAccumulator()
         try missing.compare(expected, [GGUFCheckpoint(stage: 2, layer: 0, values: [1])], position: 0)
         XCTAssertFalse(missing.result.complete)

@@ -94,6 +94,18 @@ class LESAnalysisTests(unittest.TestCase):
         point["layerCheckpoints"]["firstDivergence"]["layer"] = 40
         with self.assertRaises(ValueError): analyze(data)
 
+    def test_raw_deltanet_checkpoint_is_distinct_and_geometry_is_validated(self):
+        data = report()
+        first = dict(position=0, stage=10, layer=0, maximumAbsoluteError=.2, relativeL2Error=.01)
+        data['numericalCheck']['noLookahead']['layerCheckpoints'] = dict(
+            comparedPoints=25, missingPoints=0, shapeMismatches=0,
+            maximumAbsoluteError=.2, relativeL2Error=.01, firstDivergence=first)
+        value = analyze(data)['numericalComparisons'][0]['layerCheckpoints']['firstDivergence']
+        self.assertEqual(value['stage'], 10)
+        for stage, layer in ((10, 1), (11, 0), (1, 0), (5, -1)):
+            first.update(stage=stage, layer=layer)
+            with self.assertRaises(ValueError): analyze(data)
+
     def test_canonical_trace_requires_all_three_matching_routes_and_counts(self):
         data = report()
         for key in ("noLookahead", "lookahead", "batchedPrefill"):

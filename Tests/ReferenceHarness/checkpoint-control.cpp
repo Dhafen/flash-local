@@ -1,4 +1,5 @@
 #include "FlashLlamaReference.h"
+#include "../../Sources/CLlamaTokenizer/CheckpointObserver.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -32,6 +33,10 @@ static bool capture(uint32_t stage, int32_t layer, const float * values, int32_t
 static bool never_abort(void *) { return false; }
 int main(int argc, char ** argv) {
     if (argc != 2 || std::filesystem::file_size(argv[1]) > (32u << 20)) return 2;
+    using flash_local_checkpoint::identify;
+    if (identify("attn_output-0").stage != 10 || identify("linear_attn_out-0").stage != 5 ||
+        identify("attn_output-3").stage != 5 || identify("attn_output-1").stage != 0 ||
+        identify("linear_attn_out-0 (reshaped)").stage != 0) return 10;
     const int fd = open(argv[1], O_RDONLY);
     if (fd < 0) return 3;
     const int tokens[] = {1, 2, 3, 15, 4};
@@ -59,12 +64,13 @@ int main(int argc, char ** argv) {
         if (flr_step(observed, tokens[step], row.data(), size) != size) {
             std::cerr << flr_last_error() << " " << t.failure << " step=" << step << '\n'; flr_free(observed); return 8;
         }
-        if (row != expected[step] || t.points.size() <= 20) {
+        if (row != expected[step] || t.points.size() <= 20 || !t.points.count(uint64_t(10) << 32) ||
+            !t.points.count(uint64_t(5) << 32) || !t.points.count((uint64_t(5) << 32) | 3)) {
             std::cerr << "Checkpoint replay differs or is incomplete\n"; flr_free(observed); return 9;
         }
         points += t.points.size();
     }
     flr_free(observed);
     std::cout << "ORNITH_CHECKPOINT_REFERENCE wrapperTrace=true exactLogits=true steps=5 points=" << points
-              << " syntheticOnly=true physicalPhone=false\n";
+              << " rawDeltaNetDistinct=true syntheticOnly=true physicalPhone=false\n";
 }

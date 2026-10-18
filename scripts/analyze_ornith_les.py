@@ -149,7 +149,10 @@ def numerical_summaries(check):
                 position = number(first.get("position"), "position", integer=True)
                 stage = number(first.get("stage"), "stage", integer=True)
                 raw_layer = first.get("layer")
-                if isinstance(raw_layer, bool) or not isinstance(raw_layer, int) or raw_layer < -1 or raw_layer >= 40 or not 1 <= stage <= 9:
+                if isinstance(raw_layer, bool) or not isinstance(raw_layer, int) or not 1 <= stage <= 10:
+                    raise ValueError("invalid checkpoint key")
+                if not (raw_layer == 0 if stage == 10 else
+                        raw_layer == -1 if stage in (1, 9) else 0 <= raw_layer < 40):
                     raise ValueError("invalid checkpoint key")
                 layer["firstDivergence"] = dict(position=position, stage=stage, layer=raw_layer,
                     maximumAbsoluteError=optional_number(first, "maximumAbsoluteError", integer=False),
