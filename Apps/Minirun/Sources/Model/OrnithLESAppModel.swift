@@ -60,7 +60,6 @@ private struct LESAppReport: Encodable {
 private actor LESAppWorker {
     private var artifact: VerifiedGGUFArtifact?
     private var prepared: URL?
-    private var check: LESNumericalCheck?
     private var admissions: [LESMemoryAdmission] = []
     func memoryAdmissionReport() -> [LESMemoryAdmission] { admissions }
     func release() { artifact = nil; prepared = nil }
@@ -85,11 +84,11 @@ private actor LESAppWorker {
                 onAdmission: { self.admissions.append($0) })
         }
         guard let prepared else { throw CancellationError() }
-        if check == nil {
-            check = try LESBenchmark.check(artifact: artifact, prepared: prepared, control: control,
-                progress: progress, onAdmission: { self.admissions.append($0) })
-        }
-        guard let check else { throw CancellationError() }
+        // Every explicit run performs its own check and memory sampling.
+        // Re-exporting a cached failed check must not look like another run
+        // with zero measured RAM. The verified file/preparation may be reused.
+        let check = try LESBenchmark.check(artifact: artifact, prepared: prepared, control: control,
+            progress: progress, onAdmission: { self.admissions.append($0) })
         onCheck(check)
         guard check.nativeBenchmarkAdmitted else { return (check, []) }
         var runs: [LESBenchmarkRun] = []

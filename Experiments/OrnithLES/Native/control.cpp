@@ -37,18 +37,35 @@ static void routing_trace_control() {
                 throw std::runtime_error("Single-position trace rejected");
         }
     }
-    if (batch.canonical != single.canonical || batch.decisions != 32 || single.decisions != 32 ||
+    if (batch.canonical != single.canonical || batch.expert_sets != single.expert_sets || batch.decisions != 32 || single.decisions != 32 ||
         batch.sequential == single.sequential) throw std::runtime_error("Routing trace is not batch-order independent");
     const auto before = batch;
     padded[256] = -1;
     if (batch.append("ffn_moe_topk-0", 0, 8, 2, 1024, 256, row_reader) ||
-        batch.decisions != before.decisions || batch.canonical != before.canonical || batch.sequential != before.sequential)
+        batch.decisions != before.decisions || batch.canonical != before.canonical || batch.sequential != before.sequential ||
+        batch.expert_sets != before.expert_sets)
         throw std::runtime_error("Invalid routing trace was partially committed");
-    padded[256] = 17;
+    padded[256] = 16;
+    flash_local_routing_trace permuted;
+    for (const char * layer : {"ffn_moe_topk-0", "ffn_moe_topk-1"})
+        if (!permuted.append(layer, 0, 8, 2, 1024, 256,
+            [&](int32_t * out, size_t offset, size_t bytes) {
+                row_reader(out, offset, bytes); std::reverse(out, out + 8);
+            })) throw std::runtime_error("Permuted expert set rejected");
+    if (permuted.canonical == single.canonical || permuted.sequential == single.sequential ||
+        permuted.expert_sets != single.expert_sets || permuted.decisions != single.decisions)
+        throw std::runtime_error("Rank permutation and expert selection were conflated");
+    padded[256] = 17; // Duplicate: not an eight-expert selection.
+    const auto duplicate_before = batch;
+    if (batch.append("ffn_moe_topk-0", 0, 8, 2, 1024, 256, row_reader) ||
+        batch.canonical != duplicate_before.canonical || batch.expert_sets != duplicate_before.expert_sets ||
+        batch.decisions != duplicate_before.decisions || batch.sequential != duplicate_before.sequential)
+        throw std::runtime_error("Duplicate expert was accepted or partially committed");
+    padded[256] = 31;
     flash_local_routing_trace changed;
     for (const char * layer : {"ffn_moe_topk-0", "ffn_moe_topk-1"})
         if (!changed.append(layer, 0, 8, 2, 1024, 256, row_reader)) throw std::runtime_error("Changed route rejected");
-    if (changed.canonical == single.canonical || changed.decisions != single.decisions)
+    if (changed.canonical == single.canonical || changed.expert_sets == single.expert_sets || changed.decisions != single.decisions)
         throw std::runtime_error("Changed expert was not visible in canonical routing trace");
     for (const char * invalid : {"ffn_moe_topk-", "ffn_moe_topk--1", "ffn_moe_topk-0suffix"}) {
         if (changed.append(invalid, 0, 8, 1, 1024, 256, row_reader)) throw std::runtime_error("Invalid layer accepted");
@@ -58,6 +75,7 @@ static void routing_trace_control() {
         changed.append("ffn_moe_topk-0", 0, 8, 2, std::numeric_limits<size_t>::max(), 256, row_reader))
         throw std::runtime_error("Invalid top-k tensor geometry accepted");
     std::cout << "ORNITH_ROUTING_TRACE paddedRows=true batchOrderIndependent=true changedExpertDetected=true invalidInputAtomic=true\n";
+    std::cout << "ORNITH_EXPERT_SETS exactPositionLayer=true rankPermutationDistinguished=true changedExpertDetected=true duplicateRejected=true atomic=true\n";
 }
 struct layer_trace {
     std::set<uint64_t> points, expected;
@@ -109,7 +127,7 @@ static output evaluate(int fd, const char * dir, bool metal, int depth, int step
         }
         out.metrics = flo_snapshot(context);
         if (trace_routing && !out.metrics.routing_decisions) throw std::runtime_error("Routing trace was not executed");
-        if (!trace_routing && !trace_layers && (out.metrics.routing_decisions || out.metrics.canonical_routing_digest ||
+        if (!trace_routing && !trace_layers && (out.metrics.routing_decisions || out.metrics.canonical_routing_digest || out.metrics.canonical_expert_set_digest ||
                 out.metrics.probe_samples)) throw std::runtime_error("Callback-free execution unexpectedly observed tensors");
         flo_reset(context);
         const int first_count = prefill > 0 ? std::min(4, prefill) : 1;
@@ -127,6 +145,7 @@ static output evaluate(int fd, const char * dir, bool metal, int depth, int step
 }
 static double compare(const output & a, const output & b, bool routing = true) {
     if (routing && (a.metrics.canonical_routing_digest != b.metrics.canonical_routing_digest ||
+        a.metrics.canonical_expert_set_digest != b.metrics.canonical_expert_set_digest ||
         a.metrics.routing_decisions != b.metrics.routing_decisions))
         throw std::runtime_error("Actual expert routing changed");
     if (a.logits.size() != a.positions.size() || b.logits.size() != b.positions.size() ||
@@ -239,6 +258,7 @@ int main(int argc, char ** argv) {
             {"verifiedDescriptorMetadata", true}, {"boundedPrivateLoaderErrors", true},
             {"nativeLoaderCauseExported", true}, {"nativeOwnersReleasedAfterEachContext", true},
             {"canonicalBatchedRoutingIdentical", true}, {"batchPrefillTokens", 4},
+            {"canonicalExpertSetsIdentical", true}, {"rankPermutationsDistinguished", true},
             {"completeLayerCheckpointTrace", true}, {"layerCheckpointMaximumAbsoluteError", layer_error},
             {"callbackFreeVariants", 6}, {"callbackFreeMaximumAbsoluteError", callback_free_error},
             {"batchPrefixLengths", prefixes}, {"batchedPrefillMaximumAbsoluteError", batch_error},

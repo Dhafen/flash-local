@@ -7,7 +7,7 @@ import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from analyze_ornith_les import analyze, BACKENDS, CACHES, MODEL, REFERENCE, ARITHMETIC
+from analyze_ornith_les import analyze, BACKENDS, CACHES, MODEL, REFERENCE, ARITHMETIC, EXPERT_SET_ROUTING
 
 
 def report():
@@ -63,6 +63,70 @@ def arithmetic_report(batch=False):
 
 
 class LESAnalysisTests(unittest.TestCase):
+    def test_exact_expert_sets_allow_only_reference_rank_permutation_with_strict_logits(self):
+        data = arithmetic_report(True)
+        item = data['numericalCheck']['arithmeticCheck']
+        item['routingComparison'] = EXPERT_SET_ROUTING
+        item['referenceMetrics']['canonicalExpertSetDigest'] = 41
+        for key in ('noLookahead', 'lookahead', 'batchedPrefill'):
+            item[key].update(canonicalRoutingDigest=24, canonicalExpertSetDigest=41)
+        item['batchedPrefill']['canonicalRoutingDigest'] = 27
+        result = analyze(data)
+        self.assertTrue(result['nativeBenchmarkAdmitted'])
+        self.assertTrue(result['independentArithmetic']['referenceExpertSetsIdentical'])
+        self.assertFalse(result['independentArithmetic']['referenceRankedRoutingIdentical'])
+        self.assertFalse(result['fullModelNumericsVerified'])
+        self.assertFalse(result['shortNumericalGatePassed'])
+        cases = [
+            ((), 'routingComparison', 'unknown'),
+            (('referenceMetrics',), 'canonicalExpertSetDigest', 42),
+            (('noLookahead',), 'canonicalExpertSetDigest', 42),
+            (('lookahead',), 'canonicalExpertSetDigest', 42),
+            (('lookahead',), 'canonicalRoutingDigest', 25),
+            (('lookahead',), 'routingDigest', 20),
+            (('lookahead',), 'routingDecisions', 7999),
+            (('callbackFreeLookahead',), 'canonicalExpertSetDigest', 41),
+            (('callbackFreeNoLookahead',), 'maximumAbsoluteError', .0101),
+        ]
+        for path, field, replacement in cases:
+            changed = copy.deepcopy(data)
+            child = changed['numericalCheck']['arithmeticCheck']
+            for key in path: child = child[key]
+            child[field] = replacement
+            self.assertFalse(analyze(changed)['nativeBenchmarkAdmitted'], (path, field))
+        for path, field in [((), 'routingComparison')] + [((key,), 'canonicalExpertSetDigest')
+                for key in ('referenceMetrics', 'noLookahead', 'lookahead')]:
+            changed = copy.deepcopy(data)
+            child = changed['numericalCheck']['arithmeticCheck']
+            for key in path: child = child[key]
+            child.pop(field)
+            self.assertFalse(analyze(changed)['nativeBenchmarkAdmitted'])
+
+    def test_changed_batch_expert_sets_require_validated_serial_prefill(self):
+        data = arithmetic_report(True)
+        item = data['numericalCheck']['arithmeticCheck']
+        item['routingComparison'] = EXPERT_SET_ROUTING
+        item['referenceMetrics']['canonicalExpertSetDigest'] = 41
+        for key in ('noLookahead', 'lookahead', 'batchedPrefill'): item[key]['canonicalExpertSetDigest'] = 41
+        item['batchedPrefill']['canonicalExpertSetDigest'] = 42
+        self.assertFalse(analyze(data)['nativeBenchmarkAdmitted'])  # Page cache still measured batch four.
+        item['pageCachePrefillTokens'] = 1
+        for run in data['measurements']: run['measurement']['prefillBatchTokens'] = 1
+        result = analyze(data)
+        self.assertTrue(result['nativeBenchmarkAdmitted'])
+        self.assertFalse(result['independentArithmetic']['batchedPrefillPassed'])
+        self.assertEqual(result['independentArithmetic']['prefillTokens'], 1)
+
+    def test_expert_set_digest_is_bounded_and_never_invented_for_old_reports(self):
+        data = arithmetic_report()
+        result = analyze(data)
+        self.assertTrue(result['nativeBenchmarkAdmitted'])
+        self.assertFalse(result['independentArithmetic']['referenceExpertSetsIdentical'])
+        data['numericalCheck']['arithmeticCheck']['referenceMetrics']['canonicalExpertSetDigest'] = 2**64
+        with self.assertRaises(ValueError): analyze(data)
+        data['numericalCheck']['arithmeticCheck']['referenceMetrics']['canonicalExpertSetDigest'] = True
+        with self.assertRaises(ValueError): analyze(data)
+
     def test_independent_reference_is_explicit_and_preserves_failed_ordinary_cpu_comparison(self):
         for batch in (False, True):
             data = arithmetic_report(batch)

@@ -67,7 +67,7 @@ toward admission. No static MiniCPM expert-frequency/prewarm table is reused.
 | Candidate | Current evidence | Next decision |
 | --- | --- | --- |
 | A: existing packed GGUF/MLX | Phone build 107: 1.931 decode forwards/s, 190 forwards; 3.954 GB peak; uncontrolled prompt/cache | Same fixed prompt, at least 128 decode steps per mode |
-| B: llama.cpp-omni LES | Build 113 admits all checks and releases owners/buffers; trained logit gate fails before timing | Locate the numerical discrepancy with bounded layer and matched-input diagnostics, then rerun the trained gate |
+| B: llama.cpp-omni LES | Build 120 serial logits satisfy the independent reference limits; ranked route checksums differ and timing remains blocked | Verify exact expert sets separately from rank permutations; keep failing batch-four disabled |
 | C: Flash-MoE pipeline | Code inspected; fused expert/pointwise kernels, deferred command buffers, parallel pread; no redistribution license found | Do not copy; compare permitted independently implemented techniques |
 | Swiftlet/QPack | Build 97 delivered, grouped kernels conditionally activated after four-position replay; no phone result | Different checkpoint quantization, so cannot be an identical-weight A/B |
 
@@ -424,7 +424,7 @@ functions and three Apple slices pass. These synthetic results validate that
 initial oracle implementation, not trained phone inference or the subsequent
 integration changes.
 
-The subsequent integration preserves the original `.passed` CPU comparison
+The build-120 integration preserves the original `.passed` CPU comparison
 and reports an explicitly named `arithmeticCheck`. Native timing requires
 this separate, complete higher-precision reference, identical canonical
 position/layer/rank/expert checksums against the CPU oracle across every replay
@@ -439,6 +439,52 @@ hash implementation with LES. Its linear scratch is a single lazy 786,432-byte
 allocation, independent of column-growth history. Failed arithmetic checks
 retain bounded layer diagnostics against that same higher-precision oracle.
 The original chat is never promoted or changed by any benchmark result.
+
+## Build 120 phone evidence
+
+The four supplied files identify runtime source `1f3fbebd77bc-dirty` and build
+120. Their entire numerical checks are identical; two files are byte-identical.
+Only the first contains fresh admission samples and measured peak footprint
+(2,302,268,280 bytes). The later exports reused a cached failed check and contain
+no new admissions or observed footprint. They are not four independent runs.
+All reports contain zero timing measurements. The test worker now performs a
+fresh reference check and memory sampling for each explicit run rather than
+re-exporting a cached failed result. Existing verified weights/preparation stay
+reusable.
+
+Against the new direct dequantized-weight/F32 reference, the actual serial
+native paths have maximum absolute logit error 0.00377691, relative L2
+0.0000444115 and matching four greedy choices. Cache, lookahead and page-cache
+callback-free paths report these same errors. This satisfies the unchanged
+0.01 / 0.001 logit bounds, but does not establish full model quality. Across
+25 forwards and 8,000 expert decisions, the reference ranked checksum is
+4421523720827196693 and serial native is 2129472169425831000. Native lookahead
+on/off ranked checksums match each other exactly. Build 120 cannot distinguish
+expert rank permutations within the same eight from actual selection changes;
+the check therefore correctly stops timing.
+
+Batch-four has 2.28847 maximum logit error and 0.0592567 relative L2 against
+the same independent reference. It remains unadmitted. Bounded layer tracing
+compares all 5,125 semantic points with no missing points or shape mismatch;
+the first layer threshold crossing is post-attention normalization in layer
+31 at position one (0.0100813 absolute). Both reference/native observation
+effects are exactly zero on the four output vectors. The original ordinary
+CPU comparison is still reported, including its roughly 0.06596 relative L2
+difference; changing the reference is not an engine speed or quality gain.
+
+The next isolated revision adds a second checksum over each absolute
+position/layer/expert tuple, omitting only rank. Duplicate expert IDs are
+rejected before committing either checksum. It never sorts or modifies model
+data. The explicitly named `exact-expert-set-v1` admission requires complete
+identical expert sets against the independent reference, the unchanged strict
+full-vocabulary and callback-free limits, and still requires ranked native
+lookahead on/off traces to be identical. An altered expert, incomplete trace,
+unknown policy or missing set proof cannot pass. The original ranked checksums
+remain exported. Rank permutations can change floating-point reduction order
+while preserving the mathematical expert-weight pairs; only that separately
+verified case is accepted. Failed batch checks select independently checked
+serial prefill, without changing top-k, quantization or weights. Host tests
+are being run; trained expert-set agreement and phone throughput remain open.
 
 Run `python3 scripts/analyze_ornith_les.py REPORT.json` on an exported LES
 report. It only reads the local JSON and prints whitelisted aggregates.

@@ -173,7 +173,8 @@ int main(int argc, char ** argv) {
         check(metrics.dense_calls > 0 && metrics.expert_calls >= 60 && metrics.rows > 0 &&
             metrics.maximum_scratch_bytes > 0 && metrics.maximum_scratch_bytes <= (1u << 20), "Full graph oracle has no linear coverage");
         check(metrics.routing_decisions == expected_decisions && metrics.routing_decisions == f32_metrics.routing_decisions &&
-            metrics.canonical_routing_digest == f32_metrics.canonical_routing_digest,
+            metrics.canonical_routing_digest == f32_metrics.canonical_routing_digest &&
+            metrics.canonical_expert_set_digest == f32_metrics.canonical_expert_set_digest,
             "Independent dequantized graph routing differs or is incomplete");
         double maximum = 0, squared = 0, norm = 0;
         check(expected.size() == exact.size(), "Independent graph step count");
@@ -190,6 +191,7 @@ int main(int argc, char ** argv) {
         std::cout << "ORNITH_DEQUANTIZED_REFERENCE independentF32Graph=true originalCPUUnchanged=true steps=5 fullVocabulary=true"
             << " denseCalls=" << metrics.dense_calls << " expertCalls=" << metrics.expert_calls
             << " maxAbs=" << maximum << " relativeL2=" << relative << " syntheticOnly=true physicalPhone=false\n";
+        std::cout << "ORNITH_REFERENCE_EXPERT_SETS complete=true originalWeights=true syntheticOnly=true\n";
         return 0;
     } catch (const std::exception & error) { std::cerr << error.what() << '\n'; return 1; }
 }

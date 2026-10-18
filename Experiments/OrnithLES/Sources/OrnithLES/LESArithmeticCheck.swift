@@ -20,7 +20,32 @@ public struct LESArithmeticCheck: Codable, Sendable {
     public let pageCachePrefillTokens: Int
     public var diagnostics: LESNumericalDiagnostics? = nil
     public var diagnosticsUnavailable: Bool? = nil
+    public var routingComparison: String? = nil
     public static let arithmetic = "dequantized-weight-f32-double-v1"
+    public static let expertSetRouting = "exact-expert-set-v1"
+
+    /// Rank permutations within the exact same eight experts can change the
+    /// floating-point reduction order. They are admitted only with complete
+    /// per-position/layer set checksums and the unchanged full-logit bounds.
+    /// The original ranked checksums remain in the report. LES on/off must
+    /// still preserve their ranked traces exactly, not merely the sets.
+    public var referenceRankedRoutingIdentical: Bool {
+        noLookahead.canonicalRoutingDigest != nil &&
+            noLookahead.canonicalRoutingDigest == referenceMetrics.canonicalRoutingDigest
+    }
+    public var referenceExpertSetsIdentical: Bool {
+        noLookahead.canonicalExpertSetDigest != nil &&
+            noLookahead.canonicalExpertSetDigest == referenceMetrics.canonicalExpertSetDigest
+    }
+    private var referenceRoutingPassed: Bool {
+        if routingComparison == nil {
+            return referenceRankedRoutingIdentical && referenceMetrics.canonicalExpertSetDigest == nil &&
+                noLookahead.canonicalExpertSetDigest == nil && lookahead.canonicalExpertSetDigest == nil &&
+                batchedPrefill.canonicalExpertSetDigest == nil
+        }
+        return routingComparison == Self.expertSetRouting && referenceExpertSetsIdentical &&
+            noLookahead.canonicalExpertSetDigest == lookahead.canonicalExpertSetDigest
+    }
 
     private var serialRoutingPassed: Bool {
         guard (4...67).contains(forwardCount) else { return false }
@@ -28,7 +53,7 @@ public struct LESArithmeticCheck: Codable, Sendable {
             noLookahead.canonicalRoutingDigest != nil && noLookahead.routingDigest != nil &&
             noLookahead.routingDecisions == UInt64(forwardCount * 40 * 8) &&
             noLookahead.routingDecisions == referenceMetrics.routingDecisions &&
-            noLookahead.canonicalRoutingDigest == referenceMetrics.canonicalRoutingDigest &&
+            referenceRoutingPassed &&
             noLookahead.canonicalRoutingDigest == lookahead.canonicalRoutingDigest &&
             noLookahead.routingDigest == lookahead.routingDigest &&
             noLookahead.routingDecisions == lookahead.routingDecisions
@@ -36,7 +61,10 @@ public struct LESArithmeticCheck: Codable, Sendable {
     public var batchedPrefillPassed: Bool {
         noLookahead.passed && lookahead.passed && serialRoutingPassed && batchedPrefill.passed &&
             batchedPrefill.routingObserved == true &&
-            batchedPrefill.canonicalRoutingDigest == noLookahead.canonicalRoutingDigest &&
+            batchedPrefill.canonicalRoutingDigest != nil &&
+            (routingComparison == nil ? batchedPrefill.canonicalRoutingDigest == noLookahead.canonicalRoutingDigest :
+                batchedPrefill.canonicalExpertSetDigest != nil &&
+                batchedPrefill.canonicalExpertSetDigest == noLookahead.canonicalExpertSetDigest) &&
             batchedPrefill.routingDecisions == noLookahead.routingDecisions &&
             callbackFreeBatchedPrefill.passed && callbackFreeBatchedPrefill.callbackFree
     }

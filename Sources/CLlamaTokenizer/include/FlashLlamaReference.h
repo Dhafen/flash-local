@@ -31,6 +31,7 @@ flr_context * flr_create_dequantized(int verified_descriptor, int32_t context_to
 typedef struct {
     uint64_t dense_calls, expert_calls, rows, maximum_scratch_bytes;
     uint64_t canonical_routing_digest, routing_decisions;
+    uint64_t canonical_expert_set_digest;
 } flr_dequantized_metrics;
 flr_dequantized_metrics flr_dequantized_snapshot(const flr_context *);
 void flr_free(flr_context *);

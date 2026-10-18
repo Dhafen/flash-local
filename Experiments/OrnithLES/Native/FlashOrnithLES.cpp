@@ -336,6 +336,7 @@ flo_metrics flo_snapshot(const flo_context * c) {
     if (c) {
         out.routing_digest = c->routing.sequential; out.routing_decisions = c->routing.decisions;
         out.canonical_routing_digest = c->routing.canonical;
+        out.canonical_expert_set_digest = c->routing.expert_sets;
         const auto & p = c->projection_probe;
         out.probe_samples = p.samples; out.probe_columns = p.columns;
         out.probe_weight_type = p.weight_type; out.probe_cpu_input_type = p.cpu_input_type;

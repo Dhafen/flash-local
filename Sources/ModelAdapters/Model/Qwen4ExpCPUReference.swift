@@ -117,7 +117,8 @@ public final class Qwen4ExpCPUReference {
         let value = flr_dequantized_snapshot(handle)
         return .init(denseCalls: value.dense_calls, expertCalls: value.expert_calls,
             rows: value.rows, maximumScratchBytes: value.maximum_scratch_bytes,
-            canonicalRoutingDigest: value.canonical_routing_digest, routingDecisions: value.routing_decisions)
+            canonicalRoutingDigest: value.canonical_routing_digest, routingDecisions: value.routing_decisions,
+            canonicalExpertSetDigest: value.canonical_expert_set_digest)
     }
 
     public func logits(for token: Int) throws -> [Float] {
@@ -141,4 +142,5 @@ public struct GGUFDequantizedReferenceMetrics: Codable, Equatable, Sendable {
     public let maximumScratchBytes: UInt64
     public let canonicalRoutingDigest: UInt64
     public let routingDecisions: UInt64
+    public var canonicalExpertSetDigest: UInt64? = nil
 }

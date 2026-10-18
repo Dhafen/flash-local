@@ -16,6 +16,7 @@ from analyze_ornith_performance import number
 MODEL = "42739874cc2ccfdb8523b23fbe52e29b2a7555c8176737ca9ca0b5d59859d41f"
 REFERENCE = "e467e5b5e5ba43071d6151b3d881deb9300d000e"
 ARITHMETIC = "dequantized-weight-f32-double-v1"
+EXPERT_SET_ROUTING = "exact-expert-set-v1"
 BACKENDS = ("existingGGUF", "omniCache", "omniLookahead", "omniPageCache")
 CACHES = ("initiallyEmpty", "warm")
 CEILING = 5_500_000_000
@@ -196,7 +197,7 @@ def arithmetic_gate(check):
     metrics = item.get("referenceMetrics")
     if not isinstance(metrics, dict): return empty
     metrics = {key: optional_number(metrics, key) for key in ("denseCalls", "expertCalls", "rows",
-        "maximumScratchBytes", "canonicalRoutingDigest", "routingDecisions")}
+        "maximumScratchBytes", "canonicalRoutingDigest", "routingDecisions", "canonicalExpertSetDigest")}
     if any(value is not None and value > 2**64 - 1 for value in metrics.values()):
         raise ValueError("reference metric exceeds UInt64")
     forwards = optional_number(item, "forwardCount")
@@ -209,23 +210,35 @@ def arithmetic_gate(check):
             relative is not None and relative <= .001
     def callback_free(value):
         return logits_pass(value) and value.get("routingObserved") is False and all(value.get(key) is None for key in (
-            "routingDigest", "routingDecisions", "canonicalRoutingDigest", "layerCheckpoints", "projectionProbe"))
+            "routingDigest", "routingDecisions", "canonicalRoutingDigest", "canonicalExpertSetDigest", "layerCheckpoints", "projectionProbe"))
     traces = [item.get(key) for key in ("noLookahead", "lookahead", "batchedPrefill")]
     if any(not isinstance(value, dict) for value in traces): return empty
     off, on, batch = traces
     for value in traces:
-        for key in ("routingDigest", "canonicalRoutingDigest", "routingDecisions"):
+        for key in ("routingDigest", "canonicalRoutingDigest", "routingDecisions", "canonicalExpertSetDigest"):
             metric = optional_number(value, key)
             if metric is not None and metric > 2**64 - 1: raise ValueError("routing metric exceeds UInt64")
     geometry = forwards is not None and 4 <= forwards <= 67
+    ranked_reference = off.get("canonicalRoutingDigest") is not None and \
+        off["canonicalRoutingDigest"] == metrics["canonicalRoutingDigest"]
+    sets_reference = off.get("canonicalExpertSetDigest") is not None and \
+        off["canonicalExpertSetDigest"] == metrics["canonicalExpertSetDigest"]
+    routing_policy = item.get("routingComparison")
+    legacy = ranked_reference and metrics['canonicalExpertSetDigest'] is None and \
+        all(value.get('canonicalExpertSetDigest') is None for value in traces)
+    reference_routes = legacy if routing_policy is None else routing_policy == EXPERT_SET_ROUTING and \
+        sets_reference and off.get("canonicalExpertSetDigest") == on.get("canonicalExpertSetDigest")
     routes = geometry and off.get("routingObserved") is True and on.get("routingObserved") is True and \
         off.get("routingDigest") is not None and off["routingDigest"] == on.get("routingDigest") and \
         off.get("canonicalRoutingDigest") is not None and off["canonicalRoutingDigest"] == on.get("canonicalRoutingDigest") and \
-        off["canonicalRoutingDigest"] == metrics["canonicalRoutingDigest"] and \
+        reference_routes and \
         off.get("routingDecisions") == forwards * 40 * 8 == metrics["routingDecisions"] == on.get("routingDecisions")
     serial = routes and logits_pass(off) and logits_pass(on)
+    batch_routes = batch.get("canonicalRoutingDigest") == off.get("canonicalRoutingDigest") if routing_policy is None else \
+        batch.get("canonicalRoutingDigest") is not None and batch.get("canonicalExpertSetDigest") is not None and \
+        batch["canonicalExpertSetDigest"] == off.get("canonicalExpertSetDigest")
     batched = bool(serial and logits_pass(batch) and batch.get("routingObserved") is True and
-        batch.get("canonicalRoutingDigest") == off["canonicalRoutingDigest"] and batch.get("routingDecisions") == off["routingDecisions"] and
+        batch_routes and batch.get("routingDecisions") == off["routingDecisions"] and
         callback_free(item.get("callbackFreeBatchedPrefill")))
     prefill = 4 if batched else 1
     coverage = geometry and metrics["denseCalls"] is not None and metrics["denseCalls"] >= forwards * 40 and \
@@ -239,7 +252,9 @@ def arithmetic_gate(check):
     return dict(present=True, passed=passed, batchedPrefillPassed=batched, prefillTokens=prefill,
         referenceArithmetic=ARITHMETIC if item.get("referenceArithmetic") == ARITHMETIC else None,
         referenceRevision=REFERENCE if item.get("referenceRevision") == REFERENCE else None,
-        forwardCount=forwards, referenceMetrics=metrics)
+        forwardCount=forwards, referenceMetrics=metrics,
+        routingComparison=EXPERT_SET_ROUTING if routing_policy == EXPERT_SET_ROUTING else None,
+        referenceRankedRoutingIdentical=ranked_reference, referenceExpertSetsIdentical=sets_reference)
 
 
 def delta(before, after, key):

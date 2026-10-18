@@ -6,8 +6,8 @@ Current target: the official 21.7 GB Ornith 1.5 35B-A3B Q4_K_M GGUF, a total pro
 
 ## Development status
 
-**Private TestFlight 0.1.0 (119) is available**, adding bounded layer and
-matched-input diagnostics for the installed Ornith GGUF. Streamed thinking,
+**Private TestFlight 0.1.0 (120) is available**, adding an independent bounded
+dequantized-weight reference for the installed Ornith GGUF. Streamed thinking,
 VM-backed LES buffers and explicit ownership are retained.
 [Delivery and limits](docs/TESTFLIGHT.md).
 Host synthetic/reference gates pass. Phone build 112 admits the first native
@@ -49,8 +49,14 @@ phone timing passed admission. The independent, bounded dequantized-weight
 third oracle passes its initial host controls. Its integration requires the
 same strict logit thresholds, complete routing against that oracle and actual
 callback-free execution; the original CPU discrepancy stays in the report.
-Batch-four is used only if separately admitted. The new integration is not
-yet delivered or phone-verified. See [the detailed evidence](docs/ORNITH-LES.md).
+Batch-four is used only if separately admitted. Build 120 is delivered and its
+phone report has no completed timing: serial native logits are within 0.00378
+absolute / 0.0000445 relative L2 of the independent reference, but ranked expert
+checksums differ. Batch-four still differs by 2.288 absolute / 0.05926 relative
+L2. A separate exact expert-set checksum is being validated to distinguish
+rank permutations from changed selections, retaining strict logit limits and
+ranked lookahead on/off checks. No speed improvement or full quality agreement
+is established. See [the detailed evidence](docs/ORNITH-LES.md).
 
 The [Ornith adapter and model switch](docs/ORNITH-IMPLEMENTATION.md) are delivered in **TestFlight 0.1.0 (84)**. They implement the actual `qwen35moe` trunk, including SiLU GDN gating, ordinary residual/norm blocks, shared/routed experts, pinned tokenization and correct exclusion of the stored MTP block. Small K/V projections use bounded pinned CPU kernels to preserve reference rounding; other projections and experts stay on Metal. Ornith is the default, with separate persisted chats and a model picker retaining REAM. Build 84 pairs eligible gate/up projections without changing their per-row arithmetic; phone performance for that optimization is pending.
 

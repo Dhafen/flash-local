@@ -21,9 +21,10 @@ public struct LESLogitComparison: Codable, Sendable, Equatable {
     public var projectionProbe: LESProjectionProbe? = nil
     public var activeLookaheadDepth: Int? = nil
     public var routingObserved: Bool? = nil
+    public var canonicalExpertSetDigest: UInt64? = nil
     public var callbackFree: Bool {
         routingObserved == false && routingDigest == nil && routingDecisions == nil &&
-            canonicalRoutingDigest == nil && layerCheckpoints == nil && projectionProbe == nil
+            canonicalRoutingDigest == nil && canonicalExpertSetDigest == nil && layerCheckpoints == nil && projectionProbe == nil
     }
     public var passed: Bool {
         positions == 4 && maximumAbsoluteError.isFinite && relativeL2Error.isFinite &&
@@ -225,7 +226,8 @@ public enum LESBenchmark {
             canonicalRoutingDigest: traceRouting || collector != nil ? context.metrics.canonicalRoutingDigest : nil,
             layerCheckpoints: collector == nil ? nil : checkpoints.result,
             projectionProbe: context.projectionProbe,
-            activeLookaheadDepth: memory.lookaheadDepth, routingObserved: traceRouting || collector != nil)
+            activeLookaheadDepth: memory.lookaheadDepth, routingObserved: traceRouting || collector != nil,
+            canonicalExpertSetDigest: traceRouting || collector != nil ? context.metrics.canonicalExpertSetDigest : nil)
     }
     private static func rebase(_ routing: LESLogitComparison, logits: [[Float]],
                                reference: Replay) throws -> LESLogitComparison {
@@ -233,6 +235,7 @@ public enum LESBenchmark {
         result.routingDigest = routing.routingDigest; result.routingDecisions = routing.routingDecisions
         result.canonicalRoutingDigest = routing.canonicalRoutingDigest
         result.activeLookaheadDepth = routing.activeLookaheadDepth; result.routingObserved = routing.routingObserved
+        result.canonicalExpertSetDigest = routing.canonicalExpertSetDigest
         return result
     }
     private static func arithmeticCheck(_ original: Replay, off: LESLogitComparison, on: LESLogitComparison,
@@ -262,30 +265,23 @@ public enum LESBenchmark {
             try compare(exact, artifact: artifact, prepared: prepared, depth: 0, prefillBatch: 4,
                 phase: "unobserved", traceRouting: false, control: control, onAdmission: onAdmission)
         }
-        let batchPassed = exactOff.passed && exactOn.passed && exactBatch.passed &&
-            exactOff.canonicalRoutingDigest != nil &&
-            exactOff.canonicalRoutingDigest == exactOn.canonicalRoutingDigest &&
-            exactOff.canonicalRoutingDigest == exactBatch.canonicalRoutingDigest &&
-            exactOff.canonicalRoutingDigest == metrics.canonicalRoutingDigest &&
-            exactOff.routingDigest != nil && exactOff.routingDigest == exactOn.routingDigest &&
-            exactOff.routingDecisions == UInt64((original.prompt.count + original.forced.count) * 40 * 8) &&
-            exactOff.routingDecisions == metrics.routingDecisions &&
-            exactOff.routingDecisions == exactOn.routingDecisions && exactOff.routingDecisions == exactBatch.routingDecisions &&
-            freeBatch.passed && freeBatch.callbackFree
-        let prefill = batchPassed ? 4 : 1
+        func proof(page: LESLogitComparison, prefill: Int) throws -> LESArithmeticCheck {
+            LESArithmeticCheck(referenceArithmetic: LESArithmeticCheck.arithmetic,
+                referenceRevision: Qwen4ExpCPUReference.sourceRevision,
+                forwardCount: original.prompt.count + original.forced.count, referenceMetrics: metrics,
+                ordinaryCPUComparison: try observerEffect(exact.logits, original.logits),
+                noLookahead: exactOff, lookahead: exactOn, batchedPrefill: exactBatch,
+                callbackFreeNoLookahead: freeOff, callbackFreeLookahead: freeOn,
+                callbackFreeBatchedPrefill: freeBatch, callbackFreePageCache: page,
+                pageCachePrefillTokens: prefill, routingComparison: LESArithmeticCheck.expertSetRouting)
+        }
+        let prefill = try proof(page: freeOff, prefill: 1).prefillTokens
         progress("Kontrollerar OS-cache med \(prefill) prompttoken per steg…")
         let freePage = try autoreleasepool {
             try compare(exact, artifact: artifact, prepared: prepared, depth: 0, prefillBatch: prefill,
                 phase: "pagecache", traceRouting: false, pageCache: true, control: control, onAdmission: onAdmission)
         }
-        var result = LESArithmeticCheck(referenceArithmetic: LESArithmeticCheck.arithmetic,
-            referenceRevision: Qwen4ExpCPUReference.sourceRevision,
-            forwardCount: original.prompt.count + original.forced.count, referenceMetrics: metrics,
-            ordinaryCPUComparison: try observerEffect(exact.logits, original.logits),
-            noLookahead: exactOff, lookahead: exactOn, batchedPrefill: exactBatch,
-            callbackFreeNoLookahead: freeOff, callbackFreeLookahead: freeOn,
-            callbackFreeBatchedPrefill: freeBatch, callbackFreePageCache: freePage,
-            pageCachePrefillTokens: prefill)
+        var result = try proof(page: freePage, prefill: prefill)
         if !result.passed {
             progress("Lokaliserar avvikelsen mot avkvantiserade originalvikter…")
             do {

@@ -165,6 +165,7 @@ final class LESPolicyTests: XCTestCase {
             XCTAssertEqual(reference.dequantizedMetrics.expertCalls, 0)
             return result
         }
+        var referenceExpertSetDigest: UInt64?
         try autoreleasepool {
             let reference = try Qwen4ExpCPUReference(artifact: artifact, contextTokens: 32,
                 budgetBytes: 5_500_000_000, arithmetic: .dequantizedWeights)
@@ -178,6 +179,7 @@ final class LESPolicyTests: XCTestCase {
             XCTAssertGreaterThan(metrics.rows, 0); XCTAssertGreaterThan(metrics.maximumScratchBytes, 0)
             XCTAssertLessThanOrEqual(metrics.maximumScratchBytes, 1 << 20)
             XCTAssertEqual(metrics.routingDecisions, 16)
+            referenceExpertSetDigest = try XCTUnwrap(metrics.canonicalExpertSetDigest)
             let encoded = String(decoding: try JSONEncoder().encode(metrics), as: UTF8.self)
             for key in ["promptTokenIDs", "generatedTokenIDs", "logits", "messages", "path", "values"] {
                 XCTAssertFalse(encoded.contains("\"" + key + "\""))
@@ -220,6 +222,7 @@ final class LESPolicyTests: XCTestCase {
                 "Both runtimes must expose the same semantic checkpoints at position \(index)")
             try layers.compare(referencePoints[index], actualPoints, position: index)
         }
+        XCTAssertEqual(candidate.metrics.canonicalExpertSetDigest, referenceExpertSetDigest)
         XCTAssertTrue(layers.result.complete,
             "Missing points: \(layers.result.missingPoints); shape mismatches: \(layers.result.shapeMismatches)")
         XCTAssertGreaterThan(layers.result.comparedPoints, 20)
@@ -319,6 +322,55 @@ final class LESPolicyTests: XCTestCase {
             XCTAssertFalse(encoded.contains("\"" + key + "\""))
         }
         print("ORNITH_ARITHMETIC_GATE independentReference=true originalDiscrepancyPreserved=true fullRoutingRequired=true callbackFreeRequired=true batchFallback=true syntheticOnly=true")
+    }
+    func testExactExpertSetsDistinguishRankPermutationWithoutAdmittingChangedExperts() throws {
+        let metrics = try JSONDecoder().decode(GGUFDequantizedReferenceMetrics.self, from: Data(#"{"denseCalls":10000,"expertCalls":3000,"rows":1000000,"maximumScratchBytes":786432,"canonicalRoutingDigest":23,"routingDecisions":8000,"canonicalExpertSetDigest":41}"#.utf8))
+        let serial = LESLogitComparison(positions: 4, maximumAbsoluteError: 0.00378,
+            relativeL2Error: 0.000045, sameGreedy: true, routingDigest: 19, routingDecisions: 8000,
+            canonicalRoutingDigest: 24, routingObserved: true, canonicalExpertSetDigest: 41)
+        let free = LESLogitComparison(positions: 4, maximumAbsoluteError: 0.00378,
+            relativeL2Error: 0.000045, sameGreedy: true, routingObserved: false)
+        var batch = serial; batch.canonicalRoutingDigest = 27
+        var value = LESArithmeticCheck(referenceArithmetic: LESArithmeticCheck.arithmetic,
+            referenceRevision: Qwen4ExpCPUReference.sourceRevision, forwardCount: 25,
+            referenceMetrics: metrics, ordinaryCPUComparison: free,
+            noLookahead: serial, lookahead: serial, batchedPrefill: batch,
+            callbackFreeNoLookahead: free, callbackFreeLookahead: free,
+            callbackFreeBatchedPrefill: free, callbackFreePageCache: free, pageCachePrefillTokens: 4,
+            routingComparison: LESArithmeticCheck.expertSetRouting)
+        XCTAssertTrue(value.passed); XCTAssertTrue(value.batchedPrefillPassed)
+        XCTAssertFalse(value.referenceRankedRoutingIdentical); XCTAssertTrue(value.referenceExpertSetsIdentical)
+        let mutations: [(String, String, Any)] = [
+            ("", "routingComparison", "unknown"),
+            ("referenceMetrics", "canonicalExpertSetDigest", 42),
+            ("noLookahead", "canonicalExpertSetDigest", 42),
+            ("lookahead", "canonicalExpertSetDigest", 42),
+            ("lookahead", "canonicalRoutingDigest", 25),
+            ("lookahead", "routingDigest", 20),
+            ("lookahead", "routingDecisions", 7999),
+            ("callbackFreeLookahead", "canonicalExpertSetDigest", 41),
+            ("callbackFreeNoLookahead", "maximumAbsoluteError", 0.0101)
+        ]
+        func changed(_ key: String, _ field: String, _ replacement: Any?) throws -> LESArithmeticCheck {
+            var object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(value)) as? [String: Any])
+            if key.isEmpty { object[field] = replacement }
+            else {
+                var child = try XCTUnwrap(object[key] as? [String: Any]); child[field] = replacement; object[key] = child
+            }
+            return try JSONDecoder().decode(LESArithmeticCheck.self, from: JSONSerialization.data(withJSONObject: object))
+        }
+        for (key, field, replacement) in mutations {
+            XCTAssertFalse(try changed(key, field, replacement).passed, "\(key).\(field)")
+        }
+        for key in ["referenceMetrics", "noLookahead", "lookahead"] {
+            XCTAssertFalse(try changed(key, "canonicalExpertSetDigest", nil).passed)
+        }
+        XCTAssertFalse(try changed("", "routingComparison", nil).passed, "Legacy ranked gate retains its original meaning")
+        value = try changed("batchedPrefill", "canonicalExpertSetDigest", 42)
+        XCTAssertFalse(value.batchedPrefillPassed); XCTAssertEqual(value.prefillTokens, 1)
+        value = try changed("", "pageCachePrefillTokens", 1)
+        XCTAssertTrue(value.passed, "Changed batch experts must fall back to independently validated serial prefill")
+        print("ORNITH_EXPERT_SET_GATE completeSetsRequired=true rankPermutationOnly=true predictionRankedTraceUnchanged=true strictLogits=true missingProofRejected=true batchFallback=true syntheticOnly=true")
     }
     func testLayerCheckpointBoundsAndFirstDivergence() throws {
         let values: [Float] = [1, 2, 3]

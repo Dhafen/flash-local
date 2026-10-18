@@ -262,7 +262,7 @@ flr_dequantized_metrics flr_dequantized_snapshot(const flr_context * value) {
     if (!value || !value->dequantized) return {};
     const auto & v = value->linear_reference;
     return {v.dense_calls, v.expert_calls, v.rows, v.maximum_scratch_bytes,
-        value->reference_routing.canonical, value->reference_routing.decisions};
+        value->reference_routing.canonical, value->reference_routing.decisions, value->reference_routing.expert_sets};
 }
 
 void flr_free(flr_context * value) { delete value; }

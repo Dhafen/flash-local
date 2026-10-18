@@ -1,6 +1,31 @@
 # Private internal TestFlight delivery
 
-Latest delivered version **0.1.0 (119)**, app source
+Latest delivered version **0.1.0 (120)**, app source
+`1f3fbebd77bc24936d0704eaa96fdcdbccc1c24b`, is available to the existing
+private internal group. [Full delivery run 39138061935](https://github.com/Dhafen/flash-local/actions/runs/39138061935)
+passed the three independent five-forward F32 graph controls, eight operator
+formats, 63 routed and 18 callback-free synthetic variants, 20 selected Swift
+functions and three Apple framework/header/import/export slices. The retained
+186 Swiftlet controls, 24 QPack tests, 580 app tests, 474 package invocations
+(9 environment skips), 36 actually reviewed light/dark captures, device archive,
+signing, memory entitlements, privacy manifest and private delivery also pass.
+The arm64 device archive is 38,291,086 bytes with no model payload. A fresh
+read-only Apple audit confirms `VALID`, `INTERNAL_ONLY`, `IN_BETA_TESTING`,
+nonexpired, the exact private group and unchanged sole-owner membership.
+The sealed IPA SHA-256 is
+`319723ce65120eb3b82646ea878ba83fb9ea829f5aa1870b94c6a03d36ee3303`.
+
+The supplied build-120 phone reports contain one shared numerical result and
+no completed speed measurements. Serial native logits satisfy the unchanged
+limits against the independent reference, but ranked expert checksums differ.
+Batch-four does not satisfy the logit limits. Timing remains blocked and the
+ordinary chat is retained. Repeating build 120 is unnecessary; the next check
+must distinguish rank permutations from actual changed top-eight selections.
+See [the phone evidence and next gate](ORNITH-LES.md#build-120-phone-evidence).
+
+## Previous build 119
+
+Previous delivered version **0.1.0 (119)**, app source
 `8792fd52ea525fafec8145dbc3aa4b0195cf28d6`, is available to the existing
 private internal group. [Full delivery run 39130511069](https://github.com/Dhafen/flash-local/actions/runs/39130511069)
 passed native/reference controls, 63 synthetic batch variants, complete

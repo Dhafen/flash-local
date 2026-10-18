@@ -30,6 +30,7 @@ public struct LESMetrics: Codable, Sendable, Equatable {
     public let metalDispatches, metalCommandBuffers, metalNanoseconds: UInt64
     public let routingDigest, routingDecisions: UInt64
     public let canonicalRoutingDigest: UInt64?
+    public let canonicalExpertSetDigest: UInt64?
     public let demandCacheHits, demandCacheMisses: UInt64
     public let metalTimestampedCommandBuffers: UInt64
     init(_ value: flo_metrics) {
@@ -40,6 +41,7 @@ public struct LESMetrics: Codable, Sendable, Equatable {
         metalDispatches = value.dispatches; metalCommandBuffers = value.command_buffers; metalNanoseconds = value.gpu_ns
         routingDigest = value.routing_digest; routingDecisions = value.routing_decisions
         canonicalRoutingDigest = value.canonical_routing_digest
+        canonicalExpertSetDigest = value.canonical_expert_set_digest
         demandCacheHits = value.demand_hits; demandCacheMisses = value.demand_misses
         metalTimestampedCommandBuffers = value.timestamped_command_buffers
     }
