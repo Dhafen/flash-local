@@ -386,7 +386,36 @@ The matched-input projection control, all 19 selected Swift functions,
 three Apple slices, 186 Swiftlet/24 QPack tests, app/package gates, 36 reviewed
 captures, device archive, signing and private availability pass. Local LES
 report analysis passes 19 tests. These are synthetic/metadata/build results;
-the trained phone discrepancy and fastest backend remain unverified.
+the fastest backend remains unverified.
+
+The subsequent physical build-119 export contains 5,125 compared semantic
+points (205 per forward across 25 forwards), with zero missing points or shape
+mismatches. Embeddings match exactly. Layer-zero attention normalization has
+maximum absolute error 5.72e-6; the first threshold violation is QKV at position
+zero, with 0.05444 maximum error and 0.004192 relative L2. Added layer observers
+change neither runtime's four output logit vectors in this replay. The 16-row
+matched-input Q4_K projection probe has maximum Metal error 1.57e-7 versus
+dequantized-weight/F32 dots, compared with 0.009567 for the ordinary CPU's
+Q8_K operand path. This establishes the arithmetic difference for that sample,
+not full-model correctness. Single-token off/on logits still have 0.06596
+relative L2 error against ordinary CPU; batch-four has 0.08928, and its canonical
+route checksum differs. Both supplied files contain the same report. No speed
+measurements completed. Sampled peak was 2.288 GB; all four phase boundaries
+have zero owned native contexts/buffers. Airplane mode was user-declared.
+
+An opt-in third reference is being validated separately. It keeps the old
+source pin, model graph and original GGUF bytes, and replaces every model-weight
+linear product at a synchronized scheduler boundary with row dequantization
+and a double-accumulated dot using the original F32 activations. Dense and
+selected-expert paths are covered; real expert IDs and padded row strides are
+preserved. Linear scratch is capped at one MiB and governor checks occur at
+least every 64 output rows. The default CPU reference, numerical thresholds,
+production GGUF/REAM runner and benchmark admission are unchanged. This is
+not a performance backend and does not prove that native batch-four is correct.
+New host controls compare it with an independent all-F32 graph made only from
+the same bounded synthetic fixture's dequantized weights. No trained model is
+downloaded or converted on the build host, and the phone reference never writes
+an expanded model. Host execution of these new controls is still pending.
 
 Run `python3 scripts/analyze_ornith_les.py REPORT.json` on an exported LES
 report. It only reads the local JSON and prints whitelisted aggregates.

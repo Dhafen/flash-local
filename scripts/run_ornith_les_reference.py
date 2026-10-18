@@ -20,7 +20,7 @@ def main():
                 '-DCMAKE_BUILD_TYPE=Release', '-DCMAKE_OSX_ARCHITECTURES=arm64', '-DGGML_NATIVE=OFF',
                 '-DGGML_CPU_ARM_ARCH=armv8-a', '-DGGML_ACCELERATE=OFF', '-DGGML_CPU_KLEIDIAI=OFF', '-DGGML_LLAMAFILE=OFF'])
             run(['cmake', '--build', build, '--target', 'flash-local-reference', 'flash-local-projection-probe-control',
-                'flash-local-checkpoint-control', '--parallel', '3'])
+                'flash-local-checkpoint-control', 'flash-local-dequantized-control', '--parallel', '3'])
             run([build/'flash-local-projection-probe-control'])
             for mixed in [False, True]:
                 suffix = '-mixed' if mixed else ''
@@ -28,6 +28,7 @@ def main():
                 if model.stat().st_size > 32 << 20:
                     raise ValueError('Only bounded generated random fixtures may run')
                 run([build/'flash-local-checkpoint-control', model])
+                run([build/'flash-local-dequantized-control', model, work/f'les-dequantized-f32{suffix}.gguf'])
                 oracle = work/f'les-oracle{suffix}.json'
                 run([build/'flash-local-reference', model, oracle])
                 expected = json.loads(oracle.read_text())['logits']

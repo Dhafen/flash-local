@@ -3,6 +3,7 @@
 #include "ggml-cpu.h"
 #include "ggml-quants.h"
 #include "CheckpointObserver.h"
+#include "DequantizedLinearReference.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -25,6 +26,8 @@ struct flr_context {
     bool poisoned = false, checkpoint_failed = false;
     std::string checkpoint_error;
     std::string last_checkpoint;
+    bool dequantized = false;
+    flash_local_dequantized_linear linear_reference;
     ~flr_context() {
         if (context) llama_free(context);
         if (model) llama_model_free(model);
@@ -149,7 +152,7 @@ int32_t flr_project_kv_rows(uint32_t weight_type, const void * weights, int32_t 
 }
 
 static flr_context * create_reference(int descriptor, int32_t context_tokens, flr_abort_callback callback, void * user,
-                                     flr_checkpoint_callback checkpoint, void * checkpoint_user) {
+                                     flr_checkpoint_callback checkpoint, void * checkpoint_user, bool dequantized = false) {
     try {
         if (!callback || context_tokens < 16 || context_tokens > 128) {
             reference_error = "CPU diagnostic requires a governor and 16...128 context tokens"; return nullptr;
@@ -157,6 +160,7 @@ static flr_context * create_reference(int descriptor, int32_t context_tokens, fl
         auto value = std::make_unique<flr_context>();
         value->should_abort = callback; value->user = user; value->limit = context_tokens;
         value->checkpoint = checkpoint; value->checkpoint_user = checkpoint_user;
+        value->dequantized = dequantized;
         if (aborted(value.get())) { reference_error = "CPU reference cancelled before loading"; return nullptr; }
         const int duplicate = fcntl(descriptor, F_DUPFD_CLOEXEC, 0);
         if (duplicate < 0) { reference_error = "Cannot duplicate verified CPU reference descriptor"; return nullptr; }
@@ -176,6 +180,9 @@ static flr_context * create_reference(int descriptor, int32_t context_tokens, fl
         if (std::string(architecture) != "qwen4exp" && std::string(architecture) != "qwen35moe") {
             reference_error = "CPU diagnostic requires a registered qwen4exp/qwen35moe graph"; return nullptr;
         }
+        if (dequantized && std::string(architecture) != "qwen35moe") {
+            reference_error = "Dequantized third oracle requires the Ornith graph"; return nullptr;
+        }
         value->vocabulary = llama_vocab_n_tokens(llama_model_get_vocab(value->model));
         if (value->vocabulary < 1 || value->vocabulary > 300000) { reference_error = "CPU vocabulary exceeds output bound"; return nullptr; }
         auto cp = llama_context_default_params();
@@ -185,13 +192,19 @@ static flr_context * create_reference(int descriptor, int32_t context_tokens, fl
         cp.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED;
         cp.offload_kqv = false; cp.op_offload = false; cp.moe_cache_size = 0;
         cp.abort_callback = decoding; cp.abort_callback_data = value.get();
-        if (checkpoint) {
+        if (checkpoint || dequantized) {
             cp.cb_eval_user_data = value.get();
             cp.cb_eval = [](ggml_tensor * tensor, bool ask, void * user) {
-                const bool selected = flash_local_checkpoint::identify(ggml_get_name(tensor)).stage != 0;
-                if (ask) return selected;
-                if (!selected) return true;
                 auto * owner = static_cast<flr_context *>(user);
+                const bool selected = owner->checkpoint && flash_local_checkpoint::identify(ggml_get_name(tensor)).stage != 0;
+                const bool linear = owner->dequantized && flash_local_dequantized_linear::selected(tensor);
+                if (ask) return selected || linear;
+                try {
+                    if (linear) owner->linear_reference.apply(tensor, owner->should_abort, owner->user);
+                } catch (const std::exception & error) {
+                    owner->checkpoint_failed = true; owner->checkpoint_error = error.what(); return false;
+                }
+                if (!selected) return true;
                 const bool valid = flash_local_checkpoint::emit(tensor, owner->checkpoint, owner->checkpoint_user,
                     &owner->checkpoint_error);
                 // Only fixed, fully parsed names admitted by identify() reach
@@ -218,6 +231,15 @@ flr_context * flr_create_traced(int descriptor, int32_t context_tokens, flr_abor
                               flr_checkpoint_callback checkpoint, void * checkpoint_user) {
     if (!checkpoint) { reference_error = "Missing reference checkpoint observer"; return nullptr; }
     return create_reference(descriptor, context_tokens, callback, user, checkpoint, checkpoint_user);
+}
+flr_context * flr_create_dequantized(int descriptor, int32_t context_tokens, flr_abort_callback callback, void * user,
+                                   flr_checkpoint_callback checkpoint, void * checkpoint_user) {
+    return create_reference(descriptor, context_tokens, callback, user, checkpoint, checkpoint_user, true);
+}
+flr_dequantized_metrics flr_dequantized_snapshot(const flr_context * value) {
+    if (!value || !value->dequantized) return {};
+    const auto & v = value->linear_reference;
+    return {v.dense_calls, v.expert_calls, v.rows, v.maximum_scratch_bytes};
 }
 
 void flr_free(flr_context * value) { delete value; }

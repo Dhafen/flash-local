@@ -21,6 +21,17 @@ typedef bool (*flr_checkpoint_callback)(uint32_t stage, int32_t layer,
     const float * values, int32_t count, void * user);
 flr_context * flr_create_traced(int verified_descriptor, int32_t context_tokens,
     flr_abort_callback should_abort, void * user, flr_checkpoint_callback, void * checkpoint_user);
+// Independent diagnostic third oracle. Keeps the pinned graph and original
+// packed weights; every model-weight MUL_MAT/MUL_MAT_ID uses row dequantization
+// and a double-accumulated dot with the original F32 activation. The ordinary
+// CPU reference above is retained. Optional checkpoints; <=1 MiB linear scratch.
+// Ornith only, serial short replay, never a production/performance backend.
+flr_context * flr_create_dequantized(int verified_descriptor, int32_t context_tokens,
+    flr_abort_callback should_abort, void * user, flr_checkpoint_callback, void * checkpoint_user);
+typedef struct {
+    uint64_t dense_calls, expert_calls, rows, maximum_scratch_bytes;
+} flr_dequantized_metrics;
+flr_dequantized_metrics flr_dequantized_snapshot(const flr_context *);
 void flr_free(flr_context *);
 const char * flr_last_error(void);
 const char * flr_source_revision(void);

@@ -5,12 +5,20 @@ import LlamaTokenizerRuntime
 import MinirunKit
 import StorageCore
 
-/// Diagnostic reference, never the bounded production runner. Uses unchanged
-/// pinned llama.cpp CPU kernels, lazy PLE and mmap without mlock or repacking.
+/// Diagnostic reference, never the bounded production runner. The default uses
+/// unchanged pinned CPU kernels. The explicit third oracle replaces only model
+/// linear products with dequantized-weight/F32 dots; all graph operations and
+/// original weights remain pinned. Both use mmap without mlock or repacking.
 /// mmap may still issue kernel read-ahead: this is not a flash-cache guarantee.
 /// Run serially, release it before constructing the MLX decoder, and admit only
 /// short reference sequences. A failure leaves full-model parity unproven.
 public final class Qwen4ExpCPUReference {
+    public enum Arithmetic: Sendable, Equatable {
+        case pinnedCPU
+        /// Independent third oracle; original GGUF weights and F32 operands,
+        /// row dequantization and double accumulation. No production use.
+        case dequantizedWeights
+    }
     public static var sourceRevision: String { String(cString: flr_source_revision()) }
     private final class Governor: @unchecked Sendable {
         enum Stop { case cancelled, memory, unavailable }
@@ -56,12 +64,14 @@ public final class Qwen4ExpCPUReference {
 
     public init(artifact: VerifiedGGUFArtifact, contextTokens: Int = 128, budgetBytes: UInt64 = 4_000_000_000,
                 checkpoints: GGUFCheckpointCollector? = nil,
+                arithmetic: Arithmetic = .pinnedCPU,
                 cancellationRequested: @escaping @Sendable () -> Bool = { false }) throws {
         guard (16...128).contains(contextTokens), budgetBytes <= 5_500_000_000 else {
             throw GGUFError.limit("short CPU reference context or memory budget")
         }
         _ = try GGUFStreamedDecoder.vocabularySize(index: artifact.index)
-        if checkpoints != nil, artifact.index.metadata["general.architecture"]?.text != "qwen35moe" {
+        if checkpoints != nil || arithmetic == .dequantizedWeights,
+           artifact.index.metadata["general.architecture"]?.text != "qwen35moe" {
             throw GGUFError.unsupported("Layer checkpoint diagnostics require the Ornith graph")
         }
         let governor = Governor(budget: budgetBytes, cancelled: cancellationRequested)
@@ -74,7 +84,16 @@ public final class Qwen4ExpCPUReference {
             return Unmanaged<Governor>.fromOpaque(user).takeUnretainedValue().shouldAbort()
         }
         let created: OpaquePointer?
-        if let checkpoints {
+        if arithmetic == .dequantizedWeights {
+            let capture: flr_checkpoint_callback? = checkpoints == nil ? nil : { stage, layer, values, count, user in
+                guard let user else { return false }
+                return Unmanaged<GGUFCheckpointCollector>.fromOpaque(user).takeUnretainedValue()
+                    .capture(stage: stage, layer: layer, values: values, count: count)
+            }
+            created = flr_create_dequantized(descriptor, Int32(contextTokens), abort,
+                Unmanaged.passUnretained(governor).toOpaque(), capture,
+                checkpoints.map { Unmanaged.passUnretained($0).toOpaque() })
+        } else if let checkpoints {
             created = flr_create_traced(descriptor, Int32(contextTokens), abort,
                 Unmanaged.passUnretained(governor).toOpaque(), { stage, layer, values, count, user in
                     guard let user else { return false }
@@ -94,6 +113,11 @@ public final class Qwen4ExpCPUReference {
 
     deinit { flr_free(handle) }
     public var maximumObservedFootprintBytes: UInt64 { governor.maximumObservedFootprint }
+    public var dequantizedMetrics: GGUFDequantizedReferenceMetrics {
+        let value = flr_dequantized_snapshot(handle)
+        return .init(denseCalls: value.dense_calls, expertCalls: value.expert_calls,
+            rows: value.rows, maximumScratchBytes: value.maximum_scratch_bytes)
+    }
 
     public func logits(for token: Int) throws -> [Float] {
         guard token >= 0, token < vocabularySize else { throw GGUFError.invalid("CPU reference token") }
@@ -106,4 +130,12 @@ public final class Qwen4ExpCPUReference {
         try artifact.assertUnchanged()
         return output
     }
+}
+
+/// Aggregate coverage only; no weights, logits, tokens or activation payloads.
+public struct GGUFDequantizedReferenceMetrics: Codable, Equatable, Sendable {
+    public let denseCalls: UInt64
+    public let expertCalls: UInt64
+    public let rows: UInt64
+    public let maximumScratchBytes: UInt64
 }
