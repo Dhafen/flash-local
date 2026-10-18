@@ -20,6 +20,11 @@ public struct LESLogitComparison: Codable, Sendable, Equatable {
     public var layerCheckpoints: LESCheckpointComparison? = nil
     public var projectionProbe: LESProjectionProbe? = nil
     public var activeLookaheadDepth: Int? = nil
+    public var routingObserved: Bool? = nil
+    public var callbackFree: Bool {
+        routingObserved == false && routingDigest == nil && routingDecisions == nil &&
+            canonicalRoutingDigest == nil && layerCheckpoints == nil && projectionProbe == nil
+    }
     public var passed: Bool {
         positions == 4 && maximumAbsoluteError.isFinite && relativeL2Error.isFinite &&
             (0...0.01).contains(maximumAbsoluteError) && (0...0.001).contains(relativeL2Error) && sameGreedy
@@ -34,7 +39,13 @@ public struct LESNumericalCheck: Codable, Sendable {
     public let batchedPrefill: LESLogitComparison
     public var diagnostics: LESNumericalDiagnostics? = nil
     public var diagnosticsUnavailable: Bool? = nil
+    public var arithmeticCheck: LESArithmeticCheck? = nil
+    public var arithmeticCheckUnavailable: Bool? = nil
     public let fullModelNumericsVerified = false
+    /// Archived .passed retains the original CPU comparison's exact meaning.
+    /// New timing requires the identified third oracle and callback-free modes.
+    public var nativeBenchmarkAdmitted: Bool { arithmeticCheckUnavailable != true && arithmeticCheck?.passed == true }
+    public var nativePrefillTokens: Int { arithmeticCheck?.prefillTokens ?? 1 }
     public var canonicalBatchedRoutingVerified: Bool {
         noLookahead.canonicalRoutingDigest != nil &&
             noLookahead.routingDecisions.map({ $0 > 0 }) == true &&
@@ -80,6 +91,7 @@ public struct LESBenchmarkRun: Codable, Sendable {
     public let originalCacheBefore: GGUFResidentWeightCacheStatistics?
     public let originalCacheAfterPrefill: GGUFResidentWeightCacheStatistics?
     public let originalCacheAfter: GGUFResidentWeightCacheStatistics?
+    public var prefillBatchTokens: Int? = nil
     public var decodeTokensPerSecond: Double { Double(decodeForwardPasses) / max(decodeForwardSeconds, 1e-12) }
     public var prefillTokensPerSecond: Double { Double(promptTokens) / max(prefillSeconds, 1e-12) }
     public var hasRequiredLength: Bool { generatedTokens >= 128 && decodeForwardPasses >= 128 }
@@ -92,6 +104,7 @@ public enum LESBenchmark {
         let forced: [Int]
         let logits: [[Float]]
         let checkpoints: [[GGUFCheckpoint]]
+        var dequantizedMetrics: GGUFDequantizedReferenceMetrics? = nil
     }
     private static func greedy(_ values: [Float]) throws -> Int {
         guard !values.isEmpty, values.allSatisfy(\.isFinite) else { throw GGUFError.invalid("Non-finite benchmark logits") }
@@ -141,11 +154,12 @@ public enum LESBenchmark {
         }
     }
     private static func reference(artifact: VerifiedGGUFArtifact, prompt: [Int], control: LESControl,
-                                  traceLayers: Bool = false, forcedTokens: [Int]? = nil) throws -> Replay {
+                                  traceLayers: Bool = false, forcedTokens: [Int]? = nil,
+                                  arithmetic: Qwen4ExpCPUReference.Arithmetic = .pinnedCPU) throws -> Replay {
         guard forcedTokens == nil || forcedTokens?.count == 3 else { throw GGUFError.invalid("Diagnostic forced sequence length") }
         let collector = traceLayers ? GGUFCheckpointCollector() : nil
         let context = try Qwen4ExpCPUReference(artifact: artifact, contextTokens: 128, budgetBytes: 5_500_000_000,
-            checkpoints: collector,
+            checkpoints: collector, arithmetic: arithmetic,
             cancellationRequested: { control.shouldAbort() })
         var logits: [Float] = []
         var checkpoints: [[GGUFCheckpoint]] = [], checkpointBytes = 0
@@ -164,18 +178,20 @@ public enum LESBenchmark {
             forced.append(token)
             logits = try context.logits(for: token); vectors.append(logits); try capture()
         }
-        return Replay(prompt: prompt, forced: forced, logits: vectors, checkpoints: checkpoints)
+        return Replay(prompt: prompt, forced: forced, logits: vectors, checkpoints: checkpoints,
+            dequantizedMetrics: arithmetic == .dequantizedWeights ? context.dequantizedMetrics : nil)
     }
     private static func compare(_ replay: Replay, artifact: VerifiedGGUFArtifact, prepared: URL,
                                 depth: Int, prefillBatch: Int = 1, traceLayers: Bool = false,
-                                phase: String = "numerics", control: LESControl,
+                                phase: String = "numerics", traceRouting: Bool = true,
+                                pageCache: Bool = false, control: LESControl,
                                 onAdmission: (LESMemoryAdmission) -> Void,
                                 recordLogits: (([Float]) -> Void)? = nil) throws -> LESLogitComparison {
-        let memory = try plan(artifact, context: 128, depth: depth,
+        let memory = try plan(artifact, context: 128, depth: depth, pageCache: pageCache,
             phase: "\(phase).prediction\(depth).prefill\(prefillBatch)", onAdmission: onAdmission)
         let collector = traceLayers && prefillBatch == 1 ? GGUFCheckpointCollector() : nil
         let context = try LESContext(artifact: artifact, prepared: prepared, plan: memory, control: control,
-            traceRouting: true, checkpoints: collector)
+            traceRouting: traceRouting, checkpoints: collector)
         defer { context.close() }
         var logits: [Float] = []
         var checkpoints = LESCheckpointAccumulator()
@@ -204,11 +220,98 @@ public enum LESBenchmark {
         }
         return LESLogitComparison(positions: 4, maximumAbsoluteError: absolute,
             relativeL2Error: sqrt(squared / max(referenceSquared, 1e-30)), sameGreedy: same,
-            routingDigest: context.metrics.routingDigest, routingDecisions: context.metrics.routingDecisions,
-            canonicalRoutingDigest: context.metrics.canonicalRoutingDigest,
+            routingDigest: traceRouting || collector != nil ? context.metrics.routingDigest : nil,
+            routingDecisions: traceRouting || collector != nil ? context.metrics.routingDecisions : nil,
+            canonicalRoutingDigest: traceRouting || collector != nil ? context.metrics.canonicalRoutingDigest : nil,
             layerCheckpoints: collector == nil ? nil : checkpoints.result,
             projectionProbe: context.projectionProbe,
-            activeLookaheadDepth: memory.lookaheadDepth)
+            activeLookaheadDepth: memory.lookaheadDepth, routingObserved: traceRouting || collector != nil)
+    }
+    private static func rebase(_ routing: LESLogitComparison, logits: [[Float]],
+                               reference: Replay) throws -> LESLogitComparison {
+        var result = try observerEffect(reference.logits, logits)
+        result.routingDigest = routing.routingDigest; result.routingDecisions = routing.routingDecisions
+        result.canonicalRoutingDigest = routing.canonicalRoutingDigest
+        result.activeLookaheadDepth = routing.activeLookaheadDepth; result.routingObserved = routing.routingObserved
+        return result
+    }
+    private static func arithmeticCheck(_ original: Replay, off: LESLogitComparison, on: LESLogitComparison,
+                                        batch: LESLogitComparison, offLogits: [[Float]], onLogits: [[Float]],
+                                        batchLogits: [[Float]], artifact: VerifiedGGUFArtifact, prepared: URL,
+                                        control: LESControl, progress: @Sendable (String) -> Void,
+                                        onAdmission: (LESMemoryAdmission) -> Void) throws -> LESArithmeticCheck {
+        progress("Kontrollerar ursprungliga vikter utan extra aktiveringskvantisering…")
+        let exact = try autoreleasepool {
+            try reference(artifact: artifact, prompt: original.prompt, control: control,
+                forcedTokens: original.forced, arithmetic: .dequantizedWeights)
+        }
+        guard let metrics = exact.dequantizedMetrics else { throw GGUFError.invalid("Missing third-oracle coverage") }
+        let exactOff = try rebase(off, logits: offLogits, reference: exact)
+        let exactOn = try rebase(on, logits: onLogits, reference: exact)
+        let exactBatch = try rebase(batch, logits: batchLogits, reference: exact)
+        progress("Kontrollerar körningen utan profileringsåteranrop…")
+        let freeOff = try autoreleasepool {
+            try compare(exact, artifact: artifact, prepared: prepared, depth: 0,
+                phase: "unobserved", traceRouting: false, control: control, onAdmission: onAdmission)
+        }
+        let freeOn = try autoreleasepool {
+            try compare(exact, artifact: artifact, prepared: prepared, depth: 4,
+                phase: "unobserved", traceRouting: false, control: control, onAdmission: onAdmission)
+        }
+        let freeBatch = try autoreleasepool {
+            try compare(exact, artifact: artifact, prepared: prepared, depth: 0, prefillBatch: 4,
+                phase: "unobserved", traceRouting: false, control: control, onAdmission: onAdmission)
+        }
+        let batchPassed = exactOff.passed && exactOn.passed && exactBatch.passed &&
+            exactOff.canonicalRoutingDigest != nil &&
+            exactOff.canonicalRoutingDigest == exactOn.canonicalRoutingDigest &&
+            exactOff.canonicalRoutingDigest == exactBatch.canonicalRoutingDigest &&
+            exactOff.canonicalRoutingDigest == metrics.canonicalRoutingDigest &&
+            exactOff.routingDigest != nil && exactOff.routingDigest == exactOn.routingDigest &&
+            exactOff.routingDecisions == UInt64((original.prompt.count + original.forced.count) * 40 * 8) &&
+            exactOff.routingDecisions == metrics.routingDecisions &&
+            exactOff.routingDecisions == exactOn.routingDecisions && exactOff.routingDecisions == exactBatch.routingDecisions &&
+            freeBatch.passed && freeBatch.callbackFree
+        let prefill = batchPassed ? 4 : 1
+        progress("Kontrollerar OS-cache med \(prefill) prompttoken per steg…")
+        let freePage = try autoreleasepool {
+            try compare(exact, artifact: artifact, prepared: prepared, depth: 0, prefillBatch: prefill,
+                phase: "pagecache", traceRouting: false, pageCache: true, control: control, onAdmission: onAdmission)
+        }
+        var result = LESArithmeticCheck(referenceArithmetic: LESArithmeticCheck.arithmetic,
+            referenceRevision: Qwen4ExpCPUReference.sourceRevision,
+            forwardCount: original.prompt.count + original.forced.count, referenceMetrics: metrics,
+            ordinaryCPUComparison: try observerEffect(exact.logits, original.logits),
+            noLookahead: exactOff, lookahead: exactOn, batchedPrefill: exactBatch,
+            callbackFreeNoLookahead: freeOff, callbackFreeLookahead: freeOn,
+            callbackFreeBatchedPrefill: freeBatch, callbackFreePageCache: freePage,
+            pageCachePrefillTokens: prefill)
+        if !result.passed {
+            progress("Lokaliserar avvikelsen mot avkvantiserade originalvikter…")
+            do {
+                let traced = try autoreleasepool {
+                    try reference(artifact: artifact, prompt: original.prompt, control: control, traceLayers: true,
+                        forcedTokens: original.forced, arithmetic: .dequantizedWeights)
+                }
+                var observed: [[Float]] = []
+                let comparison = try autoreleasepool {
+                    try compare(traced, artifact: artifact, prepared: prepared, depth: 0, traceLayers: true,
+                        phase: "dequantized", control: control, onAdmission: onAdmission,
+                        recordLogits: { observed.append($0) })
+                }
+                let nativeEffect = try observerEffect(offLogits, observed)
+                let referenceEffect = try observerEffect(exact.logits, traced.logits)
+                result.diagnostics = LESNumericalDiagnostics(instrumentedComparison: comparison,
+                    instrumentationMaximumAbsoluteError: nativeEffect.maximumAbsoluteError,
+                    instrumentationRelativeL2Error: nativeEffect.relativeL2Error,
+                    instrumentationSameGreedy: nativeEffect.sameGreedy,
+                    referenceInstrumentationMaximumAbsoluteError: referenceEffect.maximumAbsoluteError,
+                    referenceInstrumentationRelativeL2Error: referenceEffect.relativeL2Error,
+                    referenceInstrumentationSameGreedy: referenceEffect.sameGreedy,
+                    referenceCheckpointPayloadBytes: traced.checkpoints.reduce(0) { $0 + $1.reduce(0) { $0 + $1.values.count * 4 } })
+            } catch { result.diagnosticsUnavailable = true }
+        }
+        return result
     }
     public static func check(artifact: VerifiedGGUFArtifact, prepared: URL, control: LESControl,
                              progress: @Sendable (String) -> Void = { _ in },
@@ -218,19 +321,28 @@ public enum LESBenchmark {
         progress("Jämför hela modellgrafen med CPU-referensen…")
         let replay = try autoreleasepool { try reference(artifact: artifact, prompt: tokens, control: control) }
         progress("Kontrollerar LES utan förläsning…")
-        var unobserved: [[Float]] = []
+        var routedOffLogits: [[Float]] = [], onLogits: [[Float]] = [], batchLogits: [[Float]] = []
         let off = try autoreleasepool { try compare(replay, artifact: artifact, prepared: prepared, depth: 0,
-            control: control, onAdmission: onAdmission, recordLogits: { unobserved.append($0) }) }
+            control: control, onAdmission: onAdmission, recordLogits: { routedOffLogits.append($0) }) }
         progress("Kontrollerar LES med förläsning…")
         let on = try autoreleasepool { try compare(replay, artifact: artifact, prepared: prepared, depth: 4,
-            control: control, onAdmission: onAdmission) }
+            control: control, onAdmission: onAdmission, recordLogits: { onLogits.append($0) }) }
         progress("Kontrollerar batchad promptbearbetning…")
         let batch = try autoreleasepool { try compare(replay, artifact: artifact, prepared: prepared, depth: 0,
-            prefillBatch: 4, control: control, onAdmission: onAdmission) }
+            prefillBatch: 4, control: control, onAdmission: onAdmission, recordLogits: { batchLogits.append($0) }) }
         var result = LESNumericalCheck(modelSHA256: artifact.manifest.sha256,
             referenceRevision: Qwen4ExpCPUReference.sourceRevision, nativeRevision: LESContext.revision,
             noLookahead: off, lookahead: on, batchedPrefill: batch)
-        if !result.passed {
+        do {
+            result.arithmeticCheck = try arithmeticCheck(replay, off: off, on: on, batch: batch,
+                offLogits: routedOffLogits, onLogits: onLogits, batchLogits: batchLogits,
+                artifact: artifact, prepared: prepared, control: control, progress: progress, onAdmission: onAdmission)
+        } catch {
+            // Keep both the original comparison and the failed independent
+            // admission. Never admit from the small matched-input probe alone.
+            result.arithmeticCheckUnavailable = true
+        }
+        if !result.passed && result.arithmeticCheck == nil {
             // Observation can alter backend fusion. It is never the run that
             // admits timing; retain the original failed gate unchanged.
             progress("Lokaliserar avvikelsen med separat lagerdiagnostik…")
@@ -244,7 +356,7 @@ public enum LESBenchmark {
                         traceLayers: true, phase: "diagnostics", control: control, onAdmission: onAdmission,
                         recordLogits: { observed.append($0) })
                 }
-                let nativeEffect = try observerEffect(unobserved, observed)
+                let nativeEffect = try observerEffect(routedOffLogits, observed)
                 let referenceEffect = try observerEffect(replay.logits, diagnosticReplay.logits)
                 result.diagnostics = LESNumericalDiagnostics(instrumentedComparison: comparison,
                     instrumentationMaximumAbsoluteError: nativeEffect.maximumAbsoluteError,
@@ -272,8 +384,8 @@ public enum LESBenchmark {
                                progress: @Sendable (String) -> Void = { _ in },
                                onAdmission: (LESMemoryAdmission) -> Void = { _ in }) throws -> [LESBenchmarkRun] {
         guard check.modelSHA256 == artifact.manifest.sha256,
-              backend == .existingGGUF || (check.passed && check.canonicalBatchedRoutingVerified) else {
-            throw GGUFError.invalid("LES numerical and batched routing checks have not passed")
+              backend == .existingGGUF || check.nativeBenchmarkAdmitted else {
+            throw GGUFError.invalid("Independent LES reference and callback-free checks have not passed")
         }
         let tokenizer = try CanonicalQwen35Tokenizer(artifact: artifact)
         let prompt = try tokenizer.chat([.init(role: .user, content: Self.prompt)], maximumTokens: 512).tokenIDs
@@ -314,7 +426,7 @@ public enum LESBenchmark {
             let before = native?.metrics, startBytes = reads(), started = MonotonicClock.now()
             let originalBefore = original?.projectionStatistics, originalCacheBefore = original?.residentCacheStatistics
             var logits: [Float] = []
-            let batchSize = native == nil ? 1 : 4
+            let batchSize = native == nil ? 1 : check.nativePrefillTokens
             for first in stride(from: 0, to: prompt.count, by: batchSize) {
                 let end = min(first + batchSize, prompt.count)
                 if let native { logits = try native.logits(tokens: Array(prompt[first..<end])) }
@@ -348,7 +460,8 @@ public enum LESBenchmark {
                 memoryPlan: nativePlan, metricsBefore: before, metricsAfterPrefill: afterPrefill, metricsAfter: native?.metrics,
                 originalProjectionsBefore: originalBefore, originalProjectionsAfterPrefill: originalAfterPrefill,
                 originalProjectionsAfter: original?.projectionStatistics, originalCacheBefore: originalCacheBefore,
-                originalCacheAfterPrefill: originalCacheAfterPrefill, originalCacheAfter: original?.residentCacheStatistics))
+                originalCacheAfterPrefill: originalCacheAfterPrefill, originalCacheAfter: original?.residentCacheStatistics,
+                prefillBatchTokens: batchSize))
         }
         return results
     }

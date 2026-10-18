@@ -15,7 +15,7 @@ flr_context * flr_create(int verified_descriptor, int32_t context_tokens,
 // Opt-in bounded checkpoint observer for the fixed local numerical test.
 // stage IDs: 1 embedding, 2 attention norm, 3 first-layer QKV, 4 first-layer
 // convolution, 5 attention output, 6 post-attention norm, 7 FFN output,
-// 8 layer output, 9 final norm. Values are transient and must not escape the
+// 8 layer output, 9 final norm, 10 first-layer raw DeltaNet output. Values are transient and must not escape the
 // callback without a caller-owned bounded copy. False aborts this diagnostic.
 typedef bool (*flr_checkpoint_callback)(uint32_t stage, int32_t layer,
     const float * values, int32_t count, void * user);
@@ -30,6 +30,7 @@ flr_context * flr_create_dequantized(int verified_descriptor, int32_t context_to
     flr_abort_callback should_abort, void * user, flr_checkpoint_callback, void * checkpoint_user);
 typedef struct {
     uint64_t dense_calls, expert_calls, rows, maximum_scratch_bytes;
+    uint64_t canonical_routing_digest, routing_decisions;
 } flr_dequantized_metrics;
 flr_dequantized_metrics flr_dequantized_snapshot(const flr_context *);
 void flr_free(flr_context *);

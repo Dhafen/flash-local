@@ -4,6 +4,7 @@
 #include "ggml-quants.h"
 #include "CheckpointObserver.h"
 #include "DequantizedLinearReference.h"
+#include "CanonicalRoutingTrace.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -28,6 +29,8 @@ struct flr_context {
     std::string last_checkpoint;
     bool dequantized = false;
     flash_local_dequantized_linear linear_reference;
+    flash_local_routing_trace reference_routing;
+    uint32_t experts = 0;
     ~flr_context() {
         if (context) llama_free(context);
         if (model) llama_model_free(model);
@@ -183,6 +186,15 @@ static flr_context * create_reference(int descriptor, int32_t context_tokens, fl
         if (dequantized && std::string(architecture) != "qwen35moe") {
             reference_error = "Dequantized third oracle requires the Ornith graph"; return nullptr;
         }
+        if (dequantized) {
+            char experts[16]{};
+            llama_model_meta_val_str(value->model, "qwen35moe.expert_count", experts, sizeof(experts));
+            const std::string text(experts);
+            const auto parsed = std::from_chars(text.data(), text.data() + text.size(), value->experts);
+            if (parsed.ec != std::errc{} || parsed.ptr != text.data() + text.size() || !value->experts || value->experts > 256) {
+                reference_error = "Third-oracle expert count unavailable"; return nullptr;
+            }
+        }
         value->vocabulary = llama_vocab_n_tokens(llama_model_get_vocab(value->model));
         if (value->vocabulary < 1 || value->vocabulary > 300000) { reference_error = "CPU vocabulary exceeds output bound"; return nullptr; }
         auto cp = llama_context_default_params();
@@ -198,9 +210,19 @@ static flr_context * create_reference(int descriptor, int32_t context_tokens, fl
                 auto * owner = static_cast<flr_context *>(user);
                 const bool selected = owner->checkpoint && flash_local_checkpoint::identify(ggml_get_name(tensor)).stage != 0;
                 const bool linear = owner->dequantized && flash_local_dequantized_linear::selected(tensor);
-                if (ask) return selected || linear;
+                const bool routed = owner->dequantized && std::string_view(ggml_get_name(tensor)).substr(0, 13) == "ffn_moe_topk-";
+                if (ask) return selected || linear || routed;
                 try {
                     if (linear) owner->linear_reference.apply(tensor, owner->should_abort, owner->user);
+                    if (routed) {
+                        const bool valid = tensor->type == GGML_TYPE_I32 && tensor->nb[0] == sizeof(int32_t) &&
+                            owner->reference_routing.append(ggml_get_name(tensor), owner->position,
+                                tensor->ne[0], tensor->ne[1], tensor->nb[1], owner->experts,
+                                [tensor](int32_t * out, size_t offset, size_t bytes) {
+                                    ggml_backend_tensor_get(tensor, out, offset, bytes);
+                                });
+                        if (!valid) throw std::runtime_error("Third-oracle routing observation failed");
+                    }
                 } catch (const std::exception & error) {
                     owner->checkpoint_failed = true; owner->checkpoint_error = error.what(); return false;
                 }
@@ -239,7 +261,8 @@ flr_context * flr_create_dequantized(int descriptor, int32_t context_tokens, flr
 flr_dequantized_metrics flr_dequantized_snapshot(const flr_context * value) {
     if (!value || !value->dequantized) return {};
     const auto & v = value->linear_reference;
-    return {v.dense_calls, v.expert_calls, v.rows, v.maximum_scratch_bytes};
+    return {v.dense_calls, v.expert_calls, v.rows, v.maximum_scratch_bytes,
+        value->reference_routing.canonical, value->reference_routing.decisions};
 }
 
 void flr_free(flr_context * value) { delete value; }

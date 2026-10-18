@@ -2,11 +2,12 @@
 #include "ggml.h"
 #include "ggml-backend.h"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <stdexcept>
-#include <vector>
+#include <memory>
 
 // Diagnostic third oracle, never a production kernel. The scheduler pauses
 // after each selected model-weight multiplication; replace that result with
@@ -17,8 +18,12 @@
 struct flash_local_dequantized_linear {
     uint64_t dense_calls = 0, expert_calls = 0, rows = 0, maximum_scratch_bytes = 0;
     static constexpr int64_t maximum_columns = 65536, maximum_rows = 300000;
-    std::vector<float> input, decoded;
-    std::vector<uint64_t> packed;
+    struct alignas(64) scratch_buffers {
+        std::array<float, maximum_columns> input, decoded;
+        std::array<uint64_t, maximum_columns / 2> packed;
+    };
+    static_assert(sizeof(scratch_buffers) <= (1u << 20), "Linear scratch budget");
+    std::unique_ptr<scratch_buffers> scratch;
 
     static void require(bool value, const char * reason) {
         if (!value) throw std::runtime_error(reason);
@@ -79,16 +84,17 @@ struct flash_local_dequantized_linear {
                 "Dequantized reference dense broadcast bound");
         }
         const size_t columns = size_t(w->ne[0]);
-        input.resize(columns); decoded.resize(columns); packed.resize((row_bytes + 7) / 8);
-        maximum_scratch_bytes = std::max(maximum_scratch_bytes,
-            uint64_t((input.capacity() + decoded.capacity()) * sizeof(float) + packed.capacity() * sizeof(uint64_t)));
-        require(maximum_scratch_bytes <= (1u << 20), "Dequantized reference scratch exceeds one MiB");
+        // A single lazy, fixed allocation avoids vector-growth transients and
+        // keeps the default reference at zero additional linear scratch.
+        if (!scratch) scratch = std::make_unique<scratch_buffers>();
+        maximum_scratch_bytes = sizeof(scratch_buffers);
+        auto & input = scratch->input; auto & decoded = scratch->decoded; auto & packed = scratch->packed;
         for (int64_t token = 0; token < dst->ne[2]; ++token) for (int64_t rank = 0; rank < dst->ne[1]; ++rank) {
             int32_t expert = 0;
             if (ids) std::memcpy(&expert, static_cast<const char *>(ids->data) + token * ids->nb[1] + rank * ids->nb[0], sizeof(expert));
             const size_t input_offset = token * x->nb[2] + (rank % x->ne[1]) * x->nb[1];
             std::memcpy(input.data(), static_cast<const char *>(x->data) + input_offset, columns * sizeof(float));
-            require(std::all_of(input.begin(), input.end(), [](float a) { return std::isfinite(a); }),
+            require(std::all_of(input.begin(), input.begin() + columns, [](float a) { return std::isfinite(a); }),
                 "Dequantized reference input nonfinite");
             for (int64_t row = 0; row < w->ne[1]; ++row) {
                 if (row % 64 == 0) require(!abort(user), "Dequantized reference governor stopped calculation");

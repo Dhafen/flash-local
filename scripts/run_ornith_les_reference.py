@@ -45,6 +45,8 @@ def main():
                 if maximum > .01 or relative > .001 or not same:
                     raise ValueError(f'Pinned reference mismatch: maxAbs={maximum} relativeL2={relative} sameGreedy={same}')
                 records.append(dict(mixed=mixed, positions=5, maximumAbsoluteError=maximum, relativeL2=relative, sameGreedy=same))
+            run([build/'flash-local-dequantized-control', root/'.test-fixtures/synthetic-ornith-top8.gguf',
+                work/'les-dequantized-f32-top8.gguf'])
         except Exception:
             output.flush(); print((work/'les-reference.log').read_text(errors='replace')[-10000:]); raise
     (work/'les-reference-check.json').write_text(json.dumps(dict(referenceRevision=REVISION,

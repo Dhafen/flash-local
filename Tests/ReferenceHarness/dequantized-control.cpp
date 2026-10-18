@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <iostream>
 #include <memory>
+#include <vector>
 #include <unistd.h>
 
 static bool never_abort(void *) { return false; }
@@ -20,7 +21,7 @@ using reference_owner = std::unique_ptr<flr_context, decltype(&flr_free)>;
 // Compare against an independently executed all-F32 graph made from the same
 // dequantized original weights. Only tiny explicitly named random fixtures
 // may be materialized this way; the phone oracle never creates this file.
-static void make_f32_fixture(const char * source, const char * target) {
+static uint64_t make_f32_fixture(const char * source, const char * target) {
     check(std::filesystem::file_size(source) <= (32u << 20), "Only bounded random fixtures may be converted");
     ggml_context * tensors = nullptr;
     std::unique_ptr<gguf_context, decltype(&gguf_free)> input(gguf_init_from_file(source, {false, &tensors}), gguf_free);
@@ -55,6 +56,12 @@ static void make_f32_fixture(const char * source, const char * target) {
         gguf_set_tensor_data(output.get(), t->name, payload[i].data());
     }
     check(gguf_write_to_file(output.get(), target, false), "Synthetic F32 write failed");
+    const auto layers = gguf_find_key(input.get(), "qwen35moe.block_count");
+    const auto mtp = gguf_find_key(input.get(), "qwen35moe.nextn_predict_layers");
+    const auto topk = gguf_find_key(input.get(), "qwen35moe.expert_used_count");
+    check(layers >= 0 && mtp >= 0 && topk >= 0, "Synthetic routing metadata unavailable");
+    return uint64_t(gguf_get_val_u32(input.get(), layers) - gguf_get_val_u32(input.get(), mtp)) *
+        gguf_get_val_u32(input.get(), topk) * 5;
 }
 
 static std::vector<std::vector<float>> replay(const char * path, bool dequantized, flr_dequantized_metrics & metrics) {
@@ -155,15 +162,19 @@ int main(int argc, char ** argv) {
     try {
         check(argc == 3, "Expected bounded synthetic source and temporary F32 target");
         operator_controls();
-        make_f32_fixture(argv[1], argv[2]);
-        flr_dequantized_metrics unused{}, metrics{};
+        const auto expected_decisions = make_f32_fixture(argv[1], argv[2]);
+        flr_dequantized_metrics unused{}, metrics{}, f32_metrics{};
         const auto ordinary_before = replay(argv[1], false, unused);
         const auto expected = replay(argv[2], false, unused);
         const auto exact = replay(argv[1], true, metrics);
+        (void)replay(argv[2], true, f32_metrics);
         const auto ordinary_after = replay(argv[1], false, unused);
         check(ordinary_before == ordinary_after, "Third oracle altered the ordinary CPU reference");
         check(metrics.dense_calls > 0 && metrics.expert_calls >= 60 && metrics.rows > 0 &&
             metrics.maximum_scratch_bytes > 0 && metrics.maximum_scratch_bytes <= (1u << 20), "Full graph oracle has no linear coverage");
+        check(metrics.routing_decisions == expected_decisions && metrics.routing_decisions == f32_metrics.routing_decisions &&
+            metrics.canonical_routing_digest == f32_metrics.canonical_routing_digest,
+            "Independent dequantized graph routing differs or is incomplete");
         double maximum = 0, squared = 0, norm = 0;
         check(expected.size() == exact.size(), "Independent graph step count");
         for (size_t step = 0; step < exact.size(); ++step) {

@@ -45,9 +45,12 @@ probe has maximum error 1.57e-7 against dequantized-weight/F32 dots, whereas
 the ordinary CPU operand path differs by 0.00957. This localizes a CPU operand
 rounding difference in that sample; it does not explain or validate the entire
 model. Batch-four canonical routes also differ from single-token routes. No
-phone timing passed admission. An independent, bounded dequantized-weight
-third oracle is under host validation; the original reference and gate remain
-unchanged. See [the detailed evidence](docs/ORNITH-LES.md).
+phone timing passed admission. The independent, bounded dequantized-weight
+third oracle passes its initial host controls. Its integration requires the
+same strict logit thresholds, complete routing against that oracle and actual
+callback-free execution; the original CPU discrepancy stays in the report.
+Batch-four is used only if separately admitted. The new integration is not
+yet delivered or phone-verified. See [the detailed evidence](docs/ORNITH-LES.md).
 
 The [Ornith adapter and model switch](docs/ORNITH-IMPLEMENTATION.md) are delivered in **TestFlight 0.1.0 (84)**. They implement the actual `qwen35moe` trunk, including SiLU GDN gating, ordinary residual/norm blocks, shared/routed experts, pinned tokenization and correct exclusion of the stored MTP block. Small K/V projections use bounded pinned CPU kernels to preserve reference rounding; other projections and experts stay on Metal. Ornith is the default, with separate persisted chats and a model picker retaining REAM. Build 84 pairs eligible gate/up projections without changing their per-row arithmetic; phone performance for that optimization is pending.
 

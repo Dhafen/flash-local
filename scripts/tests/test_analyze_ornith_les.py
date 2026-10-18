@@ -7,7 +7,7 @@ import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from analyze_ornith_les import analyze, BACKENDS, CACHES, MODEL
+from analyze_ornith_les import analyze, BACKENDS, CACHES, MODEL, REFERENCE, ARITHMETIC
 
 
 def report():
@@ -39,7 +39,106 @@ def report():
     return result
 
 
+def arithmetic_report(batch=False):
+    data = report()
+    data['numericalCheck']['noLookahead'].update(maximumAbsoluteError=3.12, relativeL2Error=.066)
+    routed = dict(positions=4, maximumAbsoluteError=.00001, relativeL2Error=.000001,
+        sameGreedy=True, routingDigest=19, routingDecisions=8000, canonicalRoutingDigest=23, routingObserved=True)
+    plain = {key: routed[key] for key in ('positions', 'maximumAbsoluteError', 'relativeL2Error', 'sameGreedy')}
+    plain['routingObserved'] = False
+    proof = dict(referenceArithmetic=ARITHMETIC, referenceRevision=REFERENCE, forwardCount=25,
+        referenceMetrics=dict(denseCalls=10000, expertCalls=3000, rows=1000000, maximumScratchBytes=786432,
+            canonicalRoutingDigest=23, routingDecisions=8000),
+        ordinaryCPUComparison=dict(positions=4, maximumAbsoluteError=3.12, relativeL2Error=.066, sameGreedy=True))
+    for key in ('noLookahead', 'lookahead', 'batchedPrefill'): proof[key] = copy.deepcopy(routed)
+    for key in ('callbackFreeNoLookahead', 'callbackFreeLookahead', 'callbackFreeBatchedPrefill', 'callbackFreePageCache'):
+        proof[key] = copy.deepcopy(plain)
+    if not batch:
+        proof['batchedPrefill']['canonicalRoutingDigest'] = 24
+    proof['pageCachePrefillTokens'] = 4 if batch else 1
+    data['numericalCheck']['arithmeticCheck'] = proof
+    for item in data['measurements']:
+        item['measurement']['prefillBatchTokens'] = 1 if item['measurement']['backend'] == 'existingGGUF' else proof['pageCachePrefillTokens']
+    return data
+
+
 class LESAnalysisTests(unittest.TestCase):
+    def test_independent_reference_is_explicit_and_preserves_failed_ordinary_cpu_comparison(self):
+        for batch in (False, True):
+            data = arithmetic_report(batch)
+            result = analyze(data)
+            self.assertFalse(result['shortNumericalGatePassed'])
+            self.assertTrue(result['independentArithmetic']['passed'])
+            self.assertTrue(result['nativeBenchmarkAdmitted'])
+            self.assertEqual(result['independentArithmetic']['prefillTokens'], 4 if batch else 1)
+            self.assertEqual(result['independentArithmetic']['batchedPrefillPassed'], batch)
+            self.assertTrue(all(value['fastestComparableBackend'] == 'omniLookahead' for value in result['comparisons']))
+            self.assertFalse(result['fullModelNumericsVerified'])
+
+    def test_independent_gate_requires_original_precision_complete_reference_routes_and_callback_free_paths(self):
+        cases = [
+            (('referenceArithmetic',), 'unknown'), (('referenceRevision',), 'unknown'),
+            (('forwardCount',), 0), (('forwardCount',), 68),
+            (('referenceMetrics', 'denseCalls'), 0), (('referenceMetrics', 'expertCalls'), 0),
+            (('referenceMetrics', 'maximumScratchBytes'), 1048577),
+            (('referenceMetrics', 'canonicalRoutingDigest'), 24), (('referenceMetrics', 'routingDecisions'), 7999),
+            (('lookahead', 'canonicalRoutingDigest'), 24), (('lookahead', 'routingDecisions'), 7999),
+            (('callbackFreeNoLookahead', 'routingObserved'), True),
+            (('callbackFreeLookahead', 'routingDigest'), 19),
+            (('callbackFreeLookahead', 'maximumAbsoluteError'), .02),
+            (('callbackFreePageCache', 'relativeL2Error'), .002),
+            (('callbackFreePageCache', 'sameGreedy'), False), (('pageCachePrefillTokens',), 4),
+        ]
+        for path, value in cases:
+            with self.subTest(path=path):
+                data = arithmetic_report()
+                item = data['numericalCheck']['arithmeticCheck']
+                for key in path[:-1]: item = item[key]
+                item[path[-1]] = value
+                result = analyze(data)
+                self.assertFalse(result['nativeBenchmarkAdmitted'])
+                self.assertTrue(all(value['fastestComparableBackend'] is None for value in result['comparisons']))
+
+    def test_partial_new_proof_or_unavailable_reference_cannot_fall_back_to_legacy_success(self):
+        for proof in ({}, dict(referenceArithmetic=ARITHMETIC)):
+            data = report(); data['numericalCheck']['arithmeticCheck'] = proof
+            self.assertFalse(analyze(data)['nativeBenchmarkAdmitted'])
+        data = report(); data['numericalCheck']['arithmeticCheckUnavailable'] = True
+        self.assertTrue(analyze(data)['shortNumericalGatePassed'])
+        self.assertFalse(analyze(data)['nativeBenchmarkAdmitted'])
+        data = arithmetic_report(); data['numericalCheck']['arithmeticCheckUnavailable'] = True
+        self.assertFalse(analyze(data)['nativeBenchmarkAdmitted'])
+        data = arithmetic_report(); data['numericalCheck']['arithmeticCheckUnavailable'] = 'false'
+        with self.assertRaises(ValueError): analyze(data)
+        data = arithmetic_report(); data['numericalCheck']['arithmeticCheck']['pageCachePrefillTokens'] = True
+        with self.assertRaises(ValueError): analyze(data)
+
+    def test_batch_falls_back_to_serial_but_serial_must_be_the_measured_path(self):
+        data = arithmetic_report(True)
+        data['numericalCheck']['arithmeticCheck']['callbackFreeBatchedPrefill']['relativeL2Error'] = .002
+        self.assertFalse(analyze(data)['nativeBenchmarkAdmitted'])  # Page-cache proof is still batch-four.
+        data['numericalCheck']['arithmeticCheck']['pageCachePrefillTokens'] = 1
+        for item in data['measurements']: item['measurement']['prefillBatchTokens'] = 1
+        self.assertTrue(analyze(data)['nativeBenchmarkAdmitted'])
+        data['measurements'][2]['measurement']['prefillBatchTokens'] = 4
+        result = analyze(data)
+        self.assertIn('prefillBatchNotValidated', result['runs'][2]['issues'])
+        self.assertIsNone(result['comparisons'][0]['fastestComparableBackend'])
+
+    def test_independent_diagnostics_remain_scalar_and_cannot_override_failed_unobserved_logits(self):
+        data = arithmetic_report()
+        proof = data['numericalCheck']['arithmeticCheck']
+        proof['path'] = 'PRIVATE_MARKER'; proof['referenceMetrics']['weights'] = 'PRIVATE_MARKER'
+        proof['diagnostics'] = dict(instrumentedComparison=copy.deepcopy(proof['noLookahead']),
+            instrumentationMaximumAbsoluteError=0, instrumentationRelativeL2Error=0,
+            referenceInstrumentationMaximumAbsoluteError=0, referenceInstrumentationRelativeL2Error=0,
+            referenceCheckpointPayloadBytes=1024, values='PRIVATE_MARKER')
+        proof['callbackFreeNoLookahead']['maximumAbsoluteError'] = .02
+        result = analyze(data)
+        self.assertFalse(result['nativeBenchmarkAdmitted'])
+        self.assertTrue(any(value['mode'] == 'dequantized.diagnosticsOnly' for value in result['numericalComparisons']))
+        self.assertNotIn('PRIVATE_MARKER', json.dumps(result))
+
     def test_comparable_prompt_ranking_never_promotes_full_quality_or_app_selection(self):
         data = report()
         data["fullModelNumericsVerified"] = True

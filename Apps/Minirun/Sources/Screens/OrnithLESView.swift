@@ -53,11 +53,15 @@ struct OrnithLESPage: View {
                 }
                 Text("Ingen ny modell hämtas. Fasta vikter kopieras till en mindre lokal fil; experterna läses direkt ur din GGUF. Testet ändrar inte den vanliga chatten.")
                     .font(.footnote).foregroundStyle(.secondary)
-                Text("Först jämförs hela modellens logits med CPU-referensen vid fyra positioner. Därefter körs samma fasta prompt med vanlig motor, expertcache, LES-förläsning och OS-cache. Varje läge körs två gånger med minst 128 genererade token. Låt appen vara öppen; det kan ta flera minuter.")
+                Text("Först jämförs hela modellens logits med CPU-referenser vid fyra positioner. Kontrollen räknar även direkt från originalvikterna utan extra aktiveringskvantisering. Därefter körs samma fasta prompt med vanlig motor, expertcache, LES-förläsning och OS-cache. Varje läge körs två gånger med minst 128 genererade token. Låt appen vara öppen; det kan ta flera minuter.")
                     .font(.footnote).foregroundStyle(.secondary)
                 if let check = model.numericalCheck {
-                    Text(check.passed ? "Kort referenskontroll godkänd." : "Referenskontrollen avvek. Ingen ny motor aktiverades.")
-                        .font(.callout.bold()).foregroundStyle(check.passed ? Color.primary : Color.red)
+                    Text(check.nativeBenchmarkAdmitted ? "Kort kontroll mot originalvikterna godkänd." : "Referenskontrollen avvek. Ingen ny motor aktiverades.")
+                        .font(.callout.bold()).foregroundStyle(check.nativeBenchmarkAdmitted ? Color.primary : Color.red)
+                    if check.nativeBenchmarkAdmitted && check.nativePrefillTokens == 1 {
+                        Text("Prompten behandlas en token åt gången eftersom batchkontrollen inte godkändes.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                     if check.lookahead.activeLookaheadDepth == 0 {
                         Text("RAM-utrymmet räckte till expertcache men inte till förläsning i kontrollen.")
                             .font(.caption).foregroundStyle(.secondary)

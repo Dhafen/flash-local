@@ -160,7 +160,29 @@ final class LESPolicyTests: XCTestCase {
         let artifact = try VerifiedGGUFArtifact.verify(insideRoot: root, manifest: manifest)
         let expected: [[Float]] = try autoreleasepool {
             let reference = try Qwen4ExpCPUReference(artifact: artifact, contextTokens: 32, budgetBytes: 5_500_000_000)
-            return try [1, 2].map { try reference.logits(for: $0) }
+            let result = try [1, 2].map { try reference.logits(for: $0) }
+            XCTAssertEqual(reference.dequantizedMetrics.denseCalls, 0)
+            XCTAssertEqual(reference.dequantizedMetrics.expertCalls, 0)
+            return result
+        }
+        try autoreleasepool {
+            let reference = try Qwen4ExpCPUReference(artifact: artifact, contextTokens: 32,
+                budgetBytes: 5_500_000_000, arithmetic: .dequantizedWeights)
+            for (position, token) in [1, 2].enumerated() {
+                let actual = try reference.logits(for: token)
+                XCTAssertEqual(actual.count, expected[position].count)
+                XCTAssertLessThanOrEqual(zip(actual, expected[position]).map { abs($0 - $1) }.max() ?? .infinity, 0.0001)
+            }
+            let metrics = reference.dequantizedMetrics
+            XCTAssertGreaterThan(metrics.denseCalls, 0); XCTAssertGreaterThanOrEqual(metrics.expertCalls, 24)
+            XCTAssertGreaterThan(metrics.rows, 0); XCTAssertGreaterThan(metrics.maximumScratchBytes, 0)
+            XCTAssertLessThanOrEqual(metrics.maximumScratchBytes, 1 << 20)
+            XCTAssertEqual(metrics.routingDecisions, 16)
+            let encoded = String(decoding: try JSONEncoder().encode(metrics), as: UTF8.self)
+            for key in ["promptTokenIDs", "generatedTokenIDs", "logits", "messages", "path", "values"] {
+                XCTAssertFalse(encoded.contains("\"" + key + "\""))
+            }
+            print("ORNITH_DEQUANTIZED_SWIFT explicitMode=true defaultUnchanged=true boundedScratch=true noPayload=true syntheticOnly=true")
         }
         let referencePoints: [[GGUFCheckpoint]] = try autoreleasepool {
             let collector = GGUFCheckpointCollector()
@@ -237,6 +259,66 @@ final class LESPolicyTests: XCTestCase {
         }
         print("ORNITH_NATIVE_LIFETIME explicitClose=true wrapperStillAlive=true repeatedOwners=3 noLiveBuffers=true syntheticOnly=true")
         print("ORNITH_LAYER_CHECKPOINTS exactReplay=true bounded=true failClosed=true noPayload=true syntheticOnly=true")
+    }
+    func testIndependentArithmeticRequiresCompleteReferenceRoutingAndCallbackFreeTiming() throws {
+        let metricsData = Data(#"{"denseCalls":10000,"expertCalls":3000,"rows":1000000,"maximumScratchBytes":786432,"canonicalRoutingDigest":23,"routingDecisions":8000}"#.utf8)
+        let metrics = try JSONDecoder().decode(GGUFDequantizedReferenceMetrics.self, from: metricsData)
+        let good = LESLogitComparison(positions: 4, maximumAbsoluteError: 0.00001,
+            relativeL2Error: 0.000001, sameGreedy: true, routingDigest: 19, routingDecisions: 8000,
+            canonicalRoutingDigest: 23, routingObserved: true)
+        let free = LESLogitComparison(positions: 4, maximumAbsoluteError: 0.00001,
+            relativeL2Error: 0.000001, sameGreedy: true, routingObserved: false)
+        let old = LESLogitComparison(positions: 4, maximumAbsoluteError: 3.12,
+            relativeL2Error: 0.066, sameGreedy: true, routingDigest: 19, routingDecisions: 8000)
+        func proof(batch: Bool) -> LESArithmeticCheck {
+            var batched = good
+            if !batch { batched.canonicalRoutingDigest = 24 }
+            return LESArithmeticCheck(referenceArithmetic: LESArithmeticCheck.arithmetic,
+                referenceRevision: Qwen4ExpCPUReference.sourceRevision, forwardCount: 25,
+                referenceMetrics: metrics, ordinaryCPUComparison: old,
+                noLookahead: good, lookahead: good, batchedPrefill: batched,
+                callbackFreeNoLookahead: free, callbackFreeLookahead: free,
+                callbackFreeBatchedPrefill: free, callbackFreePageCache: free, pageCachePrefillTokens: batch ? 4 : 1)
+        }
+        var check = LESNumericalCheck(modelSHA256: "same", referenceRevision: "reference", nativeRevision: "candidate",
+            noLookahead: old, lookahead: old, batchedPrefill: old)
+        XCTAssertFalse(check.passed); XCTAssertFalse(check.nativeBenchmarkAdmitted)
+        for batch in [false, true] {
+            let value = proof(batch: batch)
+            XCTAssertTrue(value.passed); XCTAssertEqual(value.batchedPrefillPassed, batch)
+            XCTAssertEqual(value.prefillTokens, batch ? 4 : 1)
+            check.arithmeticCheck = value
+            XCTAssertFalse(check.passed, "Keep the original CPU discrepancy visible")
+            XCTAssertTrue(check.nativeBenchmarkAdmitted)
+            XCTAssertFalse(check.fullModelNumericsVerified)
+        }
+        let mutations: [(String, String, Any)] = [
+            ("", "referenceArithmetic", "unknown"), ("", "referenceRevision", "unknown"),
+            ("", "forwardCount", Int.min), ("", "forwardCount", 68), ("", "pageCachePrefillTokens", 4),
+            ("referenceMetrics", "denseCalls", 0), ("referenceMetrics", "expertCalls", 0),
+            ("referenceMetrics", "maximumScratchBytes", 1048577), ("referenceMetrics", "canonicalRoutingDigest", 24),
+            ("referenceMetrics", "routingDecisions", 7999), ("lookahead", "canonicalRoutingDigest", 24),
+            ("callbackFreeNoLookahead", "routingObserved", true), ("callbackFreeLookahead", "routingDigest", 19),
+            ("callbackFreeLookahead", "maximumAbsoluteError", 0.02), ("callbackFreePageCache", "relativeL2Error", 0.002)
+        ]
+        for (key, field, value) in mutations {
+            var object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(proof(batch: false))) as? [String: Any])
+            if key.isEmpty { object[field] = value }
+            else {
+                var child = try XCTUnwrap(object[key] as? [String: Any]); child[field] = value; object[key] = child
+            }
+            let changed = try JSONDecoder().decode(LESArithmeticCheck.self, from: JSONSerialization.data(withJSONObject: object))
+            XCTAssertFalse(changed.passed, "\(key).\(field)")
+            _ = changed.prefillTokens // Invalid forward counts must not trap.
+            check.arithmeticCheck = changed; XCTAssertFalse(check.nativeBenchmarkAdmitted)
+        }
+        check.arithmeticCheck = proof(batch: false); check.arithmeticCheckUnavailable = true
+        XCTAssertFalse(check.nativeBenchmarkAdmitted)
+        let encoded = String(decoding: try JSONEncoder().encode(check), as: UTF8.self)
+        for key in ["promptTokenIDs", "generatedTokenIDs", "logits", "messages", "path", "values"] {
+            XCTAssertFalse(encoded.contains("\"" + key + "\""))
+        }
+        print("ORNITH_ARITHMETIC_GATE independentReference=true originalDiscrepancyPreserved=true fullRoutingRequired=true callbackFreeRequired=true batchFallback=true syntheticOnly=true")
     }
     func testLayerCheckpointBoundsAndFirstDivergence() throws {
         let values: [Float] = [1, 2, 3]

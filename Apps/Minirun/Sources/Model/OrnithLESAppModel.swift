@@ -91,7 +91,7 @@ private actor LESAppWorker {
         }
         guard let check else { throw CancellationError() }
         onCheck(check)
-        guard check.passed else { return (check, []) }
+        guard check.nativeBenchmarkAdmitted else { return (check, []) }
         var runs: [LESBenchmarkRun] = []
         for backend in LESBenchmarkBackend.allCases {
             let pair = try autoreleasepool {
@@ -143,6 +143,7 @@ final class OrnithLESAppModel {
         guard canStart else { return }
         let flag = LESControl(), id = UUID()
         activeID = id; control = flag; isBusy = true; error = nil; runs = []; memoryAdmissions = []; measurementURL = nil
+        numericalCheck = nil
         let declaredAirplane = userDeclaredAirplaneMode
         operation = Task { [weak self] in
             guard let self else { return }
@@ -159,7 +160,7 @@ final class OrnithLESAppModel {
                 guard activeID == id else { return }
                 memoryAdmissions = await worker.memoryAdmissionReport()
                 numericalCheck = result.0; runs = result.1
-                status = !result.0.passed ? "Numeriken avvek. LES-testet stoppades; den vanliga chatten är oförändrad." :
+                status = !result.0.nativeBenchmarkAdmitted ? "Numeriken avvek. LES-testet stoppades; den vanliga chatten är oförändrad." :
                     runs.allSatisfy(\.hasRequiredLength) ? "Jämförelsen är klar." : "Något svar blev kortare än 128 token. Den körningen är inte jämförbar."
                 try save(check: result.0, runs: result.1, airplane: declaredAirplane)
             } catch {

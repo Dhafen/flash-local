@@ -14,6 +14,8 @@ from analyze_ornith_performance import number
 
 
 MODEL = "42739874cc2ccfdb8523b23fbe52e29b2a7555c8176737ca9ca0b5d59859d41f"
+REFERENCE = "e467e5b5e5ba43071d6151b3d881deb9300d000e"
+ARITHMETIC = "dequantized-weight-f32-double-v1"
 BACKENDS = ("existingGGUF", "omniCache", "omniLookahead", "omniPageCache")
 CACHES = ("initiallyEmpty", "warm")
 CEILING = 5_500_000_000
@@ -44,7 +46,7 @@ def memory_admission(item):
         raise ValueError("invalid memory admission")
     phase = item.get("phase")
     known_phase = isinstance(phase, str) and re.fullmatch(
-        r"preparation|(?:numerics|diagnostics)\.prediction\d{1,2}\.prefill\d{1,2}|benchmark\.(?:existingGGUF|omniCache|omniLookahead|omniPageCache)", phase)
+        r"preparation|(?:numerics|diagnostics|dequantized|unobserved|pagecache)\.prediction\d{1,2}\.prefill\d{1,2}|benchmark\.(?:existingGGUF|omniCache|omniLookahead|omniPageCache)", phase)
     before, after = item.get("beforeReclaim") or {}, item.get("afterReclaim") or {}
     if not isinstance(before, dict) or not isinstance(after, dict):
         raise ValueError("invalid footprint sample")
@@ -165,7 +167,79 @@ def numerical_summaries(check):
             value["projectionProbe"].update({key: optional_number(probe, key, integer=False) for key in (
                 "backendMaximumAbsoluteError", "cpuMaximumAbsoluteError", "backendRelativeL2Error", "cpuRelativeL2Error")})
         result.append(value)
+    arithmetic = check.get("arithmeticCheck")
+    if isinstance(arithmetic, dict):
+        for key in ("noLookahead", "lookahead", "batchedPrefill", "callbackFreeNoLookahead",
+                    "callbackFreeLookahead", "callbackFreeBatchedPrefill", "callbackFreePageCache", "ordinaryCPUComparison"):
+            for value in numerical_summaries({"noLookahead": arithmetic.get(key)}):
+                value["mode"] = "dequantized." + key
+                result.append(value)
+        for value in numerical_summaries({"diagnostics": arithmetic.get("diagnostics")}):
+            value["mode"] = "dequantized.diagnosticsOnly"
+            result.append(value)
     return result
+
+
+def arithmetic_gate(check):
+    """Validate the explicitly identified independent oracle, not a probe.
+
+    Keep the historical CPU comparison separate. New exports require complete
+    real routing against this oracle and all callback-free timing modes.
+    """
+    present = isinstance(check, dict) and any(key in check for key in ("arithmeticCheck", "arithmeticCheckUnavailable"))
+    empty = dict(present=present, passed=False, batchedPrefillPassed=False, prefillTokens=None)
+    if not present or not isinstance(check.get("arithmeticCheck"), dict):
+        return empty
+    if check.get("arithmeticCheckUnavailable") is not None and type(check["arithmeticCheckUnavailable"]) is not bool:
+        raise ValueError("invalid independent reference availability")
+    item = check["arithmeticCheck"]
+    metrics = item.get("referenceMetrics")
+    if not isinstance(metrics, dict): return empty
+    metrics = {key: optional_number(metrics, key) for key in ("denseCalls", "expertCalls", "rows",
+        "maximumScratchBytes", "canonicalRoutingDigest", "routingDecisions")}
+    if any(value is not None and value > 2**64 - 1 for value in metrics.values()):
+        raise ValueError("reference metric exceeds UInt64")
+    forwards = optional_number(item, "forwardCount")
+    page_batch = optional_number(item, "pageCachePrefillTokens")
+    def logits_pass(value):
+        if not isinstance(value, dict) or value.get("sameGreedy") is not True: return False
+        absolute = optional_number(value, "maximumAbsoluteError", integer=False)
+        relative = optional_number(value, "relativeL2Error", integer=False)
+        return optional_number(value, "positions") == 4 and absolute is not None and absolute <= .01 and \
+            relative is not None and relative <= .001
+    def callback_free(value):
+        return logits_pass(value) and value.get("routingObserved") is False and all(value.get(key) is None for key in (
+            "routingDigest", "routingDecisions", "canonicalRoutingDigest", "layerCheckpoints", "projectionProbe"))
+    traces = [item.get(key) for key in ("noLookahead", "lookahead", "batchedPrefill")]
+    if any(not isinstance(value, dict) for value in traces): return empty
+    off, on, batch = traces
+    for value in traces:
+        for key in ("routingDigest", "canonicalRoutingDigest", "routingDecisions"):
+            metric = optional_number(value, key)
+            if metric is not None and metric > 2**64 - 1: raise ValueError("routing metric exceeds UInt64")
+    geometry = forwards is not None and 4 <= forwards <= 67
+    routes = geometry and off.get("routingObserved") is True and on.get("routingObserved") is True and \
+        off.get("routingDigest") is not None and off["routingDigest"] == on.get("routingDigest") and \
+        off.get("canonicalRoutingDigest") is not None and off["canonicalRoutingDigest"] == on.get("canonicalRoutingDigest") and \
+        off["canonicalRoutingDigest"] == metrics["canonicalRoutingDigest"] and \
+        off.get("routingDecisions") == forwards * 40 * 8 == metrics["routingDecisions"] == on.get("routingDecisions")
+    serial = routes and logits_pass(off) and logits_pass(on)
+    batched = bool(serial and logits_pass(batch) and batch.get("routingObserved") is True and
+        batch.get("canonicalRoutingDigest") == off["canonicalRoutingDigest"] and batch.get("routingDecisions") == off["routingDecisions"] and
+        callback_free(item.get("callbackFreeBatchedPrefill")))
+    prefill = 4 if batched else 1
+    coverage = geometry and metrics["denseCalls"] is not None and metrics["denseCalls"] >= forwards * 40 and \
+        metrics["expertCalls"] is not None and metrics["expertCalls"] >= forwards * 40 * 2 and \
+        metrics["rows"] is not None and metrics["rows"] > 0 and \
+        metrics["maximumScratchBytes"] is not None and 1 <= metrics["maximumScratchBytes"] <= 1 << 20
+    passed = bool(check.get("arithmeticCheckUnavailable") is not True and
+        item.get("referenceArithmetic") == ARITHMETIC and item.get("referenceRevision") == REFERENCE and coverage and serial and
+        callback_free(item.get("callbackFreeNoLookahead")) and callback_free(item.get("callbackFreeLookahead")) and
+        callback_free(item.get("callbackFreePageCache")) and page_batch == prefill)
+    return dict(present=True, passed=passed, batchedPrefillPassed=batched, prefillTokens=prefill,
+        referenceArithmetic=ARITHMETIC if item.get("referenceArithmetic") == ARITHMETIC else None,
+        referenceRevision=REFERENCE if item.get("referenceRevision") == REFERENCE else None,
+        forwardCount=forwards, referenceMetrics=metrics)
 
 
 def delta(before, after, key):
@@ -209,6 +283,8 @@ def measurement(item):
     if not 0 <= start <= maximum <= 3:
         raise ValueError("invalid thermal states")
     plan = plan_numbers(run.get("memoryPlan"))
+    prefill_batch = optional_number(run, "prefillBatchTokens")
+    if prefill_batch is not None and prefill_batch not in (1, 4): raise ValueError("unsupported prefill batch")
     active_depth = plan.get("lookaheadDepth")
     if item.get("lookaheadActive") is not None:
         if not isinstance(item["lookaheadActive"], bool) or item["lookaheadActive"] != (active_depth is not None and active_depth > 0):
@@ -250,6 +326,7 @@ def measurement(item):
         promptTokens=prompt, decodeReturnedReadBytes=reads, decodeReadBytesPerForward=reads / count if count else None,
         maximumObservedFootprintBytes=peak, thermalStateAtStart=start, maximumThermalState=maximum,
         contextCapacityTokens=plan.get("contextTokens"),
+        prefillBatchTokens=prefill_batch,
         activeLookaheadDepth=active_depth, requestedLookaheadDepth=plan.get("requestedLookaheadDepth"),
         metalDecodeDispatches=delta(before, after, "metalDispatches"),
         metalCommandBuffers=buffers, timestampedCommandBuffers=timed,
@@ -269,16 +346,20 @@ def analyze(report):
     if len(set(keys)) != len(keys):
         raise ValueError("duplicate benchmark variant")
     gate = numerical_gate(report.get("numericalCheck"))
+    arithmetic = arithmetic_gate(report.get("numericalCheck"))
+    admitted = arithmetic["passed"] if arithmetic["present"] else gate
     context = number(report.get("contextCapacityTokens"), "contextCapacityTokens", integer=True)
     if not 32 <= context <= 65536:
         raise ValueError("unsupported context capacity")
     for run in runs:
         if run["backend"] != "existingGGUF" and run["contextCapacityTokens"] != context:
             run["issues"].append("contextCapacityMismatch")
+        if arithmetic["present"] and run["prefillBatchTokens"] != (1 if run["backend"] == "existingGGUF" else arithmetic["prefillTokens"]):
+            run["issues"].append("prefillBatchNotValidated")
     global_issues = []
     for condition, issue in [
         (report.get("failure") is None, "reportContainsFailure"),
-        (gate, "shortNumericalGateNotPassed"),
+        (admitted, "shortNumericalGateNotPassed"),
         (report.get("platform") == "iOSDevice" and report.get("deviceIdentifier") == "iPhone18,2", "targetPhoneNotEstablished"),
         (report.get("promptID") == "ornith-lru-v1", "benchmarkPromptNotEstablished"),
         (report.get("networkInferenceUsed") is False, "localRunnerNotEstablished"),
@@ -311,6 +392,7 @@ def analyze(report):
     return dict(schemaVersion=1, appBuild=build, contextCapacityTokens=context, failedReport=report.get("failure") is not None,
         sampledPeakFootprintBytes=optional_number(report, "maximumObservedFootprintBytes"),
         shortNumericalGatePassed=gate,
+        independentArithmetic=arithmetic, nativeBenchmarkAdmitted=admitted,
         canonicalBatchedRoutingVerified=canonical_batched_routing(report.get("numericalCheck")),
         numericalComparisons=numerical_summaries(report.get("numericalCheck")),
         fullModelNumericsVerified=False,

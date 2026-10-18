@@ -81,14 +81,14 @@ struct layer_trace {
     }
 };
 static output evaluate(int fd, const char * dir, bool metal, int depth, int steps, int cache = 8, int prefill = 0,
-                       bool trace_layers = false) {
+                       bool trace_layers = false, bool trace_routing = true) {
     if (trace_layers && prefill) throw std::runtime_error("Layer controls use single-token forwards");
     layer_trace trace;
     flo_options options{};
     options.context_tokens = steps > 5 ? 256 : 32; options.prefill_slots = prefill > 0 ? 32 : 16;
     options.cache_slots_per_layer = cache;
     options.lookahead_depth = depth; options.io_threads = 2; options.cpu_threads = 2;
-    options.metal = metal; options.trace_routing = true; options.memory_ceiling_bytes = 5500000000ULL;
+    options.metal = metal; options.trace_routing = trace_routing; options.memory_ceiling_bytes = 5500000000ULL;
     if (trace_layers) { options.checkpoint = layer_trace::capture; options.checkpoint_user = &trace; }
     flo_context * context = flo_open(fd, dir, options, nullptr, nullptr);
     if (!context) throw std::runtime_error(flo_last_error());
@@ -108,7 +108,9 @@ static output evaluate(int fd, const char * dir, bool metal, int depth, int step
             first += count; out.positions.push_back(first - 1);
         }
         out.metrics = flo_snapshot(context);
-        if (!out.metrics.routing_decisions) throw std::runtime_error("Routing trace was not executed");
+        if (trace_routing && !out.metrics.routing_decisions) throw std::runtime_error("Routing trace was not executed");
+        if (!trace_routing && !trace_layers && (out.metrics.routing_decisions || out.metrics.canonical_routing_digest ||
+                out.metrics.probe_samples)) throw std::runtime_error("Callback-free execution unexpectedly observed tensors");
         flo_reset(context);
         const int first_count = prefill > 0 ? std::min(4, prefill) : 1;
         std::vector<float> replay(out.logits[0].size());
@@ -123,9 +125,9 @@ static output evaluate(int fd, const char * dir, bool metal, int depth, int step
         throw std::runtime_error("Native context or buffer ownership survived close");
     return out;
 }
-static double compare(const output & a, const output & b) {
-    if (a.metrics.canonical_routing_digest != b.metrics.canonical_routing_digest ||
-        a.metrics.routing_decisions != b.metrics.routing_decisions)
+static double compare(const output & a, const output & b, bool routing = true) {
+    if (routing && (a.metrics.canonical_routing_digest != b.metrics.canonical_routing_digest ||
+        a.metrics.routing_decisions != b.metrics.routing_decisions))
         throw std::runtime_error("Actual expert routing changed");
     if (a.logits.size() != a.positions.size() || b.logits.size() != b.positions.size() ||
         b.positions.empty() || a.positions.back() != b.positions.back()) throw std::runtime_error("Incomplete logit positions");
@@ -223,6 +225,13 @@ int main(int argc, char ** argv) {
             }
         }
         if (batch_error > 1e-6) throw std::runtime_error("Batched prefill or decode handoff changed model logits");
+        double callback_free_error = 0;
+        for (int mode = 0; mode < 3; ++mode) for (int prefix : {0, std::min(7, steps)}) {
+            const auto plain = evaluate(fd, dir.c_str(), false, mode == 1 ? 2 : 0,
+                steps, mode == 2 ? 0 : 8, prefix, false, false);
+            callback_free_error = std::max(callback_free_error, compare(cpu, plain, false));
+        }
+        if (callback_free_error > 1e-6) throw std::runtime_error("Callback-free timing path changed model logits");
         json report{{"syntheticOnly", true}, {"physicalPhone", false}, {"revision", flo_revision()},
             {"residentCPUReference", true}, {"cpuStreamingMaximumAbsoluteError", error},
             {"metalExecutionVerified", false}, {"actualRoutingIdentical", true},
@@ -231,6 +240,7 @@ int main(int argc, char ** argv) {
             {"nativeLoaderCauseExported", true}, {"nativeOwnersReleasedAfterEachContext", true},
             {"canonicalBatchedRoutingIdentical", true}, {"batchPrefillTokens", 4},
             {"completeLayerCheckpointTrace", true}, {"layerCheckpointMaximumAbsoluteError", layer_error},
+            {"callbackFreeVariants", 6}, {"callbackFreeMaximumAbsoluteError", callback_free_error},
             {"batchPrefixLengths", prefixes}, {"batchedPrefillMaximumAbsoluteError", batch_error},
             {"resetBitwiseIdentical", true}, {"sameGreedy", true}, {"modelRequantized", false},
             {"gpuTimestampsAvailable", false},
@@ -242,6 +252,8 @@ int main(int argc, char ** argv) {
                   << " maxAbs=" << batch_error << " canonicalRouting=true reset=true syntheticOnly=true\n";
         std::cout << "ORNITH_LAYER_CONTROL mainLayers=4 complete=true rawDeltaNetDistinct=true finalLayerMatched=true maxAbs="
                   << layer_error << " syntheticOnly=true\n";
+        std::cout << "ORNITH_CALLBACK_FREE variants=6 serialAndBatch=true fullVocabulary=true reset=true noObservers=true maxAbs="
+                  << callback_free_error << " syntheticOnly=true\n";
         return 0;
     } catch (const std::exception & e) { std::cerr << e.what() << '\n'; return 1; }
 }

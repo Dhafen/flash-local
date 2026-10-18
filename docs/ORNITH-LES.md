@@ -403,19 +403,42 @@ route checksum differs. Both supplied files contain the same report. No speed
 measurements completed. Sampled peak was 2.288 GB; all four phase boundaries
 have zero owned native contexts/buffers. Airplane mode was user-declared.
 
-An opt-in third reference is being validated separately. It keeps the old
+An opt-in third reference is validated separately. It keeps the old
 source pin, model graph and original GGUF bytes, and replaces every model-weight
 linear product at a synchronized scheduler boundary with row dequantization
 and a double-accumulated dot using the original F32 activations. Dense and
 selected-expert paths are covered; real expert IDs and padded row strides are
 preserved. Linear scratch is capped at one MiB and governor checks occur at
 least every 64 output rows. The default CPU reference, numerical thresholds,
-production GGUF/REAM runner and benchmark admission are unchanged. This is
+production GGUF/REAM runner are unchanged. This is
 not a performance backend and does not prove that native batch-four is correct.
 New host controls compare it with an independent all-F32 graph made only from
 the same bounded synthetic fixture's dequantized weights. No trained model is
 downloaded or converted on the build host, and the phone reference never writes
-an expanded model. Host execution of these new controls is still pending.
+an expanded model. [Native-only run 39136311025](https://github.com/Dhafen/flash-local/actions/runs/39136311025)
+passes at `2a0e2c497b63e23344a23e5b12145d5bca936ede`: both five-forward
+full-vocabulary graph controls are within 9.32e-8 maximum absolute and 1.64e-7
+relative L2 error of the independently executed F32 graphs. The eight-format
+operator controls, unchanged original CPU replay, all 19 selected Swift
+functions and three Apple slices pass. These synthetic results validate that
+initial oracle implementation, not trained phone inference or the subsequent
+integration changes.
+
+The subsequent integration preserves the original `.passed` CPU comparison
+and reports an explicitly named `arithmeticCheck`. Native timing requires
+this separate, complete higher-precision reference, identical canonical
+position/layer/rank/expert checksums against the CPU oracle across every replay
+token, the unchanged 0.01 absolute / 0.001 relative logit limits, and successful
+callback-free checks of cache, lookahead and page-cache modes. A projection
+sample or an observed-only diagnostic cannot satisfy this admission. Serial
+prefill remains available when batch-four fails its independent logit/routing
+or callback-free checks; actual batch size is recorded in each measurement.
+This retains all model weights and top-8 choices. Only prompt scheduling varies.
+The new per-context reference routing observer shares the unchanged canonical
+hash implementation with LES. Its linear scratch is a single lazy 786,432-byte
+allocation, independent of column-growth history. Failed arithmetic checks
+retain bounded layer diagnostics against that same higher-precision oracle.
+The original chat is never promoted or changed by any benchmark result.
 
 Run `python3 scripts/analyze_ornith_les.py REPORT.json` on an exported LES
 report. It only reads the local JSON and prints whitelisted aggregates.
