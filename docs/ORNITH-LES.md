@@ -67,7 +67,7 @@ toward admission. No static MiniCPM expert-frequency/prewarm table is reused.
 | Candidate | Current evidence | Next decision |
 | --- | --- | --- |
 | A: existing packed GGUF/MLX | Phone build 107: 1.931 decode forwards/s, 190 forwards; 3.954 GB peak; uncontrolled prompt/cache | Same fixed prompt, at least 128 decode steps per mode |
-| B: llama.cpp-omni LES | Phone build 112: first native admission at 114 MB, next blocked at 2.216 GB; no benchmark completed | Validate VM-buffer release, then trained Metal/reference gate and 128-token comparison |
+| B: llama.cpp-omni LES | Build 113 VM-buffer/owner fix delivered after host gates; phone build 112 blocked before its second comparison | Confirm VM-buffer release on phone, then trained Metal/reference gate and 128-token comparison |
 | C: Flash-MoE pipeline | Code inspected; fused expert/pointwise kernels, deferred command buffers, parallel pread; no redistribution license found | Do not copy; compare permitted independently implemented techniques |
 | Swiftlet/QPack | Build 97 delivered, grouped kernels conditionally activated after four-position replay; no phone result | Different checkpoint quantization, so cannot be an identical-weight A/B |
 
@@ -224,7 +224,8 @@ Host execution and three-platform compilation still cannot establish iOS
 footprint recovery or trained Metal parity. The next physical acceptance
 requires zero owners/buffers at every transition, recovered baseline, the
 trained routing/logit gate and complete 128-token runs. The eight real
-experts and 5.5 GB ceiling remain unchanged. Validation is in progress.
+experts and 5.5 GB ceiling remain unchanged. Host gates pass and the correction
+is delivered in build 113; physical confirmation remains pending.
 
 The build-108 phone attempt stops at Swift memory admission with no completed
 numerical check or benchmark; observed process peak is 2,279,560,368 bytes.
@@ -248,6 +249,33 @@ zero prediction slots, respectively; a 4.0 GB example must still fail. These
 are policy inputs, not measurements of the phone's actual available memory.
 Physical confirmation of the change remains pending.
 
+## Validated private build 113
+
+[Run 39105887981](https://github.com/Dhafen/flash-local/actions/runs/39105887981)
+delivered 0.1.0 (113), runtime source
+`c3fe7be385271bcd33b61af51661bea880b4ea29`. Native CPU cache/lookahead/page-cache
+controls remain bitwise equal to the resident CPU path for F32, mixed
+Q4_K/Q6_K and 128 top-8 positions. Their native owners are released after
+each context. The independent old CPU oracle differs by less than 5e-10.
+Nine touched VM regions disappear after free; Swift closes and reopens three
+native owners while retaining the old closed wrapper. All 18 selected Swift
+functions and three-platform framework/header/import/isolation checks pass.
+These controls do not execute trained Metal inference on iPhone.
+
+The unchanged QPack controls, 580 app tests, 474 package invocations including
+9 environment skips, ten synthetic ordinary Ornith logit comparisons and
+all 36 actually reviewed Mac/iOS captures pass. The arm64 archive, signature,
+memory entitlements, privacy manifest and no-bundled-model checks pass.
+Private upload and a fresh Apple audit confirm the exact unchanged sole-owner
+group is eligible. The iOS runtime is the source above; subsequent documentation
+does not change it. Local report-analysis tests also pass (24 cases).
+
+The ordinary chat still uses its existing runner. Native LES remains an
+opt-in comparison, with no model redownload. The next phone report must
+establish recovered phase-boundary memory, the trained routing/logit gate
+and comparable 128-token performance. No LES throughput, full trained-model
+quality or fastest-backend result has yet been verified on the phone.
+
 ## Validated private build 112
 
 [Run 39073532467](https://github.com/Dhafen/flash-local/actions/runs/39073532467)
@@ -262,8 +290,9 @@ availability to the unchanged sole-owner private group.
 
 The build includes streamed thinking and the adaptive memory admission above.
 The ordinary chat still uses its existing runner; LES is an opt-in comparison.
-Phone confirmation of the memory change, trained Metal/reference agreement,
-comparable 128-token performance and a fastest-backend result remain pending.
+The subsequent phone report stops at the second native admission as detailed
+above. Trained Metal/reference agreement, comparable 128-token performance
+and a fastest-backend result remain pending.
 Hosted tests and reviewed simulator captures do not establish these results.
 
 ## Local analysis of phone exports

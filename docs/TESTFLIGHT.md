@@ -1,6 +1,31 @@
 # Private internal TestFlight delivery
 
-Latest version **0.1.0 (112)**, app source
+Latest version **0.1.0 (113)**, app source
+`c3fe7be385271bcd33b61af51661bea880b4ea29`, is available to the existing
+private internal group. [Full delivery run 39105887981](https://github.com/Dhafen/flash-local/actions/runs/39105887981)
+passed all required gates: native CPU F32/mixed/top-8 controls and independent
+reference, nine touched VM allocation/free cycles, explicit close with three
+replacement native owners, 18 selected Swift functions, all three Apple
+framework/header/import/symbol checks, 186 Swiftlet and 24 QPack controls,
+580 app tests, 474 package invocations (9 environment skips), 36 actually
+reviewed light/dark captures, arm64 device archive, signing and private upload.
+A fresh read-only Apple audit confirms `VALID`, `INTERNAL_ONLY`,
+`IN_BETA_TESTING`, nonexpired, exact private group and unchanged sole-owner
+membership. The sealed IPA is
+`5c790f277ef1143a6f4ec0d4d0ff184f97d72207bb37817383c3f78392be7414`.
+
+Build 112 admitted the first native check at 114 MB but stopped before the
+next at 2.216 GB footprint. Build 113 reuses the existing Apple VM path for
+iOS page buffers, synchronizes/closes each native owner explicitly, and
+records remaining native contexts/buffers separately from footprint. Top-8,
+quantized weights and the 5.5 GB ceiling are unchanged. Update without
+uninstalling or redownloading the model. Phone release of the retained
+memory, trained Metal/reference numerics and LES speed remain unverified.
+See [the experiment and phone acceptance](ORNITH-LES.md).
+
+## Previous build 112
+
+Version **0.1.0 (112)**, app source
 `207b5334df8661f62222af954717fb041a01311d`, is available to the existing
 private internal group. [Full delivery run 39073532467](https://github.com/Dhafen/flash-local/actions/runs/39073532467)
 passed the native/reference and QPack controls, 18 selected Swift tests,
@@ -12,9 +37,9 @@ membership. The sealed IPA is
 `0b058fca1b407899aaa85bfb1421f5647b5df262711511a0e6e7ab57124e9237`.
 
 This build adds streamed thinking and adaptive memory admission. Update the
-existing app and retain its installed GGUF. The build-108 phone attempt
-stopped at memory admission without a completed numerical/timing comparison;
-confirmation of the build-112 memory change and LES throughput is pending.
+existing app and retain its installed GGUF. Its subsequent phone report
+records a 2.216 GB footprint before the second native comparison, which fails
+memory admission. No complete numerical/timing comparison was produced.
 See [the experiment and local report analysis](ORNITH-LES.md).
 
 ## Previous build 107

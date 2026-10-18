@@ -6,12 +6,13 @@ Current target: the official 21.7 GB Ornith 1.5 35B-A3B Q4_K_M GGUF, a total pro
 
 ## Development status
 
-**Private TestFlight 0.1.0 (112) is available**, with streamed Ornith thinking
-and adaptive memory admission for the isolated LES comparison using the
+**Private TestFlight 0.1.0 (113) is available**, with streamed Ornith thinking,
+VM-backed LES page buffers and explicit phase-boundary ownership using the
 installed GGUF. [Delivery and limits](docs/TESTFLIGHT.md).
 Host synthetic/reference gates pass. Phone build 112 admits the first native
 check at 114 MB, then stops before the next one with a 2.216 GB live footprint.
-The isolated VM-buffer/lifecycle correction is under validation; no LES speed
+The isolated VM-buffer/lifecycle correction passes host/reference controls
+and is delivered in build 113; its phone confirmation is pending. No LES speed
 result has completed on the phone. The ordinary
 GGUF chat report measures 1.931 decode forwards/s over 190 forwards and
 3.954 GB peak; this is not a controlled backend comparison. No physical
