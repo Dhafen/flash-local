@@ -1,6 +1,36 @@
 # Private internal TestFlight delivery
 
-Latest delivered version **0.1.0 (120)**, app source
+Latest delivered version **0.1.0 (121)**, app source
+`a30fe6eefa4fd9bcc73257dbde5d75a10ab977ec`, is available to the existing
+private internal group. [Full delivery run 39151820985](https://github.com/Dhafen/flash-local/actions/runs/39151820985)
+passed 21 selected Swift functions, three independent five-forward F32 graph
+controls, eight operator formats, 63 routed and 18 callback-free synthetic
+variants, and three Apple framework/header/import/export slices. New exact-set
+controls distinguish rank permutations, reject changed/duplicate experts and
+missing evidence, and preserve the original ranked checksums and logit limits.
+The 186 Swiftlet controls, 24 QPack tests, 580 app tests, 474 package invocations
+(9 environment skips), 36 actually reviewed light/dark captures, device archive,
+signing, memory entitlements and privacy manifest also pass.
+
+The arm64 device archive is 38,291,710 bytes with no model payload. A fresh
+independent Apple audit confirms `VALID`, `INTERNAL_ONLY`, `IN_BETA_TESTING`,
+nonexpired, the exact private group and unchanged sole-owner membership.
+The sealed IPA SHA-256 is
+`ee070fc4f021e5dbacd9d901cb29aca3a5d4b40b16aa5956a08cf864a3a1499b`.
+
+Update without uninstalling or redownloading. Open **Jämför LES med befintlig
+modell**, then **Kör kontroll och jämförelse**, with Low Power Mode off and
+the app kept open. Every explicit run now makes a fresh numerical check;
+verified model preparation is reused. The new checksum must establish that
+the same eight distinct experts were selected, alongside the unchanged
+full-logit/callback-free limits. Failed batch-four still selects independently
+verified serial prefill. Share the new `ornith-les-…json` report even if
+admission stops. No physical build-121 throughput or expert-set agreement is
+yet verified, and the ordinary chat does not change backend automatically.
+
+## Previous build 120
+
+Previous delivered version **0.1.0 (120)**, app source
 `1f3fbebd77bc24936d0704eaa96fdcdbccc1c24b`, is available to the existing
 private internal group. [Full delivery run 39138061935](https://github.com/Dhafen/flash-local/actions/runs/39138061935)
 passed the three independent five-forward F32 graph controls, eight operator

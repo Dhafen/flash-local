@@ -67,7 +67,7 @@ toward admission. No static MiniCPM expert-frequency/prewarm table is reused.
 | Candidate | Current evidence | Next decision |
 | --- | --- | --- |
 | A: existing packed GGUF/MLX | Phone build 107: 1.931 decode forwards/s, 190 forwards; 3.954 GB peak; uncontrolled prompt/cache | Same fixed prompt, at least 128 decode steps per mode |
-| B: llama.cpp-omni LES | Build 120 serial logits satisfy the independent reference limits; ranked route checksums differ and timing remains blocked | Verify exact expert sets separately from rank permutations; keep failing batch-four disabled |
+| B: llama.cpp-omni LES | Build 120 serial logits satisfy the independent reference limits; build 121 adds host-validated exact expert-set controls | Verify those sets on the phone and measure at least 128 tokens per mode; keep failing batch-four disabled |
 | C: Flash-MoE pipeline | Code inspected; fused expert/pointwise kernels, deferred command buffers, parallel pread; no redistribution license found | Do not copy; compare permitted independently implemented techniques |
 | Swiftlet/QPack | Build 97 delivered, grouped kernels conditionally activated after four-position replay; no phone result | Different checkpoint quantization, so cannot be an identical-weight A/B |
 
@@ -483,8 +483,20 @@ unknown policy or missing set proof cannot pass. The original ranked checksums
 remain exported. Rank permutations can change floating-point reduction order
 while preserving the mathematical expert-weight pairs; only that separately
 verified case is accepted. Failed batch checks select independently checked
-serial prefill, without changing top-k, quantization or weights. Host tests
-are being run; trained expert-set agreement and phone throughput remain open.
+serial prefill, without changing top-k, quantization or weights. Trained
+expert-set agreement and phone throughput remain open.
+
+[Full delivery run 39151820985](https://github.com/Dhafen/flash-local/actions/runs/39151820985)
+passes at runtime source `a30fe6eefa4fd9bcc73257dbde5d75a10ab977ec`, delivered
+as private TestFlight 121. All 21 selected Swift functions pass, including
+complete/missing/changed expert-set admission and batch fallback. Native
+controls retain 63 routed and 18 callback-free variants; rank permutations
+change only the ranked hash, while changed/duplicate expert IDs fail the
+appropriate controls. Three independent F32 graphs remain within 9.32e-8
+maximum absolute error. All three Apple slices, 186 Swiftlet/24 QPack tests,
+app/package gates, 36 reviewed captures, the device archive, signing and fresh
+private availability pass. Local report analysis passes 27 tests. These are
+host/build results, not trained-model phone timing or quality validation.
 
 Run `python3 scripts/analyze_ornith_les.py REPORT.json` on an exported LES
 report. It only reads the local JSON and prints whitelisted aggregates.

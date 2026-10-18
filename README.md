@@ -6,9 +6,10 @@ Current target: the official 21.7 GB Ornith 1.5 35B-A3B Q4_K_M GGUF, a total pro
 
 ## Development status
 
-**Private TestFlight 0.1.0 (120) is available**, adding an independent bounded
-dequantized-weight reference for the installed Ornith GGUF. Streamed thinking,
-VM-backed LES buffers and explicit ownership are retained.
+**Private TestFlight 0.1.0 (121) is available**, distinguishing exact expert
+sets from rank permutations in the independent Ornith-GGUF control. Every
+explicit comparison gets fresh numerical and memory observations. Streamed
+thinking, VM-backed LES buffers and explicit ownership are retained.
 [Delivery and limits](docs/TESTFLIGHT.md).
 Host synthetic/reference gates pass. Phone build 112 admits the first native
 check at 114 MB, then stops before the next one with a 2.216 GB live footprint.
@@ -53,10 +54,13 @@ Batch-four is used only if separately admitted. Build 120 is delivered and its
 phone report has no completed timing: serial native logits are within 0.00378
 absolute / 0.0000445 relative L2 of the independent reference, but ranked expert
 checksums differ. Batch-four still differs by 2.288 absolute / 0.05926 relative
-L2. A separate exact expert-set checksum is being validated to distinguish
-rank permutations from changed selections, retaining strict logit limits and
-ranked lookahead on/off checks. No speed improvement or full quality agreement
-is established. See [the detailed evidence](docs/ORNITH-LES.md).
+L2. Build 121 adds an exact expert-set checksum to distinguish rank permutations
+from changed selections, retaining strict logit limits and ranked lookahead
+on/off checks. Its [full delivery run](https://github.com/Dhafen/flash-local/actions/runs/39151820985)
+passes 21 selected Swift functions, native/reference/app/package/QPack gates,
+36 reviewed captures, device archive, signing and fresh private availability.
+Trained expert-set agreement, speed improvement and full quality remain
+unverified. See [the detailed evidence](docs/ORNITH-LES.md).
 
 The [Ornith adapter and model switch](docs/ORNITH-IMPLEMENTATION.md) are delivered in **TestFlight 0.1.0 (84)**. They implement the actual `qwen35moe` trunk, including SiLU GDN gating, ordinary residual/norm blocks, shared/routed experts, pinned tokenization and correct exclusion of the stored MTP block. Small K/V projections use bounded pinned CPU kernels to preserve reference rounding; other projections and experts stay on Metal. Ornith is the default, with separate persisted chats and a model picker retaining REAM. Build 84 pairs eligible gate/up projections without changing their per-row arithmetic; phone performance for that optimization is pending.
 
@@ -71,6 +75,10 @@ The first user-provided Ornith phone report from build 80 measures **1.493 decod
 Ornith uses bounded parallel reads, whole selected-expert transfers, packed GPU evaluation, foreground prefix retention and an expert LRU inside its 3.5 GB packed-weight allowance. Update without uninstalling; the installed model file is retained. Trained-model logit agreement, offline proof, 65K context and comparative quality remain unverified. Structured tool calling and the optional LAN model server are not yet implemented. The inherited catalog is not evidence that another architecture executes.
 
 The quality target remains Qwen3.8-27B-class capability. See [model candidates and the paired local evaluation contract](docs/REAM-QUALITY.md), [implementation and validation](docs/REAM-IMPLEMENTATION.md) and the [draft implementation PR](https://github.com/Dhafen/flash-local/pull/1). GitHub Actions builds on Apple silicon with pinned Xcode 26.2. Actual model inference is not run in the cloud.
+
+The [Bonsai feasibility review](docs/BONSAI-EVALUATION.md) records separately
+inspected low-bit kernels, publisher measurements and quality/memory limits.
+It is research, not an installed backend or a switch away from Ornith.
 
 ## Build
 
