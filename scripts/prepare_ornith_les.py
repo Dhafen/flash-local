@@ -2,6 +2,8 @@
 
 The local patch preserves router selection and all mathematical operators. It
 adds a tensor-major source reader, aggregate instrumentation and an accessor.
+Q4_K decoding promotes the stored half scale before dividing by sixteen, so
+small scales retain the values represented by the original packed weights.
 The upstream checkout is an ignored build input, never the production runtime.
 """
 import argparse
@@ -161,6 +163,12 @@ def patched_files(source):
     replace(file, "    free(buf);\n}\n\nbool ggml_metal_buffer_park",
             "    flash_omni_buffer_lifetime(buf->dev->mtl_device, false, buf->owned, buf->all_size);\n"
             "    free(buf);\n}\n\nbool ggml_metal_buffer_park")
+    # The shared dequantizer feeds GET_ROWS and small-batch matvec kernels.
+    # Half division loses scale bits before the subsequent float assignment.
+    # Preserve the existing bytes/levels, doing the scale adjustment in F32.
+    replace("ggml/src/ggml-metal/ggml-metal.metal",
+            "    const float d   = il < 2 ? xb->d : xb->d / 16.h;",
+            "    const float d   = il < 2 ? xb->d : float(xb->d) / 16.f;")
     return result
 
 
@@ -194,7 +202,8 @@ def prepare(root, run=None):
         patchScriptSHA256=script_hash,
         patchedSHA256={name: hashlib.sha256((source / name).read_bytes()).hexdigest() for name in files},
         changes=["tensor-major direct GGUF reads", "aggregate I/O and Metal telemetry", "exclude unused MTP prediction",
-                 "Apple VM-backed page buffers with symmetric deallocation", "native buffer lifetime accounting"],
+                 "Apple VM-backed page buffers with symmetric deallocation", "native buffer lifetime accounting",
+                 "Q4_K GPU nibble-scale adjustment in F32"],
         routingChanged=False, quantizationChanged=False), indent=2) + "\n")
     return source
 
