@@ -2,7 +2,6 @@
 #include <charconv>
 #include <cstddef>
 #include <cstdint>
-#include <initializer_list>
 #include <limits>
 #include <string_view>
 #include <vector>
@@ -39,13 +38,15 @@ struct flash_local_routing_trace {
                 const int32_t expert = ids[rank];
                 if (expert < 0 || uint32_t(expert) >= experts) return false;
                 ordered ^= uint32_t(expert); ordered *= 1099511628211ULL;
-                uint64_t tuple = 14695981039346656037ULL;
-                for (uint32_t value : {uint32_t(position + row), layer, rank, uint32_t(expert)}) {
-                    for (unsigned shift = 0; shift < 32; shift += 8) {
-                        tuple ^= (value >> shift) & 255U; tuple *= 1099511628211ULL;
-                    }
-                }
-                normalized += tuple;
+                // Each field has a disjoint, bounded bit range. Avalanche the
+                // complete tuple before summation: summing raw FNV tuples can
+                // cancel correlated expert changes in adjacent layers.
+                uint64_t tuple = uint64_t(position + row) | (uint64_t(layer) << 16) |
+                    (uint64_t(rank) << 24) | (uint64_t(expert) << 32);
+                tuple += 0x9e3779b97f4a7c15ULL;
+                tuple = (tuple ^ (tuple >> 30)) * 0xbf58476d1ce4e5b9ULL;
+                tuple = (tuple ^ (tuple >> 27)) * 0x94d049bb133111ebULL;
+                normalized += tuple ^ (tuple >> 31);
             }
         }
         sequential = ordered; canonical = normalized; decisions += uint64_t(rows * ranks);
