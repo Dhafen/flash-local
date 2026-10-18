@@ -73,6 +73,27 @@ class LESAnalysisTests(unittest.TestCase):
         self.assertTrue(result["shortNumericalGatePassed"])
         self.assertFalse(result["canonicalBatchedRoutingVerified"])
 
+    def test_layer_and_matched_input_diagnostics_are_scalar_and_do_not_relax_the_gate(self):
+        data = report()
+        point = data["numericalCheck"]["noLookahead"]
+        point.update(maximumAbsoluteError=3.12, relativeL2Error=.066,
+            layerCheckpoints=dict(comparedPoints=500, missingPoints=0, shapeMismatches=0,
+                maximumAbsoluteError=1, relativeL2Error=.01,
+                firstDivergence=dict(position=0, stage=3, layer=0, maximumAbsoluteError=.1,
+                    relativeL2Error=.002, values="PRIVATE_MARKER"), values="PRIVATE_MARKER"),
+            projectionProbe=dict(samples=16, columns=2048, weightType=12, cpuInputType=15,
+                backendMaximumAbsoluteError=.00001, cpuMaximumAbsoluteError=.01,
+                backendRelativeL2Error=.000001, cpuRelativeL2Error=.001, input="PRIVATE_MARKER"))
+        result = analyze(data)
+        value = result["numericalComparisons"][0]
+        self.assertEqual(value["layerCheckpoints"]["firstDivergence"]["stage"], 3)
+        self.assertEqual(value["projectionProbe"]["samples"], 16)
+        self.assertNotIn("PRIVATE_MARKER", json.dumps(result))
+        self.assertFalse(result["shortNumericalGatePassed"])
+        self.assertTrue(all(item["fastestComparableBackend"] is None for item in result["comparisons"]))
+        point["layerCheckpoints"]["firstDivergence"]["layer"] = 40
+        with self.assertRaises(ValueError): analyze(data)
+
     def test_canonical_trace_requires_all_three_matching_routes_and_counts(self):
         data = report()
         for key in ("noLookahead", "lookahead", "batchedPrefill"):

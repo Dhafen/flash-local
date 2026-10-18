@@ -50,24 +50,41 @@ public final class Qwen4ExpCPUReference {
     }
     private let artifact: VerifiedGGUFArtifact
     private let governor: Governor
+    private let checkpoints: GGUFCheckpointCollector?
     private let handle: OpaquePointer
     public let vocabularySize: Int
 
     public init(artifact: VerifiedGGUFArtifact, contextTokens: Int = 128, budgetBytes: UInt64 = 4_000_000_000,
+                checkpoints: GGUFCheckpointCollector? = nil,
                 cancellationRequested: @escaping @Sendable () -> Bool = { false }) throws {
         guard (16...128).contains(contextTokens), budgetBytes <= 5_500_000_000 else {
             throw GGUFError.limit("short CPU reference context or memory budget")
         }
         _ = try GGUFStreamedDecoder.vocabularySize(index: artifact.index)
+        if checkpoints != nil, artifact.index.metadata["general.architecture"]?.text != "qwen35moe" {
+            throw GGUFError.unsupported("Layer checkpoint diagnostics require the Ornith graph")
+        }
         let governor = Governor(budget: budgetBytes, cancelled: cancellationRequested)
-        self.artifact = artifact; self.governor = governor
+        self.artifact = artifact; self.governor = governor; self.checkpoints = checkpoints
         try artifact.assertUnchanged()
         let descriptor = try artifact.duplicateForReading()
         defer { _ = Darwin.close(descriptor) }
-        guard let handle = flr_create(descriptor, Int32(contextTokens), { user in
+        let abort: flr_abort_callback = { user in
             guard let user else { return true }
             return Unmanaged<Governor>.fromOpaque(user).takeUnretainedValue().shouldAbort()
-        }, Unmanaged.passUnretained(governor).toOpaque()) else {
+        }
+        let created: OpaquePointer?
+        if let checkpoints {
+            created = flr_create_traced(descriptor, Int32(contextTokens), abort,
+                Unmanaged.passUnretained(governor).toOpaque(), { stage, layer, values, count, user in
+                    guard let user else { return false }
+                    return Unmanaged<GGUFCheckpointCollector>.fromOpaque(user).takeUnretainedValue()
+                        .capture(stage: stage, layer: layer, values: values, count: count)
+                }, Unmanaged.passUnretained(checkpoints).toOpaque())
+        } else {
+            created = flr_create(descriptor, Int32(contextTokens), abort, Unmanaged.passUnretained(governor).toOpaque())
+        }
+        guard let handle = created else {
             throw governor.failure(String(cString: flr_last_error()))
         }
         do { try artifact.assertUnchanged() }

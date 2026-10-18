@@ -67,7 +67,7 @@ toward admission. No static MiniCPM expert-frequency/prewarm table is reused.
 | Candidate | Current evidence | Next decision |
 | --- | --- | --- |
 | A: existing packed GGUF/MLX | Phone build 107: 1.931 decode forwards/s, 190 forwards; 3.954 GB peak; uncontrolled prompt/cache | Same fixed prompt, at least 128 decode steps per mode |
-| B: llama.cpp-omni LES | Build 113 VM-buffer/owner fix delivered after host gates; phone build 112 blocked before its second comparison | Confirm VM-buffer release on phone, then trained Metal/reference gate and 128-token comparison |
+| B: llama.cpp-omni LES | Build 113 admits all checks and releases owners/buffers; trained logit gate fails before timing | Locate the numerical discrepancy with bounded layer and matched-input diagnostics, then rerun the trained gate |
 | C: Flash-MoE pipeline | Code inspected; fused expert/pointwise kernels, deferred command buffers, parallel pread; no redistribution license found | Do not copy; compare permitted independently implemented techniques |
 | Swiftlet/QPack | Build 97 delivered, grouped kernels conditionally activated after four-position replay; no phone result | Different checkpoint quantization, so cannot be an identical-weight A/B |
 
@@ -296,6 +296,38 @@ and a fastest-backend result remain pending.
 Hosted tests and reviewed simulator captures do not establish these results.
 
 ## Local analysis of phone exports
+
+### Build 113 trained phone gate
+
+The subsequent physical report admits all three numerical variants. After
+the first native owner closes, the transition footprint is 238,160,024 bytes;
+before batched prefill it is 244,664,496 bytes. Both samples report zero live
+native contexts, buffers, owned bytes and mapped spans. Device allocation is
+2,228,224 bytes. This is evidence of recovery in that run, not a larger cache
+allowance or a general memory-pressure guarantee.
+
+Prediction off/on have identical logit errors and route digest/count:
+maximum absolute error 3.11909437, relative L2 0.06595874, 8,000 decisions.
+Prefill-four has maximum error 3.30069351 and relative L2 0.08927649. All four
+greedy choices match, but the unchanged 0.01 absolute / 0.001 relative limits
+correctly prevent timing. The report contains no speed measurements. Its
+legacy batch digest cannot establish batch routing because of the observer
+stride/order limitation addressed above. Low Power Mode was enabled, so a
+future timing comparison also needs that mode disabled.
+
+The new opt-in diagnostic retains at most 64 MiB of fixed-test checkpoint
+payload, with a 4 MiB/256-point per-forward cap. Both runtimes observe known
+embedding, attention, FFN and layer outputs; detailed QKV/convolution points
+are limited to layer zero. Only scalar errors, missing/shape counts and the
+first divergent position/stage/layer are exported. Raw activation vectors
+remain ephemeral. A first-layer, 16-row matched-input probe compares observed
+and ordinary CPU results independently with a dequantized-weight double-dot
+reference. It is a sampled operator diagnostic, not a replacement model
+reference or permission to relax the full-logit gate. One hypothesis is CPU
+operand rounding versus Metal's operand path; a cause is not yet established.
+Timing runs do not enable either observer. Weights, top-8, ordinary chat,
+prepared file format and acceptance thresholds remain unchanged. New Apple
+validation and device evidence remain pending.
 
 The routing observer reads each top-8 row with the tensor's actual row
 stride. In this pinned ggml, top-k is a view of a full expert sort, so batched

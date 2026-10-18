@@ -117,6 +117,45 @@ def numerical_gate(check):
         number(on.get("routingDigest"), "routingDigest", integer=True))
 
 
+def numerical_summaries(check):
+    if not isinstance(check, dict):
+        return []
+    result = []
+    for mode in ("noLookahead", "lookahead", "batchedPrefill"):
+        item = check.get(mode)
+        if not isinstance(item, dict):
+            continue
+        value = dict(mode=mode, positions=optional_number(item, "positions"), sameGreedy=item.get("sameGreedy") is True,
+            maximumAbsoluteError=optional_number(item, "maximumAbsoluteError", integer=False),
+            relativeL2Error=optional_number(item, "relativeL2Error", integer=False))
+        trace = item.get("layerCheckpoints")
+        if trace is not None:
+            if not isinstance(trace, dict):
+                raise ValueError("invalid layer trace summary")
+            layer = {key: optional_number(trace, key) for key in ("comparedPoints", "missingPoints", "shapeMismatches")}
+            layer.update({key: optional_number(trace, key, integer=False) for key in ("maximumAbsoluteError", "relativeL2Error")})
+            first = trace.get("firstDivergence")
+            if first is not None:
+                if not isinstance(first, dict): raise ValueError("invalid first checkpoint divergence")
+                position = number(first.get("position"), "position", integer=True)
+                stage = number(first.get("stage"), "stage", integer=True)
+                raw_layer = first.get("layer")
+                if isinstance(raw_layer, bool) or not isinstance(raw_layer, int) or raw_layer < -1 or raw_layer >= 40 or not 1 <= stage <= 9:
+                    raise ValueError("invalid checkpoint key")
+                layer["firstDivergence"] = dict(position=position, stage=stage, layer=raw_layer,
+                    maximumAbsoluteError=optional_number(first, "maximumAbsoluteError", integer=False),
+                    relativeL2Error=optional_number(first, "relativeL2Error", integer=False))
+            value["layerCheckpoints"] = layer
+        probe = item.get("projectionProbe")
+        if probe is not None:
+            if not isinstance(probe, dict): raise ValueError("invalid projection probe")
+            value["projectionProbe"] = {key: optional_number(probe, key) for key in ("samples", "columns", "weightType", "cpuInputType")}
+            value["projectionProbe"].update({key: optional_number(probe, key, integer=False) for key in (
+                "backendMaximumAbsoluteError", "cpuMaximumAbsoluteError", "backendRelativeL2Error", "cpuRelativeL2Error")})
+        result.append(value)
+    return result
+
+
 def delta(before, after, key):
     if not isinstance(before, dict) or not isinstance(after, dict):
         return None
@@ -261,6 +300,7 @@ def analyze(report):
         sampledPeakFootprintBytes=optional_number(report, "maximumObservedFootprintBytes"),
         shortNumericalGatePassed=gate,
         canonicalBatchedRoutingVerified=canonical_batched_routing(report.get("numericalCheck")),
+        numericalComparisons=numerical_summaries(report.get("numericalCheck")),
         fullModelNumericsVerified=False,
         memoryAdmissions=[memory_admission(item) for item in admissions], runs=runs, comparisons=comparisons,
         recommendedAppBackend=None, reportAuthenticityVerified=False, offlineExecutionVerified=False,

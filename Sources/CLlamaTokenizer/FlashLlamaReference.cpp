@@ -2,6 +2,7 @@
 #include "llama.h"
 #include "ggml-cpu.h"
 #include "ggml-quants.h"
+#include "CheckpointObserver.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -18,8 +19,10 @@ struct flr_context {
     llama_context * context = nullptr;
     flr_abort_callback should_abort = nullptr;
     void * user = nullptr;
+    flr_checkpoint_callback checkpoint = nullptr;
+    void * checkpoint_user = nullptr;
     int32_t vocabulary = 0, position = 0, limit = 0;
-    bool poisoned = false;
+    bool poisoned = false, checkpoint_failed = false;
     ~flr_context() {
         if (context) llama_free(context);
         if (model) llama_model_free(model);
@@ -143,13 +146,15 @@ int32_t flr_project_kv_rows(uint32_t weight_type, const void * weights, int32_t 
     } catch (const std::exception & error) { reference_error = error.what(); return -3; }
 }
 
-flr_context * flr_create(int descriptor, int32_t context_tokens, flr_abort_callback callback, void * user) {
+static flr_context * create_reference(int descriptor, int32_t context_tokens, flr_abort_callback callback, void * user,
+                                     flr_checkpoint_callback checkpoint, void * checkpoint_user) {
     try {
         if (!callback || context_tokens < 16 || context_tokens > 128) {
             reference_error = "CPU diagnostic requires a governor and 16...128 context tokens"; return nullptr;
         }
         auto value = std::make_unique<flr_context>();
         value->should_abort = callback; value->user = user; value->limit = context_tokens;
+        value->checkpoint = checkpoint; value->checkpoint_user = checkpoint_user;
         if (aborted(value.get())) { reference_error = "CPU reference cancelled before loading"; return nullptr; }
         const int duplicate = fcntl(descriptor, F_DUPFD_CLOEXEC, 0);
         if (duplicate < 0) { reference_error = "Cannot duplicate verified CPU reference descriptor"; return nullptr; }
@@ -178,11 +183,32 @@ flr_context * flr_create(int descriptor, int32_t context_tokens, flr_abort_callb
         cp.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED;
         cp.offload_kqv = false; cp.op_offload = false; cp.moe_cache_size = 0;
         cp.abort_callback = decoding; cp.abort_callback_data = value.get();
+        if (checkpoint) {
+            cp.cb_eval_user_data = value.get();
+            cp.cb_eval = [](ggml_tensor * tensor, bool ask, void * user) {
+                const bool selected = flash_local_checkpoint::identify(ggml_get_name(tensor)).stage != 0;
+                if (ask) return selected;
+                if (!selected) return true;
+                auto * owner = static_cast<flr_context *>(user);
+                const bool valid = flash_local_checkpoint::emit(tensor, owner->checkpoint, owner->checkpoint_user);
+                owner->checkpoint_failed = owner->checkpoint_failed || !valid;
+                return valid;
+            };
+        }
         value->context = llama_init_from_model(value->model, cp);
         if (!value->context || aborted(value.get())) { reference_error = "CPU context allocation failed or governor stopped it"; return nullptr; }
         reference_error.clear(); return value.release();
     } catch (const std::exception & e) { reference_error = e.what(); return nullptr; }
     catch (...) { reference_error = "Unknown CPU reference load failure"; return nullptr; }
+}
+
+flr_context * flr_create(int descriptor, int32_t context_tokens, flr_abort_callback callback, void * user) {
+    return create_reference(descriptor, context_tokens, callback, user, nullptr, nullptr);
+}
+flr_context * flr_create_traced(int descriptor, int32_t context_tokens, flr_abort_callback callback, void * user,
+                              flr_checkpoint_callback checkpoint, void * checkpoint_user) {
+    if (!checkpoint) { reference_error = "Missing reference checkpoint observer"; return nullptr; }
+    return create_reference(descriptor, context_tokens, callback, user, checkpoint, checkpoint_user);
 }
 
 void flr_free(flr_context * value) { delete value; }
@@ -194,7 +220,8 @@ int32_t flr_step(flr_context * value, int32_t token, float * output, int32_t cap
             reference_error = "CPU reference token, output capacity or state invalid"; return -1;
         }
         value->poisoned = true;
-        if (aborted(value) || llama_decode(value->context, llama_batch_get_one(&token, 1)) || aborted(value)) {
+        if (aborted(value) || llama_decode(value->context, llama_batch_get_one(&token, 1)) ||
+            value->checkpoint_failed || aborted(value)) {
             reference_error = "CPU decode failed or governor stopped it"; return -1;
         }
         const float * logits = llama_get_logits_ith(value->context, -1);

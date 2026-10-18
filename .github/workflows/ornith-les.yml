@@ -83,7 +83,9 @@ jobs:
           grep 'ORNITH_ROUTING_TRACE paddedRows=true batchOrderIndependent=true changedExpertDetected=true invalidInputAtomic=true' .work/les-top8-controls.log
           grep 'ORNITH_BATCH_CONTROL prefixCases=11 steps=128 .*canonicalRouting=true reset=true syntheticOnly=true' .work/les-top8-controls.log
       - name: Compare both complete synthetic graphs with the existing pinned CPU reference
-        run: python3 scripts/run_ornith_les_reference.py
+        run: |
+          python3 scripts/run_ornith_les_reference.py
+          grep 'ORNITH_PROJECTION_PROBE matchedInput=true cpuRoundingDistinguished=true changedResultDetected=true syntheticOnly=true gpuExecuted=false' .work/les-reference.log
       - name: Both thinking modes against the pinned Ornith template
         run: |
           python3 scripts/make_tokenizer_reference_fixture.py --ornith
@@ -117,6 +119,7 @@ jobs:
           grep 'ORNITH_PREPARATION_ADMISSION phaseCaptured=true beforeAndAfterCaptured=true syntheticOnly=true' .work/les-swift-tests.log
           grep 'ORNITH_NATIVE_LIFETIME explicitClose=true wrapperStillAlive=true repeatedOwners=3 noLiveBuffers=true syntheticOnly=true' .work/les-swift-tests.log
           grep 'ORNITH_CANONICAL_ROUTING completeBatchTrace=true partialRejected=true changedExpertRejected=true legacyPreserved=true' .work/les-swift-tests.log
+          grep 'ORNITH_LAYER_CHECKPOINTS exactReplay=true bounded=true failClosed=true noPayload=true syntheticOnly=true' .work/les-swift-tests.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:

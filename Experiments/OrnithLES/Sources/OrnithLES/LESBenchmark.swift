@@ -17,6 +17,8 @@ public struct LESLogitComparison: Codable, Sendable, Equatable {
     public var routingDigest: UInt64? = nil
     public var routingDecisions: UInt64? = nil
     public var canonicalRoutingDigest: UInt64? = nil
+    public var layerCheckpoints: LESCheckpointComparison? = nil
+    public var projectionProbe: LESProjectionProbe? = nil
     public var activeLookaheadDepth: Int? = nil
     public var passed: Bool {
         positions == 4 && maximumAbsoluteError.isFinite && relativeL2Error.isFinite &&
@@ -30,6 +32,7 @@ public struct LESNumericalCheck: Codable, Sendable {
     public let noLookahead: LESLogitComparison
     public let lookahead: LESLogitComparison
     public let batchedPrefill: LESLogitComparison
+    public var referenceCheckpointPayloadBytes: Int? = nil
     public let fullModelNumericsVerified = false
     public var canonicalBatchedRoutingVerified: Bool {
         noLookahead.canonicalRoutingDigest != nil &&
@@ -87,6 +90,7 @@ public enum LESBenchmark {
         let prompt: [Int]
         let forced: [Int]
         let logits: [[Float]]
+        let checkpoints: [[GGUFCheckpoint]]
     }
     private static func greedy(_ values: [Float]) throws -> Int {
         guard !values.isEmpty, values.allSatisfy(\.isFinite) else { throw GGUFError.invalid("Non-finite benchmark logits") }
@@ -122,31 +126,50 @@ public enum LESBenchmark {
         }
     }
     private static func reference(artifact: VerifiedGGUFArtifact, prompt: [Int], control: LESControl) throws -> Replay {
+        let collector = GGUFCheckpointCollector()
         let context = try Qwen4ExpCPUReference(artifact: artifact, contextTokens: 128, budgetBytes: 5_500_000_000,
+            checkpoints: collector,
             cancellationRequested: { control.shouldAbort() })
         var logits: [Float] = []
-        for token in prompt { logits = try context.logits(for: token) }
+        var checkpoints: [[GGUFCheckpoint]] = [], checkpointBytes = 0
+        func capture() throws {
+            let step = try collector.take()
+            let bytes = step.reduce(0) { $0 + $1.values.count * 4 }
+            guard checkpointBytes <= (64 << 20) - bytes else { throw GGUFError.limit("Reference layer trace exceeds 64 MiB") }
+            checkpointBytes += bytes; checkpoints.append(step)
+        }
+        for token in prompt { logits = try context.logits(for: token); try capture() }
         var vectors = [logits], forced: [Int] = []
         for _ in 0..<3 {
             let token = try greedy(logits); forced.append(token)
-            logits = try context.logits(for: token); vectors.append(logits)
+            logits = try context.logits(for: token); vectors.append(logits); try capture()
         }
-        return Replay(prompt: prompt, forced: forced, logits: vectors)
+        return Replay(prompt: prompt, forced: forced, logits: vectors, checkpoints: checkpoints)
     }
     private static func compare(_ replay: Replay, artifact: VerifiedGGUFArtifact, prepared: URL,
                                 depth: Int, prefillBatch: Int = 1, control: LESControl,
                                 onAdmission: (LESMemoryAdmission) -> Void) throws -> LESLogitComparison {
         let memory = try plan(artifact, context: 128, depth: depth,
             phase: "numerics.prediction\(depth).prefill\(prefillBatch)", onAdmission: onAdmission)
-        let context = try LESContext(artifact: artifact, prepared: prepared, plan: memory, control: control, traceRouting: true)
+        let collector = prefillBatch == 1 ? GGUFCheckpointCollector() : nil
+        let context = try LESContext(artifact: artifact, prepared: prepared, plan: memory, control: control,
+            traceRouting: true, checkpoints: collector)
         defer { context.close() }
         var logits: [Float] = []
+        var checkpoints = LESCheckpointAccumulator()
         for first in stride(from: 0, to: replay.prompt.count, by: prefillBatch) {
             logits = try context.logits(tokens: Array(replay.prompt[first..<min(first + prefillBatch, replay.prompt.count)]))
+            if let collector { try checkpoints.compare(replay.checkpoints[first], collector.take(), position: first) }
         }
         var absolute = 0.0, squared = 0.0, referenceSquared = 0.0, same = true
         for position in 0..<4 {
-            if position > 0 { logits = try context.logits(tokens: [replay.forced[position - 1]]) }
+            if position > 0 {
+                logits = try context.logits(tokens: [replay.forced[position - 1]])
+                if let collector {
+                    let input = replay.prompt.count + position - 1
+                    try checkpoints.compare(replay.checkpoints[input], collector.take(), position: input)
+                }
+            }
             let expected = replay.logits[position]
             guard logits.count == expected.count else { throw GGUFError.invalid("LES reference vocabulary shape") }
             same = try same && greedy(logits) == greedy(expected)
@@ -160,6 +183,8 @@ public enum LESBenchmark {
             relativeL2Error: sqrt(squared / max(referenceSquared, 1e-30)), sameGreedy: same,
             routingDigest: context.metrics.routingDigest, routingDecisions: context.metrics.routingDecisions,
             canonicalRoutingDigest: context.metrics.canonicalRoutingDigest,
+            layerCheckpoints: collector == nil ? nil : checkpoints.result,
+            projectionProbe: context.projectionProbe,
             activeLookaheadDepth: memory.lookaheadDepth)
     }
     public static func check(artifact: VerifiedGGUFArtifact, prepared: URL, control: LESControl,
@@ -180,7 +205,8 @@ public enum LESBenchmark {
             prefillBatch: 4, control: control, onAdmission: onAdmission) }
         return LESNumericalCheck(modelSHA256: artifact.manifest.sha256,
             referenceRevision: Qwen4ExpCPUReference.sourceRevision, nativeRevision: LESContext.revision,
-            noLookahead: off, lookahead: on, batchedPrefill: batch)
+            noLookahead: off, lookahead: on, batchedPrefill: batch,
+            referenceCheckpointPayloadBytes: replay.checkpoints.reduce(0) { $0 + $1.reduce(0) { $0 + $1.values.count * 4 } })
     }
 
     /// Fresh state on every run. Two runs on the same engine distinguish an

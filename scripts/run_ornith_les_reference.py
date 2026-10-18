@@ -19,7 +19,8 @@ def main():
             run(['cmake', '-S', root/'Tests/ReferenceHarness', '-B', build, f'-DLLAMA_SOURCE={source}',
                 '-DCMAKE_BUILD_TYPE=Release', '-DCMAKE_OSX_ARCHITECTURES=arm64', '-DGGML_NATIVE=OFF',
                 '-DGGML_CPU_ARM_ARCH=armv8-a', '-DGGML_ACCELERATE=OFF', '-DGGML_CPU_KLEIDIAI=OFF', '-DGGML_LLAMAFILE=OFF'])
-            run(['cmake', '--build', build, '--target', 'flash-local-reference', '--parallel', '3'])
+            run(['cmake', '--build', build, '--target', 'flash-local-reference', 'flash-local-projection-probe-control', '--parallel', '3'])
+            run([build/'flash-local-projection-probe-control'])
             for mixed in [False, True]:
                 suffix = '-mixed' if mixed else ''
                 model = root/'.test-fixtures'/f'synthetic-ornith{suffix}.gguf'

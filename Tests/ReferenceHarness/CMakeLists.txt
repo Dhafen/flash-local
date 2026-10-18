@@ -53,5 +53,7 @@ target_link_libraries(flash-local-tokenizer-reference PRIVATE flash-local-tokeni
 target_include_directories(flash-local-tokenizer-reference PRIVATE
   "${LLAMA_SOURCE}/common" "${LLAMA_SOURCE}/src" "${LLAMA_SOURCE}/vendor")
 add_executable(flash-local-session-reference session.cpp)
+add_executable(flash-local-projection-probe-control projection-probe.cpp)
+target_link_libraries(flash-local-projection-probe-control PRIVATE llama)
 target_include_directories(flash-local-session-reference PRIVATE "${LLAMA_SOURCE}/common")
 target_link_libraries(flash-local-session-reference PRIVATE flash-local-tokenizer-runtime)

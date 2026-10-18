@@ -3,6 +3,7 @@ import Foundation
 import FlashOrnithLES
 import GGUFCore
 import MinirunKit
+import ModelAdapters
 import StorageCore
 
 public final class LESControl: @unchecked Sendable {
@@ -44,6 +45,20 @@ public struct LESMetrics: Codable, Sendable, Equatable {
     }
 }
 
+public struct LESProjectionProbe: Codable, Sendable, Equatable {
+    public let samples, columns, weightType, cpuInputType: UInt64
+    public let backendMaximumAbsoluteError, cpuMaximumAbsoluteError: Double
+    public let backendRelativeL2Error, cpuRelativeL2Error: Double
+    init?(_ value: flo_metrics) {
+        guard value.probe_samples > 0 else { return nil }
+        samples = value.probe_samples; columns = value.probe_columns
+        weightType = value.probe_weight_type; cpuInputType = value.probe_cpu_input_type
+        backendMaximumAbsoluteError = value.probe_backend_max; cpuMaximumAbsoluteError = value.probe_cpu_max
+        backendRelativeL2Error = sqrt(value.probe_backend_squared / max(value.probe_reference_squared, 1e-30))
+        cpuRelativeL2Error = sqrt(value.probe_cpu_squared / max(value.probe_reference_squared, 1e-30))
+    }
+}
+
 /// Ownership counters are separate from process footprint: a mapped file span
 /// is not resident RAM, and device allocation includes other Metal backends.
 public struct LESRuntimeMemory: Codable, Sendable, Equatable {
@@ -61,15 +76,16 @@ public struct LESRuntimeMemory: Codable, Sendable, Equatable {
 public final class LESContext {
     private let artifact: VerifiedGGUFArtifact
     private let control: LESControl
+    private let checkpoints: GGUFCheckpointCollector?
     private var handle: OpaquePointer?
     public let vocabularySize: Int
     public let plan: LESMemoryPlan
     public init(artifact: VerifiedGGUFArtifact, prepared: URL, plan: LESMemoryPlan,
                 control: LESControl, traceRouting: Bool = false, bypassPageCache: Bool = false,
-                syntheticCPUControl: Bool = false) throws {
+                syntheticCPUControl: Bool = false, checkpoints: GGUFCheckpointCollector? = nil) throws {
         try artifact.assertUnchanged()
         guard prepared.isFileURL, !control.shouldAbort() else { throw CancellationError() }
-        self.artifact = artifact; self.control = control; self.plan = plan
+        self.artifact = artifact; self.control = control; self.plan = plan; self.checkpoints = checkpoints
         var options = flo_options()
         options.context_tokens = Int32(plan.contextTokens); options.prefill_slots = Int32(plan.prefillSlots)
         options.cache_slots_per_layer = Int32(plan.cacheSlotsPerLayer); options.lookahead_depth = Int32(plan.lookaheadDepth)
@@ -82,6 +98,14 @@ public final class LESContext {
         options.io_threads = 4; options.cpu_threads = 4; options.metal = !syntheticCPUControl
         options.bypass_page_cache = bypassPageCache; options.trace_routing = traceRouting
         options.memory_ceiling_bytes = plan.processCeilingBytes
+        if let checkpoints {
+            options.checkpoint = { stage, layer, values, count, user in
+                guard let user else { return false }
+                return Unmanaged<GGUFCheckpointCollector>.fromOpaque(user).takeUnretainedValue()
+                    .capture(stage: stage, layer: layer, values: values, count: count)
+            }
+            options.checkpoint_user = Unmanaged.passUnretained(checkpoints).toOpaque()
+        }
         let descriptor = try artifact.duplicateForReading(); defer { Darwin.close(descriptor) }
         guard let handle = flo_open(descriptor, prepared.path, options, { user in
             guard let user else { return true }
@@ -114,6 +138,7 @@ public final class LESContext {
     }
     public func reset() { flo_reset(handle) }
     public var metrics: LESMetrics { LESMetrics(flo_snapshot(handle)) }
+    public var projectionProbe: LESProjectionProbe? { LESProjectionProbe(flo_snapshot(handle)) }
     public static var revision: String { String(cString: flo_revision()) }
     static func failure() -> Error { GGUFError.invalid(String(cString: flo_last_error())) }
 }

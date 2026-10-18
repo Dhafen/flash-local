@@ -11,9 +11,13 @@ VM-backed LES page buffers and explicit phase-boundary ownership using the
 installed GGUF. [Delivery and limits](docs/TESTFLIGHT.md).
 Host synthetic/reference gates pass. Phone build 112 admits the first native
 check at 114 MB, then stops before the next one with a 2.216 GB live footprint.
-The isolated VM-buffer/lifecycle correction passes host/reference controls
-and is delivered in build 113; its phone confirmation is pending. No LES speed
-result has completed on the phone. The latest ordinary GGUF chat export from
+The isolated VM-buffer/lifecycle correction is delivered in build 113. Its
+subsequent phone report confirms all three native checks are admitted, with
+238–245 MB transition footprint and zero live native contexts/buffers. The
+trained numerical gate then stops timing: relative logit L2 error is 6.60%
+for single-token prefill and 8.93% for prefill-four. Matching four greedy
+choices does not pass the unchanged logit thresholds. No LES speed result
+has completed on the phone. The latest ordinary GGUF chat export from
 build 113 measures 1.397 decode forwards/s over 110 forwards with thinking
 enabled and 3.912 GB peak; three supplied exports contain that same generation.
 It is shorter than the planned 128-token comparison and is not a controlled
@@ -27,6 +31,11 @@ canonical traces across prefill/decode order. Its separate
 passes 63 synthetic prefix/mode variants, all 18 selected Swift functions and
 three Apple framework slices. These observer/admission changes are not in
 installed build 113 and do not establish a phone speed improvement.
+
+The next diagnostic adds bounded layer checkpoints and a matched-input
+projection probe against dequantized weights. It investigates CPU operand
+rounding versus backend errors without changing routing, weights, acceptance
+thresholds or the installed GGUF. New Apple/build validation is pending.
 
 The [Ornith adapter and model switch](docs/ORNITH-IMPLEMENTATION.md) are delivered in **TestFlight 0.1.0 (84)**. They implement the actual `qwen35moe` trunk, including SiLU GDN gating, ordinary residual/norm blocks, shared/routed experts, pinned tokenization and correct exclusion of the stored MTP block. Small K/V projections use bounded pinned CPU kernels to preserve reference rounding; other projections and experts stay on Metal. Ornith is the default, with separate persisted chats and a model picker retaining REAM. Build 84 pairs eligible gate/up projections without changing their per-row arithmetic; phone performance for that optimization is pending.
 

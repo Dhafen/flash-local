@@ -149,6 +149,16 @@ final class LESPolicyTests: XCTestCase {
             let reference = try Qwen4ExpCPUReference(artifact: artifact, contextTokens: 32, budgetBytes: 5_500_000_000)
             return try [1, 2].map { try reference.logits(for: $0) }
         }
+        let referencePoints: [[GGUFCheckpoint]] = try autoreleasepool {
+            let collector = GGUFCheckpointCollector()
+            let reference = try Qwen4ExpCPUReference(artifact: artifact, contextTokens: 32,
+                budgetBytes: 5_500_000_000, checkpoints: collector)
+            return try [1, 2].enumerated().map { index, token in
+                let observed = try reference.logits(for: token)
+                XCTAssertEqual(observed, expected[index])
+                return try collector.take()
+            }
+        }
         let control = LESControl()
         var admissions: [LESMemoryAdmission] = []
         let prepared = try LESPreparation.prepare(artifact: artifact, privateRoot: root.appendingPathComponent("prepared"),
@@ -160,13 +170,30 @@ final class LESPolicyTests: XCTestCase {
         XCTAssertEqual(admission.plan?.contextTokens, 32)
         print("ORNITH_PREPARATION_ADMISSION phaseCaptured=true beforeAndAfterCaptured=true syntheticOnly=true")
         let plan = try LESMemoryPlan(index: artifact.index, contextTokens: 32, footprint: XCTUnwrap(ProcessFootprint.current()))
-        let candidate = try LESContext(artifact: artifact, prepared: prepared, plan: plan, control: control, syntheticCPUControl: true)
+        let collector = GGUFCheckpointCollector()
+        let candidate = try LESContext(artifact: artifact, prepared: prepared, plan: plan, control: control,
+            syntheticCPUControl: true, checkpoints: collector)
         defer { candidate.close() }
         XCTAssertEqual(LESContext.runtimeMemory.liveContexts, 1)
+        var layers = LESCheckpointAccumulator()
         for (index, token) in [1, 2].enumerated() {
             let actual = try candidate.logits(tokens: [token])
             XCTAssertEqual(actual.count, expected[index].count)
             XCTAssertLessThanOrEqual(zip(actual, expected[index]).map { abs($0 - $1) }.max() ?? .infinity, 0.01)
+            try layers.compare(referencePoints[index], collector.take(), position: index)
+        }
+        XCTAssertTrue(layers.result.complete)
+        XCTAssertGreaterThan(layers.result.comparedPoints, 20)
+        XCTAssertLessThan(layers.result.maximumAbsoluteError, 1e-6)
+        XCTAssertNil(layers.result.firstDivergence)
+        let probe = try XCTUnwrap(candidate.projectionProbe)
+        XCTAssertEqual(probe.samples, 16); XCTAssertEqual(probe.columns, 16)
+        XCTAssertLessThan(probe.backendRelativeL2Error, 1e-5)
+        let diagnostic = LESLogitComparison(positions: 4, maximumAbsoluteError: 0, relativeL2Error: 0,
+            sameGreedy: true, layerCheckpoints: layers.result, projectionProbe: probe)
+        let encoded = String(decoding: try JSONEncoder().encode(diagnostic), as: UTF8.self)
+        for key in ["values", "logits", "promptTokenIDs", "generatedTokenIDs", "messages"] {
+            XCTAssertFalse(encoded.contains("\"" + key + "\""))
         }
         try artifact.assertUnchanged()
         XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent("synthetic.gguf")), data)
@@ -192,5 +219,37 @@ final class LESPolicyTests: XCTestCase {
             XCTAssertEqual(LESContext.runtimeMemory.mappedMetalBytes, 0)
         }
         print("ORNITH_NATIVE_LIFETIME explicitClose=true wrapperStillAlive=true repeatedOwners=3 noLiveBuffers=true syntheticOnly=true")
+        print("ORNITH_LAYER_CHECKPOINTS exactReplay=true bounded=true failClosed=true noPayload=true syntheticOnly=true")
+    }
+    func testLayerCheckpointBoundsAndFirstDivergence() throws {
+        let values: [Float] = [1, 2, 3]
+        for (stage, layer, count) in [(UInt32(0), Int32(0), Int32(3)), (10, 0, 3), (2, 40, 3), (1, 0, 3), (2, 0, 16385)] {
+            let collector = GGUFCheckpointCollector()
+            XCTAssertFalse(values.withUnsafeBufferPointer { collector.capture(stage: stage, layer: layer, values: $0.baseAddress, count: count) })
+            XCTAssertThrowsError(try collector.take())
+        }
+        let duplicate = GGUFCheckpointCollector()
+        XCTAssertTrue(values.withUnsafeBufferPointer { duplicate.capture(stage: 2, layer: 0, values: $0.baseAddress, count: 3) })
+        XCTAssertFalse(values.withUnsafeBufferPointer { duplicate.capture(stage: 2, layer: 0, values: $0.baseAddress, count: 3) })
+        XCTAssertThrowsError(try duplicate.take())
+        let bounded = GGUFCheckpointCollector(), large = [Float](repeating: 1, count: 16384)
+        for index in 0..<64 {
+            XCTAssertTrue(large.withUnsafeBufferPointer {
+                bounded.capture(stage: index < 40 ? 2 : 5, layer: Int32(index % 40), values: $0.baseAddress, count: 16384)
+            })
+        }
+        XCTAssertFalse(values.withUnsafeBufferPointer { bounded.capture(stage: 6, layer: 0, values: $0.baseAddress, count: 3) })
+        XCTAssertThrowsError(try bounded.take())
+        var difference = LESCheckpointAccumulator()
+        let expected = [GGUFCheckpoint(stage: 2, layer: 0, values: values), GGUFCheckpoint(stage: 8, layer: 0, values: values)]
+        try difference.compare(expected, [GGUFCheckpoint(stage: 8, layer: 0, values: [2, 2, 3]),
+            GGUFCheckpoint(stage: 2, layer: 0, values: [1, 2, 3.1])], position: 7)
+        XCTAssertTrue(difference.result.complete)
+        XCTAssertEqual(difference.result.firstDivergence?.stage, 2)
+        XCTAssertEqual(difference.result.firstDivergence?.position, 7)
+        var missing = LESCheckpointAccumulator()
+        try missing.compare(expected, [GGUFCheckpoint(stage: 2, layer: 0, values: [1])], position: 0)
+        XCTAssertFalse(missing.result.complete)
+        XCTAssertEqual(missing.result.missingPoints, 1); XCTAssertEqual(missing.result.shapeMismatches, 1)
     }
 }

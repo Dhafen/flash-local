@@ -1,6 +1,8 @@
 #include "FlashOrnithLES.h"
 #include "LoaderDiagnostics.h"
 #include "RoutingTrace.h"
+#include "ProjectionProbe.h"
+#include "../../../Sources/CLlamaTokenizer/CheckpointObserver.h"
 #include "llama.h"
 #include "llama-context.h"
 #include "llama-model.h"
@@ -157,6 +159,9 @@ struct flo_context {
     flo_abort abort = nullptr; void * user = nullptr;
     int vocabulary = 0, batch = 0, position = 0, capacity = 0;
     bool poisoned = false, routing_failed = false;
+    flo_checkpoint checkpoint = nullptr;
+    void * checkpoint_user = nullptr;
+    flash_local_projection_probe projection_probe;
     flash_local_routing_trace routing;
     explicit flo_context() : exclusive(owner, std::try_to_lock) { live_contexts.fetch_add(1, std::memory_order_relaxed); }
     ~flo_context() {
@@ -262,13 +267,26 @@ flo_context * flo_open(int source, const char * directory, flo_options o, flo_ab
         cp.n_threads = cp.n_threads_batch = o.cpu_threads; cp.n_seq_max = 1; cp.n_rs_seq = 0;
         cp.type_k = cp.type_v = GGML_TYPE_F16; cp.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED;
         cp.no_perf = false; cp.abort_callback = abort; cp.abort_callback_data = user;
-        if (o.trace_routing) {
+        result->checkpoint = o.checkpoint; result->checkpoint_user = o.checkpoint_user;
+        if (o.trace_routing || o.checkpoint) {
             cp.cb_eval_user_data = result.get();
             cp.cb_eval = [](ggml_tensor * tensor, bool ask, void * data) {
-                const bool selected = std::string(ggml_get_name(tensor)).rfind("ffn_moe_topk-", 0) == 0;
+                auto * c = static_cast<flo_context *>(data);
+                const bool routed = std::string(ggml_get_name(tensor)).rfind("ffn_moe_topk-", 0) == 0;
+                const bool checkpoint = c->checkpoint && flash_local_checkpoint::identify(ggml_get_name(tensor)).stage != 0;
+                const bool selected = routed || checkpoint;
                 if (ask) return selected;
                 if (!selected) return true;
-                auto * c = static_cast<flo_context *>(data);
+                if (checkpoint) {
+                    const auto key = flash_local_checkpoint::identify(ggml_get_name(tensor));
+                    if (c->position == 0 && key.stage == 3 && !c->projection_probe.samples) {
+                        // Unsupported layouts remain explicitly unmeasured.
+                        (void)c->projection_probe.run(tensor);
+                    }
+                    const bool valid = flash_local_checkpoint::emit(tensor, c->checkpoint, c->checkpoint_user);
+                    c->routing_failed = c->routing_failed || !valid;
+                    return valid;
+                }
                 const bool valid = tensor->type == GGML_TYPE_I32 && tensor->ne[2] == 1 && tensor->ne[3] == 1 &&
                     c->routing.append(ggml_get_name(tensor), c->position, tensor->ne[0], tensor->ne[1],
                         tensor->nb[1], c->model->hparams.n_expert,
@@ -317,6 +335,12 @@ flo_metrics flo_snapshot(const flo_context * c) {
     if (c) {
         out.routing_digest = c->routing.sequential; out.routing_decisions = c->routing.decisions;
         out.canonical_routing_digest = c->routing.canonical;
+        const auto & p = c->projection_probe;
+        out.probe_samples = p.samples; out.probe_columns = p.columns;
+        out.probe_weight_type = p.weight_type; out.probe_cpu_input_type = p.cpu_input_type;
+        out.probe_backend_max = p.backend_max; out.probe_cpu_max = p.cpu_max;
+        out.probe_backend_squared = p.backend_squared; out.probe_cpu_squared = p.cpu_squared;
+        out.probe_reference_squared = p.reference_squared;
     }
     if (c && c->context->flash_local_slots()) {
         const auto s = c->context->flash_local_slots()->counters_snapshot();
