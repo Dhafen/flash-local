@@ -6,9 +6,10 @@ Current target: the official 21.7 GB Ornith 1.5 35B-A3B Q4_K_M GGUF, a total pro
 
 ## Development status
 
-**Private TestFlight 0.1.0 (113) is available**, with streamed Ornith thinking,
-VM-backed LES page buffers and explicit phase-boundary ownership using the
-installed GGUF. [Delivery and limits](docs/TESTFLIGHT.md).
+**Private TestFlight 0.1.0 (119) is available**, adding bounded layer and
+matched-input diagnostics for the installed Ornith GGUF. Streamed thinking,
+VM-backed LES buffers and explicit ownership are retained.
+[Delivery and limits](docs/TESTFLIGHT.md).
 Host synthetic/reference gates pass. Phone build 112 admits the first native
 check at 114 MB, then stops before the next one with a 2.216 GB live footprint.
 The isolated VM-buffer/lifecycle correction is delivered in build 113. Its
@@ -25,17 +26,19 @@ backend benchmark. No physical
 QPack or LES throughput has been verified. Existing GGUF/REAM paths remain
 available and the LES experiment requires no model redownload.
 
-The post-113 native routing observer now honours top-k row strides and compares
-canonical traces across prefill/decode order. Its separate
-[native-only validation](https://github.com/Dhafen/flash-local/actions/runs/39111809758)
-passes 63 synthetic prefix/mode variants, all 18 selected Swift functions and
-three Apple framework slices. These observer/admission changes are not in
-installed build 113 and do not establish a phone speed improvement.
+Build 119 honours top-k row strides and compares canonical traces across
+prefill/decode order. Its [full delivery run](https://github.com/Dhafen/flash-local/actions/runs/39130511069)
+passes 63 synthetic prefix/mode variants, all 19 selected Swift functions,
+three Apple framework slices, app/package/QPack gates, 36 reviewed captures,
+the device archive, signing and private availability checks. This is host
+validation and delivery, not a trained-model phone speed result.
 
-The next diagnostic adds bounded layer checkpoints and a matched-input
+The new diagnostic adds bounded layer checkpoints and a matched-input
 projection probe against dequantized weights. It investigates CPU operand
 rounding versus backend errors without changing routing, weights, acceptance
-thresholds or the installed GGUF. New Apple/build validation is pending.
+thresholds or the installed GGUF. Extra observations run separately after
+the original gate fails and cannot admit timing. Phone evidence locating
+the trained discrepancy is still required.
 
 The [Ornith adapter and model switch](docs/ORNITH-IMPLEMENTATION.md) are delivered in **TestFlight 0.1.0 (84)**. They implement the actual `qwen35moe` trunk, including SiLU GDN gating, ordinary residual/norm blocks, shared/routed experts, pinned tokenization and correct exclusion of the stored MTP block. Small K/V projections use bounded pinned CPU kernels to preserve reference rounding; other projections and experts stay on Metal. Ornith is the default, with separate persisted chats and a model picker retaining REAM. Build 84 pairs eligible gate/up projections without changing their per-row arithmetic; phone performance for that optimization is pending.
 

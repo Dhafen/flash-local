@@ -333,8 +333,8 @@ reference. It is a sampled operator diagnostic, not a replacement model
 reference or permission to relax the full-logit gate. One hypothesis is CPU
 operand rounding versus Metal's operand path; a cause is not yet established.
 Timing runs do not enable either observer. Weights, top-8, ordinary chat,
-prepared file format and acceptance thresholds remain unchanged. New Apple
-validation and device evidence remain pending.
+prepared file format and acceptance thresholds remain unchanged. Build 119
+passes Apple build/delivery validation; trained device evidence remains pending.
 
 The original CPU/native/prefill-four checks run without extra layer or
 projection observation. Only after their gate fails is a separate diagnostic
@@ -342,6 +342,9 @@ replay performed, using the original fixed prompt and the same forced tokens.
 Both CPU and native logit changes caused by observation are measured. A good
 instrumented result cannot admit timing or replace the failed original check;
 an unavailable diagnostic still preserves the original failure report.
+The original native admission checks still observe routing. A separate
+comparison of callback-free timing execution is also required before
+promoting a backend; the four-position gate is not full quality verification.
 
 The routing observer reads each top-8 row with the tensor's actual row
 stride. In this pinned ggml, top-k is a view of a full expert sort, so batched
@@ -369,7 +372,21 @@ The independent old CPU oracle remains within 5e-10. All 18 selected Swift
 functions (10 LES and 8 tokenizer/thinking), the ownership/VM tests and
 three Apple framework/header/import/export slices pass. Local report analyzers
 pass 26 tests. This validates the isolated native changes, not a new full-app
-archive or TestFlight upload; installed build 113 remains the shipped runtime.
+archive or TestFlight upload. Build 113 remained the shipped runtime at that
+point.
+
+[Full delivery run 39130511069](https://github.com/Dhafen/flash-local/actions/runs/39130511069)
+passes at runtime source `8792fd52ea525fafec8145dbc3aa4b0195cf28d6`, delivered
+as private TestFlight 119. All 63 batch variants still have zero logit error.
+Additional native F32/mixed/top-8 contexts require all 25 semantic points on
+every four-layer forward and after reset, with zero logit difference from
+resident CPU; the top-8 case uses 128 teacher-forced positions. Both old CPU
+wrapper controls retain exact logits over five forwards with 125 points.
+The matched-input projection control, all 19 selected Swift functions,
+three Apple slices, 186 Swiftlet/24 QPack tests, app/package gates, 36 reviewed
+captures, device archive, signing and private availability pass. Local LES
+report analysis passes 19 tests. These are synthetic/metadata/build results;
+the trained phone discrepancy and fastest backend remain unverified.
 
 Run `python3 scripts/analyze_ornith_les.py REPORT.json` on an exported LES
 report. It only reads the local JSON and prints whitelisted aggregates.

@@ -1,6 +1,38 @@
 # Private internal TestFlight delivery
 
-Latest delivered version **0.1.0 (113)**, app source
+Latest delivered version **0.1.0 (119)**, app source
+`8792fd52ea525fafec8145dbc3aa4b0195cf28d6`, is available to the existing
+private internal group. [Full delivery run 39130511069](https://github.com/Dhafen/flash-local/actions/runs/39130511069)
+passed native/reference controls, 63 synthetic batch variants, complete
+25-point traces on the four-layer fixtures, both exact old-CPU traced
+replays, the matched-input projection control, all 19 selected Swift
+functions and three Apple framework/header/import/export slices. The
+186 Swiftlet controls, 24 QPack tests, 580 app tests, 474 package invocations
+(9 environment skips), 36 actually reviewed light/dark captures, device
+archive, signing, memory entitlements, privacy manifest and private delivery
+also pass. The arm64 device archive is 38,205,678 bytes and contains no model
+payload. A fresh read-only Apple audit confirms `VALID`, `INTERNAL_ONLY`,
+`IN_BETA_TESTING`, nonexpired, the exact private group and unchanged
+sole-owner membership. The sealed IPA is
+`d81c4d55eda5203bf1322f59d40687ab5224440fe106ca0eb9cfbcac7669be30`.
+
+Build 119 preserves the installed Q4_K_M and ordinary chat. After a failed
+short numerical gate, separate bounded observations report the first
+divergent position/layer/stage, operator errors and the effect of observation
+on both runtimes. Raw vectors stay local and ephemeral; only aggregates are
+exported. Distinct raw-GDN/projected outputs and the final main-layer alias
+are covered by early C++ and Swift controls. No thresholds, weights or
+actual expert choices are changed. These are diagnostic improvements, not
+a verified phone speed or trained-model quality improvement.
+
+Update without uninstalling or redownloading. Open **Jämför LES med befintlig
+modell**, run **Kör kontroll och jämförelse**, keep the app open, then share
+the new `ornith-les-…json` report even if the numerical gate still stops.
+That device evidence is needed to locate the trained discrepancy.
+
+## Previous build 113
+
+Previous version **0.1.0 (113)**, app source
 `c3fe7be385271bcd33b61af51661bea880b4ea29`, is available to the existing
 private internal group. [Full delivery run 39105887981](https://github.com/Dhafen/flash-local/actions/runs/39105887981)
 passed all required gates: native CPU F32/mixed/top-8 controls and independent
@@ -19,8 +51,11 @@ next at 2.216 GB footprint. Build 113 reuses the existing Apple VM path for
 iOS page buffers, synchronizes/closes each native owner explicitly, and
 records remaining native contexts/buffers separately from footprint. Top-8,
 quantized weights and the 5.5 GB ceiling are unchanged. Update without
-uninstalling or redownloading the model. Phone release of the retained
-memory, trained Metal/reference numerics and LES speed remain unverified.
+uninstalling or redownloading the model. Its subsequent phone report confirms
+memory recovery: all three checks admit, with 238–245 MB transition footprint
+and zero live native owners/buffers. Trained relative logit L2 errors of
+6.60% and 8.93% then stop timing. Trained agreement and LES speed remain
+unverified; build 119 adds diagnostics for this next blocker.
 See [the experiment and phone acceptance](ORNITH-LES.md).
 
 ## Previous build 112
