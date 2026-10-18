@@ -314,6 +314,17 @@ cache, lookahead and page-cache modes. Batch size four was already used by
 the shipped native benchmark. These are additional correctness controls;
 they do not establish a new phone speed or a new TestFlight delivery.
 
+[Native-only run 39111809758](https://github.com/Dhafen/flash-local/actions/runs/39111809758)
+passed at source `e601d712c9110bbc54bcbeed79fb11877d56ba31`. All 63
+prefix/mode variants have zero maximum logit difference from resident CPU,
+matching greedy choices and canonical routes. F32 and mixed Q4_K/Q6_K use
+five positions; the 256-expert/top-8 graph uses 128 teacher-forced positions.
+The independent old CPU oracle remains within 5e-10. All 18 selected Swift
+functions (10 LES and 8 tokenizer/thinking), the ownership/VM tests and
+three Apple framework/header/import/export slices pass. Local report analyzers
+pass 26 tests. This validates the isolated native changes, not a new full-app
+archive or TestFlight upload; installed build 113 remains the shipped runtime.
+
 Run `python3 scripts/analyze_ornith_les.py REPORT.json` on an exported LES
 report. It only reads the local JSON and prints whitelisted aggregates.
 Failed admissions retain before/after footprint and recover published numeric

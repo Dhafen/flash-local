@@ -1,6 +1,6 @@
 # Private internal TestFlight delivery
 
-Latest version **0.1.0 (113)**, app source
+Latest delivered version **0.1.0 (113)**, app source
 `c3fe7be385271bcd33b61af51661bea880b4ea29`, is available to the existing
 private internal group. [Full delivery run 39105887981](https://github.com/Dhafen/flash-local/actions/runs/39105887981)
 passed all required gates: native CPU F32/mixed/top-8 controls and independent
