@@ -9,6 +9,10 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
+      use_macos15:
+        description: 'Use the standard free macos-15 arm64 runner if macos-26 capacity is unavailable; retain Xcode 26.2'
+        type: boolean
+        default: false
       ornith_les:
         description: 'Include the isolated GGUF LES benchmark after all native/reference controls'
         type: boolean
@@ -60,12 +64,16 @@ jobs:
   les-validation:
     if: ${{ inputs.ornith_les && !inputs.provisioning_only && !inputs.check_delivery_tools && !inputs.regenerate_project_only }}
     uses: ./.github/workflows/ornith-les.yml
+    with:
+      use_macos15: ${{ inputs.use_macos15 || false }}
   qpack-validation:
     if: ${{ !inputs.check_delivery_tools && !inputs.regenerate_project_only && !inputs.provisioning_only }}
     uses: ./.github/workflows/ornith-performance.yml
+    with:
+      use_macos15: ${{ inputs.use_macos15 || false }}
   regenerate-project:
     if: github.event_name == 'workflow_dispatch' && inputs.regenerate_project_only
-    runs-on: macos-26
+    runs-on: ${{ inputs.use_macos15 && 'macos-15' || 'macos-26' }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
@@ -92,7 +100,7 @@ jobs:
 
   delivery-tool-check:
     if: github.event_name == 'workflow_dispatch' && inputs.check_delivery_tools && !inputs.regenerate_project_only
-    runs-on: macos-26
+    runs-on: ${{ inputs.use_macos15 && 'macos-15' || 'macos-26' }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
@@ -115,7 +123,7 @@ jobs:
     needs: [qpack-validation, les-validation]
     if: ${{ !cancelled() && !inputs.check_delivery_tools && !inputs.regenerate_project_only && (needs.qpack-validation.result == 'success' || inputs.provisioning_only) && (!inputs.ornith_les || needs.les-validation.result == 'success') }}
     name: ${{ inputs.provisioning_only && 'device archive · signing probe (no test coverage)' || 'streaming tests · app tests · package tests · iOS build' }}
-    runs-on: macos-26
+    runs-on: ${{ inputs.use_macos15 && 'macos-15' || 'macos-26' }}
     timeout-minutes: ${{ inputs.upload_private_testflight && 120 || 90 }}
     env:
       FLASH_LOCAL_ENABLE_LES: ${{ inputs.ornith_les && '1' || '0' }}

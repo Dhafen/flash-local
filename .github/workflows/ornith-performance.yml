@@ -1,6 +1,10 @@
 name: Ornith Performance experiment
 on:
   workflow_call:
+    inputs:
+      use_macos15:
+        type: boolean
+        default: false
   push:
     branches: [codex/ornith-performance-engine]
     paths:
@@ -18,7 +22,7 @@ defaults:
     shell: bash
 jobs:
   isolated-engine:
-    runs-on: macos-26
+    runs-on: ${{ inputs.use_macos15 && 'macos-15' || 'macos-26' }}
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7

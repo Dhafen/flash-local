@@ -1,7 +1,16 @@
 name: Ornith LES isolated validation
 on:
   workflow_call:
+    inputs:
+      use_macos15:
+        type: boolean
+        default: false
   workflow_dispatch:
+    inputs:
+      use_macos15:
+        description: 'Use the standard free macos-15 arm64 runner with the same pinned Xcode 26.2'
+        type: boolean
+        default: false
   push:
     branches: [codex/ornith-les-backend]
     paths:
@@ -23,7 +32,7 @@ defaults:
     shell: bash
 jobs:
   native-controls:
-    runs-on: macos-26
+    runs-on: ${{ inputs.use_macos15 && 'macos-15' || 'macos-26' }}
     timeout-minutes: 35
     env:
       ORNITH_LES_CPU_CONTROL: '1'
