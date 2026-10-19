@@ -32,6 +32,7 @@ HTTP on a trusted local network, without TLS or browser CORS access.
 Quick chat's **Generering** panel accepts numeric values. Valid settings persist
 locally. The API snapshots those defaults at start; individual requests can
 override them. Stop the API to edit its default settings.
+An inactive saved thinking budget does not constrain a non-thinking request.
 
 | Control / API parameter | Default | Meaning |
 | --- | --- | --- |
