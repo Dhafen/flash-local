@@ -1,0 +1,106 @@
+name: MiniCPM Context (isolated)
+
+on:
+  push:
+    branches:
+      - feature/minicpm-v47-configurable-context
+    paths:
+      - "integrations/minicpm-context/**"
+      - ".github/workflows/minicpm-context.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: minicpm-context-${{github.ref}}
+  cancel-in-progress: true
+
+jobs:
+  ios-compile:
+    name: Isolated MiniCPM-V app / unsigned iOS verification
+    runs-on: macos-26
+    timeout-minutes: 110
+    steps:
+      - name: Checkout integration scripts (never the flash-local app)
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Choose Xcode 26
+        shell: bash
+        run: |
+          set -euo pipefail
+          XCODE=$(find /Applications -maxdepth 1 -name 'Xcode_26*.app' | sort | tail -1)
+          test -n "$XCODE"
+          sudo xcode-select --switch "$XCODE"
+          xcodebuild -version
+          cmake --version
+          python3 -m py_compile integrations/minicpm-context/apply_context_overlay.py
+
+      - name: Checkout pinned upstream source with backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none https://github.com/OpenBMB/MiniCPM-V-Apps.git "$RUNNER_TEMP/minicpm-upstream"
+          cd "$RUNNER_TEMP/minicpm-upstream"
+          git checkout --detach fa9d837e3d38dfde7a9484ec1cc6bc2e5bc9b420
+          git submodule update --init --recursive --depth 1
+          test "$(git rev-parse HEAD)" = fa9d837e3d38dfde7a9484ec1cc6bc2e5bc9b420
+          test -d llama.cpp-omni/ggml
+
+      - name: Apply guarded context UI overlay (4K / 8K / 16K / 32K / 65K)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 integrations/minicpm-context/apply_context_overlay.py "$RUNNER_TEMP/minicpm-upstream"
+          cd "$RUNNER_TEMP/minicpm-upstream"
+          git diff --check
+          git diff --stat
+          grep -q 'static var defaultNCtx: Int' MiniCPM-V-demo/Sources/Settings/ModelConst/MiniCPMModelConst.swift
+          grep -q 'presentContextWindowPicker()' MiniCPM-V-demo/Sources/Settings/ViewControler/MBSettingsViewController.swift
+
+      - name: Build upstream native llama.xcframework (device + simulator)
+        working-directory: ${{runner.temp}}/minicpm-upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+          MINIMAL_MODE=ios ./scripts/build_xcframework.sh
+          test -d MiniCPM-V-demo/thirdparty/llama.xcframework
+
+      - name: Build iOS Simulator app without signing
+        working-directory: ${{runner.temp}}/minicpm-upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild build \
+            -project MiniCPM-V-demo.xcodeproj -scheme MiniCPM-V-demo \
+            -configuration Release -destination 'generic/platform=iOS Simulator' \
+            PRODUCT_BUNDLE_IDENTIFIER=com.dhafen.minicpmcontext \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee "$RUNNER_TEMP/minicpm-simulator-build.log" | tail -60
+
+      - name: Archive unsigned physical-device build (NOT TestFlight)
+        working-directory: ${{runner.temp}}/minicpm-upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild archive \
+            -project MiniCPM-V-demo.xcodeproj -scheme MiniCPM-V-demo \
+            -configuration Release -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/MiniCPM-Context-unsigned.xcarchive" \
+            PRODUCT_BUNDLE_IDENTIFIER=com.dhafen.minicpmcontext \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee "$RUNNER_TEMP/minicpm-device-archive.log" | tail -60
+          test -d "$RUNNER_TEMP/MiniCPM-Context-unsigned.xcarchive/Products/Applications"
+
+      - name: Upload logs (no credentials, no model weights)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: minicpm-context-build-logs
+          path: |
+            ${{runner.temp}}/minicpm-simulator-build.log
+            ${{runner.temp}}/minicpm-device-archive.log
+          if-no-files-found: ignore
+          retention-days: 7
