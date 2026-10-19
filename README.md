@@ -6,6 +6,13 @@ Current target: the official 21.7 GB Ornith 1.5 35B-A3B Q4_K_M GGUF, a total pro
 
 ## Development status
 
+An upgrade regression in build 126 rejects a prepared cache sealed by the
+previous native engine. A repair now rebuilds this derivative from the already
+verified local GGUF, verifies the new files and publishes them with recoverable
+staging. Damaged/incomplete caches also rebuild; the original model stays in
+place. Regression/build/distribution checks for the repair are pending. Keep
+the app and installed model; no new weight download is required.
+
 Private build 126 adds [validated prompt batch settings, an ABBA comparison
 and editable work instructions](docs/ORNITH-PREFILL.md) on the separate
 `codex/ornith-prompt-controls` branch. Physical batches 1/4/8/16 and logical

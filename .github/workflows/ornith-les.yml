@@ -150,6 +150,11 @@ jobs:
           test "$(grep -c 'ORNITH_PREFILL_MEMORY physical=' .work/les-swift-tests.log)" = 3
           grep 'ORNITH_CHAT_SAMPLING greedyIdentical=true logitsUnchanged=true thinkingBudgetOptIn=true fixtures=128 trainedInference=false' .work/les-swift-tests.log
           grep 'ORNITH_THINKING_BUDGET canonicalClosingTokens=true reasoningSeparated=true modelWeightsLoaded=false phoneInference=false' .work/les-swift-tests.log
+          grep 'ORNITH_CACHE_UPGRADE oldRuntimeRebuilt=true exactDenseBytes=true exactLogits=true originalUnchanged=true syntheticOnly=true' .work/les-swift-tests.log
+          grep 'ORNITH_CACHE_DAMAGE cases=5 rebuilt=true hashesRetained=true originalUnchanged=true syntheticOnly=true' .work/les-swift-tests.log
+          grep 'ORNITH_CACHE_INTERRUPTION validatedStageRecovered=true publishedCacheReused=true staleTransactionsCleaned=true originalUnchanged=true syntheticOnly=true' .work/les-swift-tests.log
+          grep 'ORNITH_CACHE_CANCEL oldCacheRetained=true sourceUnchanged=true directorySymlinkRejected=true outsideUntouched=true syntheticOnly=true' .work/les-swift-tests.log
+          grep 'ORNITH_CACHE_SOURCE changedOriginalRejected=true preparedFilesUntouched=true syntheticOnly=true' .work/les-swift-tests.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:

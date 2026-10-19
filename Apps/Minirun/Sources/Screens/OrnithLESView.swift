@@ -219,17 +219,25 @@ struct OrnithPrefillControls: View {
     var body: some View {
         DisclosureGroup("Promptinläsning och batch", isExpanded: $expanded) {
             VStack(alignment: .leading, spacing: 12) {
-                Picker("Evaluation batch", selection: Binding(get: { model.batchConfiguration.evaluationTokens }, set: { value in
-                    var selected = model.batchConfiguration; selected.evaluationTokens = value
-                    if selected.physicalTokens > value { selected.physicalTokens = 0 }
-                    model.batchConfiguration = selected
-                })) { ForEach([1, 4, 8, 16, 32], id: \.self) { Text("\($0) token").tag($0) } }
-                Picker("Fysisk batch", selection: Binding(get: { model.batchConfiguration.physicalTokens }, set: { value in
-                    var selected = model.batchConfiguration; selected.physicalTokens = value
-                    selected.evaluationTokens = max(selected.evaluationTokens, value); model.batchConfiguration = selected
-                })) {
-                    Text("Auto · kontrollerad 1/4").tag(0)
-                    ForEach([1, 4, 8, 16], id: \.self) { Text("\($0) token").tag($0) }
+                HStack {
+                    Text("Evaluation batch")
+                    Spacer()
+                    Picker("Evaluation batch", selection: Binding(get: { model.batchConfiguration.evaluationTokens }, set: { value in
+                        var selected = model.batchConfiguration; selected.evaluationTokens = value
+                        if selected.physicalTokens > value { selected.physicalTokens = 0 }
+                        model.batchConfiguration = selected
+                    })) { ForEach([1, 4, 8, 16, 32], id: \.self) { Text("\($0) token").tag($0) } }.labelsHidden()
+                }
+                HStack {
+                    Text("Fysisk batch")
+                    Spacer()
+                    Picker("Fysisk batch", selection: Binding(get: { model.batchConfiguration.physicalTokens }, set: { value in
+                        var selected = model.batchConfiguration; selected.physicalTokens = value
+                        selected.evaluationTokens = max(selected.evaluationTokens, value); model.batchConfiguration = selected
+                    })) {
+                        Text("Auto · kontrollerad 1/4").tag(0)
+                        ForEach([1, 4, 8, 16], id: \.self) { Text("\($0) token").tag($0) }
+                    }.labelsHidden()
                 }
                 Text("Evaluation styr prompttoken per anrop. Fysisk batch styr samtidig beräkning. Större batch använder mer RAM och är inte alltid snabbare; modellens top-8 ändras inte.")
                     .font(.caption).foregroundStyle(.secondary)
