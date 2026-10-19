@@ -552,3 +552,25 @@ and thermal conditions are comparable. Zero-depth lookahead, inconsistent
 mode geometry, partial GPU timestamps and missing data are reported explicitly.
 The analysis does not select the app's backend or establish full model quality,
 physical flash traffic, authenticated offline execution or sustained performance.
+
+## Build 125 local API delivery
+
+Runtime source `fdb7801742a3de0015e3047a055f555db41d9b98` is privately available
+as 0.1.0 (125). [Full delivery run 39221402989](https://github.com/Dhafen/flash-local/actions/runs/39221402989)
+passes all retained native/reference/QPack controls, 26 selected native/chat/
+tokenizer Swift functions, 583 app tests, 483 package invocations (9 environment
+skips), nine actual API tests and 56 reviewed platform/appearance captures.
+The device archive, real signature/profile, memory entitlements, privacy,
+local-network purpose text and fresh independent private availability pass.
+
+The [local API and numeric generation controls](ORNITH-LOCAL-API.md) use the
+same numerically admitted page-cache context. Requests are serialized with
+local chat; cancellation awaits native teardown, and foreground/background
+ownership remains explicit. The inactive saved thinking-cap regression has an
+unchanged red/green test. Default sampling and reasoning policy are preserved.
+An explicit cap evaluates the canonical closing tokens and discloses them.
+
+This delivery does not replace the measured [build-123 phone baseline](ORNITH-PHONE-123.md),
+prove API/USB phone reachability or explicit-cap quality, establish sustained
+workloads, or extend validated context. The persistent expert-I/O scheduling
+candidate is separate, disabled by default and not part of this IPA.

@@ -1,12 +1,49 @@
 # Private internal TestFlight delivery
 
+## Current build 125: local API and generation controls
+
+Private **0.1.0 (125)** is available to the existing internal group, runtime source
+`fdb7801742a3de0015e3047a055f555db41d9b98`.
+[Delivery run 39221402989](https://github.com/Dhafen/flash-local/actions/runs/39221402989)
+passes 26 selected native/chat/tokenizer Swift controls, all retained native and
+Swiftlet/QPack gates, 583 app tests, 483 package invocations (9 environment skips)
+and all nine actual loopback API tests. All 56 iOS/macOS light/dark captures were
+visually reviewed. The arm64 device app is 38,655,618 bytes with no model payload.
+
+Archive inspection confirms the local-network purpose text, privacy manifest,
+memory entitlements and real Apple signing/profile. A fresh independent Apple
+audit confirms `VALID`, `INTERNAL_ONLY`, `IN_BETA_TESTING`, nonexpired, the exact
+private group and unchanged sole-owner membership. Sealed IPA SHA256:
+`a8070de71a328da86a81e6c912bbc27b81ec69ccef7eb0fa17b5198a74fc019e`.
+
+Update without uninstalling or downloading weights again. Open **Ornith →
+Snabbchatt → Generering** for numeric total/thinking-token limits, temperature,
+top-p and seed. No separate thinking cap is enabled by default; shorter reasoning
+can reduce answer quality. The corrected inactive-budget regression is verified
+with the identical failing-before/passing-after API test.
+
+Open **Ornith → API** to start authenticated streamed/nonstreamed text serving
+from the same admitted native context. Copy its local base URL/key to a computer
+on the same network. Keep the app in the foreground. Wi-Fi, supported USB-C
+Ethernet and an experimental computer-side USB TCP-forwarding procedure are
+documented in the [API/client and phone acceptance guide](ORNITH-LOCAL-API.md).
+Physical-phone network/USB, explicit-budget quality and sustained server work
+remain unverified. No OpenAI account or cloud inference is used. Context remains
+4096; structured tool calls and Responses are not implemented.
+
+The accepted phone performance checkpoint below is still build 123. This API
+delivery is not a new iPhone speed measurement. The separate persistent-I/O
+candidate is not included or automatically enabled.
+
+## Previous build 123 and accepted phone checkpoint
+
 Physical [build-123 evidence](ORNITH-PHONE-123.md) now includes eight completed
 128-token runs, independently admitted batch-four prefill and a completed
 quick-chat screenshot. Page-cache decode is 4.08-4.30 token/s; prefill is
 7.19-7.25 prompt token/s. The separate screenshot shows 4.50 token/s.
 General quality, sustained workloads and long context are still unverified.
 
-Latest delivered version **0.1.0 (123)**, app source `4d3f45e3520c67657b6863457c2e88e6ca2ce2d9`, is
+Previously delivered version **0.1.0 (123)**, app source `4d3f45e3520c67657b6863457c2e88e6ca2ce2d9`, is
 available to the existing private internal group. [Full delivery run 39187166866](https://github.com/Dhafen/flash-local/actions/runs/39187166866)
 passes 24 selected Swift functions, all native/reference/QPack controls,
 581 app tests and 474 package invocations (9 environment skips).
