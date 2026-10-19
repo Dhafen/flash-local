@@ -8,6 +8,10 @@ on:
         type: boolean
         required: true
         default: false
+      app_store_app_id:
+        description: "The numeric App Store Connect app ID for the separate MiniCPM app"
+        type: string
+        required: true
 
 permissions:
   contents: read
@@ -41,7 +45,7 @@ jobs:
           git diff --check
       - name: Build, sign, export and upload only to the new MiniCPM app
         env:
-          MINICPM_APP_STORE_APP_ID: ${{vars.MINICPM_APP_STORE_APP_ID}}
+          MINICPM_APP_STORE_APP_ID: ${{inputs.app_store_app_id}}
           APPLE_TEAM_ID: ${{vars.APPLE_TEAM_ID}}
           ASC_KEY_ID: ${{secrets.ASC_KEY_ID}}
           ASC_ISSUER_ID: ${{secrets.ASC_ISSUER_ID}}
