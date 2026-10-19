@@ -18,6 +18,8 @@ jobs:
   batch-controls:
     runs-on: macos-26
     timeout-minutes: 15
+    env:
+      ORNITH_LES_CPU_CONTROL: '1'
     steps:
       - uses: actions/checkout@v7
         with:
@@ -35,8 +37,8 @@ jobs:
           for kind in f32 mixed top8; do
             input=.test-fixtures/synthetic-ornith.gguf
             if test "$kind" != f32; then input=.test-fixtures/synthetic-ornith-$kind.gguf; fi
-            .work/ornith-les-macos/bin/ornith-les-control "$input" .work/prefill-$kind .work/prefill-$kind.json \
-              > .work/prefill-$kind.log 2>&1
+            if ! .work/ornith-les-macos/bin/ornith-les-control "$input" .work/prefill-$kind .work/prefill-$kind.json \
+              > .work/prefill-$kind.log 2>&1; then tail -80 .work/prefill-$kind.log; exit 1; fi
             tail -5 .work/prefill-$kind.log
             grep 'ORNITH_PREFILL_TUNING variants=16 physical=1,4,8,16 evaluationThrough32=true actualDimensions=true fullVocabulary=true canonicalRouting=true callbackFree=true unneededHeadsSkipped=true ' .work/prefill-$kind.log
           done
@@ -52,6 +54,7 @@ jobs:
         if: always()
         with:
           name: ornith-prefill-controls
+          include-hidden-files: true
           path: |
             .work/prefill-*.json
             .work/prefill-*.log
