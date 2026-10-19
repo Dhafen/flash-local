@@ -68,6 +68,19 @@ final class LocalModelAPITests: XCTestCase {
         }
         XCTAssertFalse(LocalModelAPIServer.isLocalIPv4("192.168.1.1", loopbackOnly: true))
     }
+    func testErrorEnvelopeAndStreamingNullFieldsAreValidJSON() throws {
+        let data = LocalAPIError(status: 401, message: "Use a local key").encoded()
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let error = try XCTUnwrap(object["error"] as? [String: Any])
+        XCTAssertTrue(error["param"] is NSNull); XCTAssertEqual(error["type"] as? String, "authentication_error")
+        let invalid = LocalAPIError.invalid("temperature", "Invalid value").encoded()
+        let parsed = try XCTUnwrap(JSONSerialization.jsonObject(with: invalid) as? [String: [String: Any]])
+        XCTAssertEqual(parsed["error"]?["param"] as? String, "temperature")
+        let wire = try LocalAPIWire.chunk(id: "chatcmpl-test", created: 1, delta: ["content": "hej"])
+        let json = String(decoding: wire, as: UTF8.self).dropFirst(6).trimmingCharacters(in: .whitespacesAndNewlines)
+        let chunk = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+        XCTAssertTrue(chunk["usage"] is NSNull)
+    }
     func testGreedySeededSamplingAndNucleusDistribution() throws {
         var greedy = LocalTokenSampler(seed: 1), options = LocalGenerationOptions()
         XCTAssertEqual(try greedy.select([-1, 4, 4, 2], options: options), 1)

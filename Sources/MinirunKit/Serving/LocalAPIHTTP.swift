@@ -71,7 +71,8 @@ enum LocalAPIWire {
     }
     static func chunk(id: String, created: Int, delta: [String: Any], finish: String? = nil) throws -> Data {
         let value: [String: Any] = ["id": id, "object": "chat.completion.chunk", "created": created,
-            "model": LocalChatRequest.modelID, "choices": [["index": 0, "delta": delta, "finish_reason": finish as Any? ?? NSNull()]]]
+            "model": LocalChatRequest.modelID, "usage": NSNull(),
+            "choices": [["index": 0, "delta": delta, "finish_reason": finish as Any? ?? NSNull()]]]
         return try sse(value)
     }
     static func sse(_ object: [String: Any]) throws -> Data {

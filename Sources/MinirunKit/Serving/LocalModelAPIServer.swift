@@ -65,14 +65,17 @@ public final class LocalModelAPIServer: @unchecked Sendable {
         }
         listener.start(queue: queue)
     }
-    public func stop() { queue.async { [weak self] in self?.stopOnQueue() } }
+    public func stop() { queue.async { self.stopOnQueue() } }
     private func stopOnQueue(notify: Bool = true) {
         guard !stopped else { return }; stopped = true
         listener?.cancel(); listener = nil
         let active = Array(sessions.values); sessions.removeAll()
         active.forEach { $0.finish() }; if notify { onState(.stopped) }
     }
-    deinit { listener?.cancel(); sessions.values.forEach { $0.finish() } }
+    deinit {
+        let ownedListener = listener, ownedSessions = Array(sessions.values)
+        queue.async { ownedListener?.cancel(); ownedSessions.forEach { $0.finish() } }
+    }
 
     static func isLocalIPv4(_ value: String, loopbackOnly: Bool = false) -> Bool {
         let pieces = value.split(separator: ".", omittingEmptySubsequences: false)

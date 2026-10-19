@@ -279,6 +279,7 @@ jobs:
           set -o pipefail
           xcodebuild test -scheme minirun-Package $XCODEBUILD_FLAGS -destination 'platform=macOS' \
             -only-testing:MinirunKitTests 2>&1 | tee package-tests.log | tail -40
+          grep 'ORNITH_LOCAL_API realTCP=true auth=true json=true sse=true reasoningSeparated=true syntheticOnly=true phoneReachability=false' package-tests.log
 
       - name: Failing tests, if any
         if: failure()
