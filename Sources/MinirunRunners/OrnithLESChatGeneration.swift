@@ -140,7 +140,7 @@ public final class OrnithLESChatGeneration {
             // An explicit user budget conditions the original model on its
             // canonical closing marker. Every inserted token is evaluated and
             // charged to the total limit; no graph/routing result is fabricated.
-            if thinking.isThinking, let budget = options.thinkingBudget, reasoningTokens >= budget {
+            if options.thinkingEnabled, thinking.isThinking, let budget = options.thinkingBudget, reasoningTokens >= budget {
                 guard generated.count + thinkingEnd.count < maximumNewTokens else { break }
                 for token in thinkingEnd { try sample(); try append(token, forced: true) }
                 guard !thinking.isThinking else { throw GGUFError.invalid("Thinking budget did not close its canonical channel") }

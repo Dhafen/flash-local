@@ -7,6 +7,11 @@ pass before app integration. The [phone-121 measurements](ORNITH-PHONE-121.md)
 and subsequent [phone-123 batch-four comparison](ORNITH-PHONE-123.md) provide
 completed native-mode comparisons; general quality is not established.
 
+The [local API and numeric generation controls](ORNITH-LOCAL-API.md) share
+the admitted chat owner. A saved reasoning cap is inactive when thinking is
+disabled; it cannot block a short non-thinking request. New delivery checks
+include that regression before private TestFlight upload.
+
 ## Experimental page-cache chat, build 123
 
 Private TestFlight 123 at `4d3f45e3520c67657b6863457c2e88e6ca2ce2d9` adds a separate chat selected from the
