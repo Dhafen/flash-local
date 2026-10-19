@@ -1,10 +1,19 @@
 #if canImport(OrnithLES)
 import Foundation
 import XCTest
+import MinirunKit
 @testable import MinirunApp
 
 @MainActor
 final class OrnithLESAppTests: XCTestCase {
+    func testAPICannotListenWithoutAdmittedModelAndPreviewsDoNotOpenSockets() async {
+        let model = OrnithLESAppModel.reviewPreview()
+        model.startAPI(); XCTAssertFalse(model.isAPIRunning); XCTAssertTrue(model.apiAccessKey.isEmpty)
+        model.stopAPI(); await model.shutdown()
+        XCTAssertTrue(model.apiURLs.isEmpty); XCTAssertFalse(model.shouldKeepAwake)
+        let missing = OrnithLESAppModel.live()
+        missing.startAPI(); XCTAssertFalse(missing.isAPIRunning); XCTAssertTrue(missing.apiAccessKey.isEmpty)
+    }
     func testMissingModelDoesNotAlterExistingModelsOrEnableAnotherOwner() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("les-app-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)

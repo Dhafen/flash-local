@@ -99,6 +99,21 @@ final class CanonicalQwen35TokenizerParityTests: XCTestCase {
         print("CANONICAL_THINKING_PARITY cases=\(corpus.chats.count) reasoningHistory=2 exactRender=true exactTokenIDs=true bothModes=true")
     }
 
+    func testBudgetClosingMarkerUsesCanonicalTokensAndPreservesAnswerSeparation() throws {
+        let (folder, _, _, manifest) = try fixture()
+        let artifact = try VerifiedGGUFArtifact.verify(insideRoot: folder, manifest: manifest)
+        let tokenizer = try CanonicalQwen35Tokenizer(artifact: artifact)
+        let closing = try tokenizer.tokenize("</think>\n\n", parseSpecial: true, maximumTokens: 8)
+        XCTAssertFalse(closing.isEmpty); XCTAssertLessThanOrEqual(closing.count, 8)
+        var bytes = Data()
+        for id in closing { XCTAssertFalse(tokenizer.isEndOfGeneration(id)); bytes.append(try tokenizer.bytes(for: id, includeControl: true)) }
+        XCTAssertEqual(bytes, Data("</think>\n\n".utf8))
+        var text = QwenThinkingText(startsInThinking: true)
+        text.append("Räknar"); text.append(String(decoding: bytes, as: UTF8.self)); text.append("55"); text.finish()
+        XCTAssertFalse(text.isThinking); XCTAssertEqual(text.reasoning, "Räknar"); XCTAssertTrue(text.answer.hasSuffix("55"))
+        print("ORNITH_THINKING_BUDGET canonicalClosingTokens=true reasoningSeparated=true modelWeightsLoaded=false phoneInference=false")
+    }
+
     func testLoadedCanonicalVocabularyStillRefusesAChangedVerifiedFile() throws {
         let (folder, _, _, manifest) = try fixture()
         let scratch = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)

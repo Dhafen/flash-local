@@ -1,6 +1,7 @@
 #if canImport(OrnithLES)
 import SwiftUI
 import XCTest
+import MinirunKit
 #if canImport(UIKit)
 import UIKit
 #else
@@ -10,7 +11,10 @@ import AppKit
 
 @MainActor
 final class OrnithLESRenderTests: XCTestCase {
-    private enum Fixture: String, CaseIterable { case missing, preview, chatThinking = "chat-thinking", chatComplete = "chat-complete" }
+    private enum Fixture: String, CaseIterable {
+        case missing, preview, chatThinking = "chat-thinking", chatComplete = "chat-complete"
+        case apiMissing = "api-missing", apiReady = "api-ready", generation
+    }
     func testMissingAndPreviewChatDrawInBothAppearances() throws {
         var captures: [ColorScheme: [Data]] = [:]
         for fixture in Fixture.allCases {
@@ -20,6 +24,10 @@ final class OrnithLESRenderTests: XCTestCase {
             case .preview: model = .reviewPreview()
             case .chatThinking: model = .reviewChatPreview(thinking: true)
             case .chatComplete: model = .reviewChatPreview(thinking: false)
+            case .apiMissing: model = .reviewPreview()
+            case .apiReady: model = .reviewAPIPreview()
+            case .generation:
+                model = .reviewPreview(); model.chatOptions.thinkingBudget = 128
             }
             for scheme in [ColorScheme.light, .dark] {
                 // ImageRenderer omits ScrollView contents and replaces native
@@ -27,6 +35,8 @@ final class OrnithLESRenderTests: XCTestCase {
                 // a real window before capturing, so a PNG proves actual UI.
                 let content = Group {
                     if fixture == .chatThinking || fixture == .chatComplete { OrnithLESChatPage(model: model) }
+                    else if fixture == .apiMissing || fixture == .apiReady { OrnithAPIPage(model: model) }
+                    else if fixture == .generation { OrnithGenerationControls(options: .constant(model.chatOptions), expanded: true).padding(20) }
                     else { OrnithLESPage(model: model) }
                 }.environment(\.colorScheme, scheme)
                 let data: Data
@@ -75,7 +85,7 @@ final class OrnithLESRenderTests: XCTestCase {
             }
         }
         for scheme in [ColorScheme.light, .dark] {
-            XCTAssertEqual(captures[scheme]?.count, 4)
+            XCTAssertEqual(captures[scheme]?.count, Fixture.allCases.count)
             XCTAssertNotEqual(captures[scheme]?[0], captures[scheme]?[1],
                 "Missing-model and preview pages must show different visible content, not the same empty viewport")
         }

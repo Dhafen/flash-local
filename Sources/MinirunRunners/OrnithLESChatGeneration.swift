@@ -22,6 +22,8 @@ public final class OrnithLESChatGeneration {
         public let lowPowerModeAtStart: Bool
         public let memoryPlan: LESMemoryPlan
         public let stopReason: String
+        public let options: LocalGenerationOptions
+        public let reasoningTokens, forcedThinkingEndTokens: Int
         public let metricsBefore, metricsAfterPrefill, metricsAfter: LESMetrics
         public var decodeTokensPerSecond: Double? {
             decodeForwardPasses > 0 && decodeForwardSeconds > 0 ? Double(decodeForwardPasses) / decodeForwardSeconds : nil
@@ -69,13 +71,24 @@ public final class OrnithLESChatGeneration {
     /// no approximate prefix, hidden truncation or model-sized state snapshot.
     public func generate(messages: [Qwen35ChatMessage], maximumNewTokens: Int = 512, enableThinking: Bool,
                          onEvent: (Qwen4ExpTextGeneration.Event) throws -> Void) throws -> Summary {
-        guard !running, (1...512).contains(maximumNewTokens) else { throw GGUFError.limit("Invalid native chat request") }
+        var options = LocalGenerationOptions()
+        options.maximumNewTokens = maximumNewTokens; options.enableThinking = enableThinking
+        return try generate(messages: messages, options: options, onEvent: onEvent)
+    }
+    public func generate(messages: [Qwen35ChatMessage], options: LocalGenerationOptions,
+                         onEvent: (Qwen4ExpTextGeneration.Event) throws -> Void) throws -> Summary {
+        try options.validate()
+        guard !running else { throw GGUFError.limit("Native inference is already running") }
+        let maximumNewTokens = options.maximumNewTokens
         running = true
         var completed = false
         defer { running = false; if !completed { resetConversation() } }
         try artifact.assertUnchanged()
         if control.shouldAbort() { throw CancellationError() }
-        let prompt = try tokenizer.chat(messages, maximumTokens: contextTokens - maximumNewTokens, enableThinking: enableThinking).tokenIDs
+        let prompt = try tokenizer.chat(messages, maximumTokens: contextTokens - maximumNewTokens,
+            enableThinking: options.thinkingEnabled).tokenIDs
+        let thinkingEnd = try tokenizer.tokenize("</think>\n\n", parseSpecial: true, maximumTokens: 8)
+        guard !thinkingEnd.isEmpty else { throw GGUFError.invalid("Missing canonical thinking-end tokens") }
         let reused = Self.reusablePrefix(previous: stateTokens, prompt: prompt, hasLogits: !stateLogits.isEmpty)
         if reused == 0 { resetConversation() }
         let start = MonotonicClock.now(), before = native.metrics
@@ -83,6 +96,8 @@ public final class OrnithLESChatGeneration {
         let thermal = ProcessInfo.processInfo.thermalState.rawValue
         let lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
         var maximumThermal = thermal, generated: [Int] = [], text = Qwen4ExpTokenText(), outputBytes = 0
+        var thinking = QwenThinkingText(startsInThinking: options.thinkingEnabled)
+        var sampler = LocalTokenSampler(seed: options.seed), reasoningTokens = 0, forcedTokens = 0
         func sample() throws {
             if control.shouldAbort() { throw CancellationError() }
             try artifact.assertUnchanged()
@@ -105,21 +120,35 @@ public final class OrnithLESChatGeneration {
         }
         let prefillSeconds = MonotonicClock.seconds(since: start), afterPrefill = native.metrics
         var decodeSeconds = 0.0, passes = 0, reason = "tokenLimit"
-        for step in 0..<maximumNewTokens {
-            try sample()
-            let id = try Qwen4ExpGreedyToken.select(stateLogits)
-            if tokenizer.isEndOfGeneration(id) { reason = "endOfGeneration"; break }
+        func append(_ id: Int, forced: Bool) throws {
             let bytes = try tokenizer.bytes(for: id, includeControl: true)
             outputBytes += bytes.count
             guard outputBytes <= 4 << 20 else { throw GGUFError.limit("Generated text exceeds 4 MiB") }
+            if forced { forcedTokens += 1 } else if thinking.isThinking { reasoningTokens += 1 }
             generated.append(id)
-            try onEvent(.token(id: id, textDelta: text.append(bytes), progress: progress(prompt.count)))
-            if step + 1 < maximumNewTokens {
+            let delta = text.append(bytes); thinking.append(delta)
+            try onEvent(.token(id: id, textDelta: delta, progress: progress(prompt.count)))
+            if generated.count < maximumNewTokens {
                 let begin = MonotonicClock.now()
                 stateLogits = try autoreleasepool { try native.logits(tokens: [id]) }
                 stateTokens.append(id)
                 decodeSeconds += MonotonicClock.seconds(since: begin); passes += 1
             }
+        }
+        while generated.count < maximumNewTokens {
+            try sample()
+            // An explicit user budget conditions the original model on its
+            // canonical closing marker. Every inserted token is evaluated and
+            // charged to the total limit; no graph/routing result is fabricated.
+            if thinking.isThinking, let budget = options.thinkingBudget, reasoningTokens >= budget {
+                guard generated.count + thinkingEnd.count < maximumNewTokens else { break }
+                for token in thinkingEnd { try sample(); try append(token, forced: true) }
+                guard !thinking.isThinking else { throw GGUFError.invalid("Thinking budget did not close its canonical channel") }
+                continue
+            }
+            let id = try sampler.select(stateLogits, options: options)
+            if tokenizer.isEndOfGeneration(id) { reason = "endOfGeneration"; break }
+            try append(id, forced: false)
         }
         try sample()
         let trailing = text.finish()
@@ -136,7 +165,8 @@ public final class OrnithLESChatGeneration {
             maximumObservedFootprintBytes: peak, sessionMaximumObservedFootprintBytes: control.maximumObservedFootprintBytes,
             thermalStateAtStart: thermal, maximumThermalState: maximumThermal, prefillBatchTokens: batchSize,
             lowPowerModeAtStart: lowPower, memoryPlan: native.plan,
-            stopReason: reason, metricsBefore: before, metricsAfterPrefill: afterPrefill, metricsAfter: after)
+            stopReason: reason, options: options, reasoningTokens: reasoningTokens, forcedThinkingEndTokens: forcedTokens,
+            metricsBefore: before, metricsAfterPrefill: afterPrefill, metricsAfter: after)
     }
 }
 #endif

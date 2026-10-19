@@ -47,6 +47,7 @@ targets:
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         NSHumanReadableCopyright: "Copyright © 2026 Dong Wang"
+        NSLocalNetworkUsageDescription: "Låter andra enheter ansluta till din lokala Ornith-modell över nätverket."
         LSMinimumSystemVersion: "$(MACOSX_DEPLOYMENT_TARGET)"
         NSSupportsAutomaticTermination: true
         NSSupportsSuddenTermination: true
@@ -73,6 +74,7 @@ targets:
         com.apple.security.files.user-selected.read-write: true
         com.apple.security.files.bookmarks.app-scope: true
         com.apple.security.network.client: true
+        com.apple.security.network.server: true
         # The two Mach services Sparkle's installer tools advertise, named after
         # the app's bundle identifier.  A sandboxed app cannot look up a global
         # Mach name it has not declared.  These are the supported path Sparkle
@@ -152,6 +154,7 @@ targets:
         # which is a hash rather than encryption.  Declaring the exemption here
         # means App Store Connect never asks the question per upload.
         ITSAppUsesNonExemptEncryption: false
+        NSLocalNetworkUsageDescription: "Låter din dator ansluta till Ornith på telefonen via lokalt Wi-Fi eller Ethernet. Modellen körs på telefonen."
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
         UISupportedInterfaceOrientations:

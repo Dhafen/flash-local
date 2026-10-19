@@ -4,6 +4,8 @@ import OrnithLES
 import MinirunKit
 #if os(iOS)
 import UIKit
+#elseif os(macOS)
+import AppKit
 #endif
 
 struct OrnithLESView: View {
@@ -11,7 +13,7 @@ struct OrnithLESView: View {
     var existing: VerifiedGGUFArtifact?
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
-    private enum Pane: String, CaseIterable { case chat = "Snabbchatt", comparison = "Jämförelse" }
+    private enum Pane: String, CaseIterable { case chat = "Snabbchatt", comparison = "Jämförelse", api = "API" }
     @State private var pane: Pane = .chat
     var body: some View {
         NavigationStack {
@@ -22,6 +24,7 @@ struct OrnithLESView: View {
                 switch pane {
                 case .chat: OrnithLESChatPage(model: model, activate: { model.activateChat(existing: existing) })
                 case .comparison: OrnithLESPage(model: model, start: { model.start(existing: existing) })
+                case .api: OrnithAPIPage(model: model, activate: { model.activateChat(existing: existing) })
                 }
             }
                 .navigationTitle("Ornith")
@@ -32,7 +35,7 @@ struct OrnithLESView: View {
         .interactiveDismissDisabled()
         .onChange(of: scenePhase) { _, value in if value == .background { Task { await model.shutdown() } } }
         #if os(iOS)
-        .onChange(of: model.isBusy, initial: true) { _, busy in UIApplication.shared.isIdleTimerDisabled = busy }
+        .onChange(of: model.shouldKeepAwake, initial: true) { _, awake in UIApplication.shared.isIdleTimerDisabled = awake }
         .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)) { _ in
             Task { await model.shutdown() }
@@ -57,7 +60,7 @@ struct OrnithLESPage: View {
                     HStack { ProgressView(); Spacer(); Button("Stoppa", role: .cancel) { model.stop() } }
                 } else {
                     Button("Kör kontroll och jämförelse") { start() }
-                        .buttonStyle(.borderedProminent).disabled(!model.canStart)
+                        .buttonStyle(.borderedProminent).disabled(!model.canBenchmark)
                     Toggle("Jag har aktiverat flygplansläge", isOn: $model.userDeclaredAirplaneMode)
                         .disabled(!model.canStart)
                 }
@@ -147,6 +150,7 @@ struct OrnithLESChatPage: View {
             }
             Toggle("Tänkande", isOn: $model.chatThinkingEnabled).disabled(!model.canStart)
                 .accessibilityIdentifier("ornith-chat-thinking")
+            OrnithGenerationControls(options: $model.chatOptions).disabled(!model.canStart || model.isAPIRunning)
             if let progress = model.chatProgress, model.isBusy {
                 Text(String(format: "Appminne %.2f GB · läsanrop %.2f GB · %d token", Double(progress.footprintBytes) / 1e9,
                     Double(progress.ioBytesRead) / 1e9, progress.generatedTokens)).font(.caption.monospacedDigit())
@@ -156,6 +160,8 @@ struct OrnithLESChatPage: View {
                     Text(String(format: "%.2f token/s · prompt %.2f s · %d återanvända token", speed,
                         summary.prefillSeconds, summary.reusedPromptTokens)).font(.caption.monospacedDigit())
                 }
+                Text("\(summary.reasoningTokens) tänktoken · \(summary.forcedThinkingEndTokens) token för budgetstyrt avslut")
+                    .font(.caption2).foregroundStyle(.secondary)
                 Button("Spara mätning i Filer", systemImage: "chart.bar.doc.horizontal") { model.saveChatMeasurement() }
                     .disabled(!model.canStart)
                 Text("Token-ID:n och mätvärden sparas lokalt när du trycker. Inget skickas iväg.")
@@ -170,6 +176,129 @@ struct OrnithLESChatPage: View {
             Text("OS-filcache ingår inte i det redovisade appminnet. Återläsningar kan komma från cachen.")
                 .font(.caption2).foregroundStyle(.secondary)
         }
+    }
+}
+
+struct OrnithGenerationControls: View {
+    @Binding var options: LocalGenerationOptions
+    @State private var expanded = false
+    init(options: Binding<LocalGenerationOptions>, expanded: Bool = false) {
+        self._options = options; self._expanded = State(initialValue: expanded)
+    }
+    var body: some View {
+        DisclosureGroup("Generering", isExpanded: $expanded) {
+            VStack(alignment: .leading, spacing: 12) {
+                integerRow("Max token totalt", value: $options.maximumNewTokens)
+                Text("Tänkande och svar delar gränsen. 1–2 048 token; kontexten är fortsatt 4 096 token.")
+                    .font(.caption).foregroundStyle(.secondary)
+                if options.enableThinking {
+                    Toggle("Begränsa tänkandet", isOn: Binding(get: { options.thinkingBudget != nil },
+                        set: { options.thinkingBudget = $0 ? min(256, max(0, options.maximumNewTokens - 16)) : nil }))
+                    if options.thinkingBudget != nil {
+                        integerRow("Tänkbudget (token)", value: Binding(get: { options.thinkingBudget ?? 256 }, set: { options.thinkingBudget = $0 }))
+                        Text("0 stänger av tänkandet. Vid gränsen avslutas resonemanget med modellens slutmarkör och svaret fortsätter. Lämna utrymme i totalgränsen. En kort budget kan försämra svaret.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                HStack {
+                    Text("Temperatur")
+                    Spacer()
+                    TextField("Temperatur", value: $options.temperature, format: .number.precision(.fractionLength(0...2)))
+                        .multilineTextAlignment(.trailing).frame(width: 85).textFieldStyle(.roundedBorder)
+                }
+                Text("0 ger deterministiska svar. Högre värden ger mer variation, upp till 2.")
+                    .font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Text("Top-p"); Spacer()
+                    TextField("Top-p", value: $options.topP, format: .number.precision(.fractionLength(0...2)))
+                        .multilineTextAlignment(.trailing).frame(width: 85).textFieldStyle(.roundedBorder)
+                }
+                HStack {
+                    Text("Slumpfrö"); Spacer()
+                    TextField("Slumpfrö", value: $options.seed, format: .number.grouping(.never))
+                        .multilineTextAlignment(.trailing).frame(width: 110).textFieldStyle(.roundedBorder)
+                }
+                Text("Top-p och slumpfrö används när temperaturen är större än 0. API:t använder dessa standardvärden vid start; anrop kan ange egna värden.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }.padding(.top, 8)
+        }.accessibilityIdentifier("ornith-generation-controls")
+    }
+    private func integerRow(_ title: String, value: Binding<Int>) -> some View {
+        HStack {
+            Text(title); Spacer()
+            TextField(title, value: value, format: .number.grouping(.never))
+                .multilineTextAlignment(.trailing).frame(width: 100).textFieldStyle(.roundedBorder)
+                .accessibilityLabel(title)
+        }
+    }
+}
+
+struct OrnithAPIPage: View {
+    @Bindable var model: OrnithLESAppModel
+    var activate: () -> Void = {}
+    @State private var showKey = false
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Använd Ornith från datorn").font(.title2.bold())
+                Text("OpenAI-kompatibelt API · lokal inferens på iPhone")
+                    .font(.subheadline).foregroundStyle(.secondary)
+                Text(model.apiStatus).accessibilityIdentifier("ornith-api-status")
+                if let error = model.error { Text(error).foregroundStyle(.red).font(.caption) }
+                if !model.chatReady && !model.isAPIRunning {
+                    Text("Förbered samma verifierade motor som används i snabbchatten.").font(.callout)
+                    Button("Förbered modellen") { activate() }.buttonStyle(.borderedProminent).disabled(!model.canStart)
+                }
+                HStack {
+                    Text("Port"); Spacer()
+                    TextField("Port", value: $model.apiPort, format: .number.grouping(.never))
+                        .multilineTextAlignment(.trailing).frame(width: 100).textFieldStyle(.roundedBorder)
+                        .disabled(!model.apiAccessKey.isEmpty || !model.canStart)
+                }
+                if model.apiAccessKey.isEmpty {
+                    Button("Starta lokalt API") { model.startAPI() }.buttonStyle(.borderedProminent)
+                        .disabled(!model.canStart || !model.chatReady)
+                } else {
+                    Button("Stoppa API", role: .destructive) { model.stopAPI() }.buttonStyle(.bordered)
+                }
+                ForEach(model.apiURLs, id: \.self) { url in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Base URL").font(.caption).foregroundStyle(.secondary)
+                        Text(url).font(.callout.monospaced()).textSelection(.enabled)
+                        Button("Kopiera adress", systemImage: "doc.on.doc") { copy(url) }
+                    }
+                }
+                if !model.apiAccessKey.isEmpty {
+                    Text("Lokal API-nyckel").font(.headline)
+                    if showKey { Text(model.apiAccessKey).font(.caption.monospaced()).textSelection(.enabled).privacySensitive() }
+                    HStack {
+                        Button(showKey ? "Dölj nyckel" : "Visa nyckel") { showKey.toggle() }
+                        Spacer()
+                        Button("Kopiera nyckel", systemImage: "key") { copy(model.apiAccessKey) }
+                    }
+                    Text("Nyckeln skapas på nytt när servern startas och sparas inte. Ange den som API key i klienten.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Toggle("Behåll skärmen vaken", isOn: $model.apiKeepAwake)
+                Text("Modellnamn").font(.caption).foregroundStyle(.secondary)
+                Text(LocalChatRequest.modelID).font(.callout.monospaced()).textSelection(.enabled)
+                Text("Samma Wi-Fi eller Ethernet via USB-C-adapter. HTTP används på det betrodda lokala nätverket. Vanlig USB-kabel kräver att datorn har en nätverksanslutning till telefonen.")
+                    .font(.callout)
+                Text("Låt appen vara öppen i förgrunden. Låsning, bakgrund eller minnestryck stoppar servern. Chatten och API:t delar motorn och hanterar ett anrop åt gången.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text("Stöd: /v1/models, /v1/chat/completions och strömmande textsvar. Resonemang skickas separat som reasoning_content. Strukturerade verktygsanrop och Responses API stöds ännu inte.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text("\(model.apiCompletedRequests) slutförda API-anrop").font(.caption.monospacedDigit())
+                OrnithGenerationControls(options: $model.chatOptions).disabled(!model.canStart || model.isAPIRunning)
+            }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
+        }.background(MRColor.abyss).tint(MRColor.tierPinned)
+    }
+    private func copy(_ value: String) {
+        #if os(iOS)
+        UIPasteboard.general.string = value
+        #else
+        NSPasteboard.general.clearContents(); NSPasteboard.general.setString(value, forType: .string)
+        #endif
     }
 }
 #endif

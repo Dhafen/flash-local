@@ -20,6 +20,8 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Låter din dator ansluta till Ornith på telefonen via lokalt Wi-Fi eller Ethernet. Modellen körs på telefonen.</string>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>

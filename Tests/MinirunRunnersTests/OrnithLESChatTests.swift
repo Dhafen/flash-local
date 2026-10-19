@@ -3,9 +3,22 @@ import Foundation
 import XCTest
 import OrnithLES
 import ModelAdapters
+import MinirunKit
 @testable import MinirunRunners
 
 final class OrnithLESChatTests: XCTestCase {
+    func testDefaultSamplerIsIdenticalToExistingGreedyAndDoesNotChangeLogits() throws {
+        var sampler = LocalTokenSampler(seed: 42)
+        let options = LocalGenerationOptions()
+        for step in 0..<128 {
+            let logits = (0..<257).map { Float((($0 * 17 + step * 29) % 113) - 56) / 17 }
+            let unchanged = logits
+            XCTAssertEqual(try sampler.select(logits, options: options), try Qwen4ExpGreedyToken.select(logits))
+            XCTAssertEqual(logits, unchanged)
+        }
+        XCTAssertNil(options.thinkingBudget); XCTAssertEqual(options.temperature, 0)
+        print("ORNITH_CHAT_SAMPLING greedyIdentical=true logitsUnchanged=true thinkingBudgetOptIn=true fixtures=128 trainedInference=false")
+    }
     func testAdmittedChatUsesOnlyValidatedBatchAndBindsModelAndRuntime() throws {
         let serial: [String: Any] = ["positions": 4, "maximumAbsoluteError": 0.001, "relativeL2Error": 0.0001,
             "sameGreedy": true, "routingDigest": 19, "routingDecisions": 8000, "canonicalRoutingDigest": 23,

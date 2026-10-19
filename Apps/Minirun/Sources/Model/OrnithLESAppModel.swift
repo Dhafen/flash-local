@@ -18,6 +18,17 @@ private enum LESChatPresentationError: Error, LocalizedError {
     }
 }
 
+/// Transport teardown can race a completed owner. A finished request may not
+/// cancel the reusable native context after its last event has been delivered.
+private final class LESRequestLease: @unchecked Sendable {
+    private let lock = NSLock()
+    private var finished = false
+    private let control: LESControl
+    init(_ control: LESControl) { self.control = control }
+    func finish() { lock.lock(); finished = true; lock.unlock() }
+    func cancel() { lock.lock(); defer { lock.unlock() }; if !finished { control.cancel() } }
+}
+
 private struct LESRunExport: Encodable {
     let measurement: LESBenchmarkRun
     let decodeForwardTokensPerSecond: Double
@@ -79,6 +90,7 @@ private actor LESAppWorker {
     func memoryAdmissionReport() -> [LESMemoryAdmission] { admissions }
     func release() { chat?.close(); chat = nil; chatCheck = nil; artifact = nil; prepared = nil }
     func resetChat() { chat?.resetConversation() }
+    func closeChat() { chat?.close(); chat = nil }
     private func prepareFiles(modelsRoot: URL, privateRoot: URL, existing: VerifiedGGUFArtifact?, control: LESControl,
                               progress: @Sendable (String) -> Void) throws {
         if artifact == nil {
@@ -115,13 +127,13 @@ private actor LESAppWorker {
             control: control, onAdmission: { self.admissions.append($0) })
         return check
     }
-    func generateChat(messages: [Qwen35ChatMessage], thinking: Bool,
+    func generateChat(messages: [Qwen35ChatMessage], options: LocalGenerationOptions,
                       events: AsyncThrowingStream<Qwen4ExpTextGeneration.Event, Error>.Continuation)
         -> Result<OrnithLESChatGeneration.Summary, Error> {
         let result = Result {
             guard let chat else { throw LESChatPresentationError.notReady }
             return try autoreleasepool {
-                try chat.generate(messages: messages, enableThinking: thinking) { event in
+                try chat.generate(messages: messages, options: options) { event in
                     if case .dropped = events.yield(event) {
                         throw LESChatPresentationError.streamFull
                     }
@@ -176,7 +188,21 @@ final class OrnithLESAppModel {
     private(set) var chatSummary: OrnithLESChatGeneration.Summary?
     private(set) var chatMeasurementURL: URL?
     var chatDraft = ""
-    var chatThinkingEnabled = true
+    var chatOptions = LocalGenerationOptions()
+    var chatThinkingEnabled: Bool {
+        get { chatOptions.enableThinking }
+        set { chatOptions.enableThinking = newValue }
+    }
+    private(set) var isAPIRunning = false
+    private(set) var apiStatus = "Avstängd"
+    private(set) var apiAccessKey = ""
+    private(set) var apiURLs: [String] = []
+    private(set) var apiCompletedRequests = 0
+    var apiPort = 8080
+    var apiKeepAwake = true
+    @ObservationIgnored private var apiServer: LocalModelAPIServer?
+    @ObservationIgnored private var apiID: UUID?
+    @ObservationIgnored private var operationIsAPI = false
     var userDeclaredAirplaneMode = false
     let modelsRoot: URL
     let privateRoot: URL
@@ -188,6 +214,8 @@ final class OrnithLESAppModel {
     @ObservationIgnored private var activeID: UUID?
     var canStart: Bool { !isBusy && !isShuttingDown && !isPreview }
     var canSendChat: Bool { canStart && chatReady }
+    var canBenchmark: Bool { canStart && apiServer == nil }
+    var shouldKeepAwake: Bool { isBusy || (isAPIRunning && apiKeepAwake) }
     init(modelsRoot: URL, privateRoot: URL, documents: URL) {
         self.modelsRoot = modelsRoot; self.privateRoot = privateRoot; self.documents = documents
     }
@@ -213,8 +241,16 @@ final class OrnithLESAppModel {
             reasoning: "Jag börjar med cachens gränser och vilka egenskaper testet behöver kontrollera.", isThinking: thinking))
         return model
     }
+    static func reviewAPIPreview() -> OrnithLESAppModel {
+        let model = Self.reviewPreview()
+        model.apiStatus = "Förhandsvisning · ingen server eller modell körs"
+        model.apiURLs = ["http://192.168.1.25:8080/v1"]
+        model.apiAccessKey = "example-only-not-a-live-key"
+        model.chatReady = true; model.isAPIRunning = true
+        return model
+    }
     func start(existing: VerifiedGGUFArtifact? = nil) {
-        guard canStart else { return }
+        guard canBenchmark else { return }
         chatReady = false; chatControl = nil
         let flag = LESControl(), id = UUID()
         activeID = id; control = flag; isBusy = true; error = nil; runs = []; memoryAdmissions = []; measurementURL = nil
@@ -250,6 +286,7 @@ final class OrnithLESAppModel {
     func shutdown() async {
         guard !isShuttingDown else { await operation?.value; return }
         isShuttingDown = true
+        stopAPI()
         stop(); await operation?.value; await worker.release()
         chatReady = false; chatControl = nil; isShuttingDown = false
     }
@@ -287,17 +324,19 @@ final class OrnithLESAppModel {
         guard canSendChat, let flag = chatControl else { return }
         let input = chatDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !input.isEmpty, input.utf8.count <= 262144 else { return }
+        do { try chatOptions.validate() } catch { self.error = error.localizedDescription; return }
         chatDraft = ""; chatMessages.append(.init(role: .user, text: input))
         let prompt = REAMMessage.generationPrompt(chatMessages)
         chatMessages.append(.init(role: .assistant, text: "", interrupted: true))
-        let response = chatMessages.last!.id, id = UUID(), thinking = chatThinkingEnabled
+        let response = chatMessages.last!.id, id = UUID(), options = chatOptions
+        let thinking = options.thinkingEnabled
         activeID = id; control = flag; isBusy = true; error = nil
         chatProgress = nil; chatSummary = nil; chatMeasurementURL = nil; status = "Förbereder lokal generering…"
         let channel = AsyncThrowingStream<Qwen4ExpTextGeneration.Event, Error>.makeStream(bufferingPolicy: .bufferingOldest(64))
         channel.continuation.onTermination = { if case .cancelled = $0 { flag.cancel() } }
         let worker = worker
         let task = Task.detached(priority: .userInitiated) {
-            let result = await worker.generateChat(messages: prompt, thinking: thinking, events: channel.continuation)
+            let result = await worker.generateChat(messages: prompt, options: options, events: channel.continuation)
             switch result {
             case .success: channel.continuation.finish()
             case .failure(let error): channel.continuation.finish(throwing: error)
@@ -343,6 +382,121 @@ final class OrnithLESAppModel {
                 status = "Genereringen stoppades. Aktivera snabbchatten för att fortsätta."
             }
         }
+    }
+    func startAPI() {
+        guard canStart, chatReady, apiServer == nil else { return }
+        guard (1024...65535).contains(apiPort) else { error = "Välj en port mellan 1024 och 65535."; return }
+        do {
+            let key = try LocalModelAPIServer.makeAccessKey(), id = UUID()
+            apiAccessKey = key; apiID = id; apiStatus = "Startar lokalt API…"; error = nil
+            apiServer = try LocalModelAPIServer(key: key, port: UInt16(apiPort), defaults: chatOptions, handler: { [weak self] request in
+                guard let self else { throw LocalAPIError(status: 503, message: "Phone service is closed") }
+                return try await self.openAPIRequest(request)
+            }, onState: { [weak self] state in
+                Task { @MainActor in
+                    guard let self, self.apiID == id else { return }
+                    switch state {
+                    case .ready(let port, let addresses):
+                        self.isAPIRunning = true
+                        self.apiURLs = addresses.map { "http://\($0):\(port)/v1" }
+                        self.apiStatus = addresses.isEmpty ? "Servern lyssnar. Anslut till Wi-Fi eller Ethernet och starta om API:t för att visa adressen." : "API aktivt · samma lokala Ornith-motor"
+                    case .failed(let message):
+                        self.error = message; self.stopAPI()
+                    case .stopped: self.stopAPI()
+                    }
+                }
+            })
+        } catch { self.error = error.localizedDescription; stopAPI() }
+    }
+    func stopAPI() {
+        apiID = nil; apiServer?.stop(); apiServer = nil
+        isAPIRunning = false; apiAccessKey = ""; apiURLs = []; apiStatus = "Avstängd"
+        if operationIsAPI { control?.cancel() }
+    }
+    /// The transport calls this before sending successful headers. All UI and
+    /// API requests reserve the same owner; no second model context is loaded.
+    func openAPIRequest(_ request: LocalChatRequest) throws -> LocalChatGeneration {
+        guard apiServer != nil, !isShuttingDown, !isPreview else {
+            throw LocalAPIError(status: 503, message: "Start the local API on the phone")
+        }
+        guard !isBusy else { throw LocalAPIError(status: 429, message: "The phone is processing another request") }
+        guard chatReady, let flag = chatControl else {
+            throw LocalAPIError(status: 503, message: "Activate Ornith quick chat on the phone first")
+        }
+        let id = UUID(), lease = LESRequestLease(flag)
+        let output = AsyncThrowingStream<LocalChatEvent, Error>.makeStream(bufferingPolicy: .bufferingOldest(64))
+        output.continuation.onTermination = { if case .cancelled = $0 { lease.cancel() } }
+        let input = request.messages.map { Qwen35ChatMessage(role: Qwen35ChatMessage.Role(rawValue: $0.role)!, content: $0.content, reasoningContent: $0.reasoning) }
+        let channel = AsyncThrowingStream<Qwen4ExpTextGeneration.Event, Error>.makeStream(bufferingPolicy: .bufferingOldest(64))
+        activeID = id; control = flag; isBusy = true; operationIsAPI = true; error = nil
+        status = "API: förbereder lokal generering…"
+        let worker = worker
+        let owner = Task.detached(priority: .userInitiated) {
+            let result = await worker.generateChat(messages: input, options: request.options, events: channel.continuation)
+            lease.finish()
+            switch result { case .success: channel.continuation.finish(); case .failure(let error): channel.continuation.finish(throwing: error) }
+            return result
+        }
+        operation = Task { [weak self] in
+            guard let self else { lease.cancel(); _ = await owner.value; output.continuation.finish(); return }
+            defer {
+                lease.finish()
+                if activeID == id { activeID = nil; control = nil; isBusy = false; operationIsAPI = false; operation = nil }
+            }
+            var text = QwenThinkingText(startsInThinking: request.options.thinkingEnabled)
+            var answerBytes = 0, reasoningBytes = 0
+            func emit() throws {
+                let answer = String(decoding: text.answer.utf8.dropFirst(answerBytes), as: UTF8.self)
+                let reasoning = String(decoding: text.reasoning.utf8.dropFirst(reasoningBytes), as: UTF8.self)
+                answerBytes = text.answer.utf8.count; reasoningBytes = text.reasoning.utf8.count
+                if !answer.isEmpty || !reasoning.isEmpty {
+                    switch output.continuation.yield(.delta(content: answer, reasoning: reasoning)) {
+                    case .enqueued: break
+                    default: lease.cancel(); throw LESChatPresentationError.streamFull
+                    }
+                }
+            }
+            do {
+                for try await event in channel.stream {
+                    switch event {
+                    case .prefill(let value): status = "API: läser prompt \(value.promptTokensCompleted)/\(value.promptTokensTotal)"
+                    case .token(_, let delta, _):
+                        text.append(delta); try emit()
+                        status = text.isThinking ? "API: tänker lokalt…" : "API: skriver svaret…"
+                    case .trailingText(let delta): text.append(delta); try emit()
+                    }
+                }
+                text.finish(); try emit()
+            } catch { lease.cancel() }
+            var result = await owner.value
+            if flag.isCancellationRequested { await worker.closeChat(); result = .failure(CancellationError()) }
+            lease.finish()
+            switch result {
+            case .success(let summary):
+                output.continuation.yield(.complete(.init(promptTokens: summary.promptTokenIDs.count,
+                    completionTokens: summary.generatedTokenIDs.count, reasoningTokens: summary.reasoningTokens,
+                    forcedTokens: summary.forcedThinkingEndTokens, finishReason: summary.stopReason == "endOfGeneration" ? "stop" : "length")))
+                output.continuation.finish(); apiCompletedRequests += 1
+                status = "API: klart · \(summary.generatedTokenIDs.count) token"
+            case .failure(let failure):
+                output.continuation.finish(throwing: failure); chatReady = false; chatControl = nil
+                if !flag.isCancellationRequested { error = failure.localizedDescription }
+                status = "API-anropet stoppades."
+                // A disconnected client cancels its owner, not the listener.
+                // Recreate only that context after awaiting native teardown;
+                // reuse the same process-local, source-bound numerical check.
+                if flag.isCancellationRequested, apiServer != nil, !isShuttingDown {
+                    let recovery = LESControl(); control = recovery
+                    do {
+                        let check = try await worker.prepareChat(modelsRoot: modelsRoot, privateRoot: privateRoot, existing: nil,
+                            control: recovery, progress: { _ in }, onCheck: { _ in })
+                        guard check.nativeBenchmarkAdmitted, !recovery.isCancellationRequested else { throw CancellationError() }
+                        numericalCheck = check; chatControl = recovery; chatReady = true; status = "API redo för nästa anrop."
+                    } catch { await worker.closeChat(); status = "Aktivera snabbchatten igen för att återuppta API:t." }
+                }
+            }
+        }
+        return .init(events: output.stream, cancel: { lease.cancel() })
     }
     func clearChat() {
         guard canStart else { return }

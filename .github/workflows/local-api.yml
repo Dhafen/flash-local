@@ -1,0 +1,42 @@
+name: Local API source controls
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/ornith-api-controls]
+concurrency:
+  group: local-api-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  api-controls:
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - run: sudo xcode-select -s /Applications/Xcode_26.2.app
+      - run: python3 scripts/make_local_api_controls.py
+      - name: Real TCP, framing, authorization, stream and cancellation controls
+        working-directory: .work/local-api-controls
+        run: |
+          set -o pipefail
+          xcodebuild test -scheme LocalAPIControls-Package -destination 'platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee ../local-api-controls.log | tail -70
+          grep 'ORNITH_LOCAL_API realTCP=true auth=true json=true sse=true reasoningSeparated=true syntheticOnly=true phoneReachability=false' ../local-api-controls.log
+      - name: Compile the identical server for iOS
+        working-directory: .work/local-api-controls
+        run: |
+          set -o pipefail
+          xcodebuild build -scheme LocalAPIControls-Package -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee ../local-api-ios-build.log | tail -30
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: local-api-controls
+          path: |
+            .work/local-api-controls.log
+            .work/local-api-ios-build.log
+            .work/local-api-controls/source-manifest.json
+          retention-days: 7
