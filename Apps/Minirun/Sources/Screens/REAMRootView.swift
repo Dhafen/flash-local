@@ -40,7 +40,7 @@ struct REAMRootView: View {
                                 openPerformance()
                             }.disabled(!model.canOpenAlternateRunner)
                             #if canImport(OrnithLES)
-                            Button("Jämför LES med befintlig GGUF") { openLES() }
+                            Button("Ornith snabbchatt och motortest") { openLES() }
                                 .disabled(!model.canOpenAlternateRunner)
                             #endif
                             NavigationLink("Om Flash Local") { AboutView() }
@@ -128,7 +128,7 @@ struct REAMChatPage: View {
                 ScrollView {
                     VStack(spacing: 0) {
                     if let openLES {
-                        Button("Jämför LES med befintlig modell", systemImage: "speedometer", action: openLES)
+                        Button("Öppna Ornith snabbchatt", systemImage: "speedometer", action: openLES)
                             .buttonStyle(.borderedProminent).disabled(!model.canOpenAlternateRunner)
                             .accessibilityIdentifier("open-ornith-les").padding(.bottom, 12)
                     }

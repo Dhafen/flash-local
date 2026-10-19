@@ -382,11 +382,10 @@ def analyze(report):
     ]:
         if not condition:
             global_issues.append(issue)
-    comparisons = []
-    for cache in CACHES:
-        selected = [run for run in runs if run["applicationCache"] == cache]
+    def compare(cache, backends):
+        selected = [run for run in runs if run["applicationCache"] == cache and run["backend"] in backends]
         issues = list(global_issues)
-        if {run["backend"] for run in selected} != set(BACKENDS):
+        if {run["backend"] for run in selected} != set(backends):
             issues.append("missingBenchmarkModes")
         if any(run["issues"] for run in selected):
             issues.append("invalidOrIncompleteRun")
@@ -399,9 +398,13 @@ def analyze(report):
             issues.append("thermalConditionsNotComparable")
         fastest = max(selected, key=lambda run: run["forwardsPerSecond"]) if selected and not issues else None
         baseline = next((run for run in selected if run["backend"] == "existingGGUF"), None)
-        comparisons.append(dict(applicationCache=cache, issues=issues,
+        return dict(applicationCache=cache, issues=issues,
             fastestComparableBackend=fastest["backend"] if fastest else None,
-            speedupOverExisting=fastest["forwardsPerSecond"] / baseline["forwardsPerSecond"] if fastest else None))
+            speedupOverExisting=fastest["forwardsPerSecond"] / baseline["forwardsPerSecond"] if fastest and baseline else None)
+    comparisons = [compare(cache, BACKENDS) for cache in CACHES]
+    # A different legacy output prevents a four-way speedup claim, but does
+    # not invalidate a complete, output-identical comparison among native modes.
+    native_comparisons = [compare(cache, BACKENDS[1:]) for cache in CACHES]
     build = report.get("appBuild")
     build = build if isinstance(build, str) and re.fullmatch(r"[0-9]{1,16}", build) else None
     return dict(schemaVersion=1, appBuild=build, contextCapacityTokens=context, failedReport=report.get("failure") is not None,
@@ -412,6 +415,7 @@ def analyze(report):
         numericalComparisons=numerical_summaries(report.get("numericalCheck")),
         fullModelNumericsVerified=False,
         memoryAdmissions=[memory_admission(item) for item in admissions], runs=runs, comparisons=comparisons,
+        nativeComparisons=native_comparisons,
         recommendedAppBackend=None, reportAuthenticityVerified=False, offlineExecutionVerified=False,
         scope="single fixed prompt; four reference positions; no automatic backend selection",
         notes=["Observed peak is not the live baseline at an admission failure.",

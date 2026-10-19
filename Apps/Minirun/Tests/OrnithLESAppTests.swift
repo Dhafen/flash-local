@@ -26,5 +26,21 @@ final class OrnithLESAppTests: XCTestCase {
         XCTAssertFalse(model.isBusy); XCTAssertTrue(model.runs.isEmpty)
         XCTAssertNil(model.measurementURL); XCTAssertNil(model.numericalCheck)
     }
+    func testMissingChatModelCannotGenerateOrChangeOrdinaryFiles() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("les-chat-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("chat.json"), bytes = Data("keep ordinary history".utf8)
+        try bytes.write(to: file)
+        let app = OrnithLESAppModel(modelsRoot: root, privateRoot: root.appendingPathComponent("private"), documents: root)
+        app.chatDraft = "Hej"; app.sendChat()
+        XCTAssertTrue(app.chatMessages.isEmpty); XCTAssertFalse(app.canSendChat)
+        app.activateChat(); XCTAssertTrue(app.isBusy); XCTAssertFalse(app.canStart)
+        await app.shutdown()
+        XCTAssertFalse(app.chatReady); XCTAssertFalse(app.isBusy); XCTAssertFalse(app.canSendChat)
+        XCTAssertEqual(try Data(contentsOf: file), bytes)
+        XCTAssertNil(app.chatSummary); XCTAssertNil(app.chatMeasurementURL)
+        print("ORNITH_CHAT_APP missingModelRejected=true sameOwner=true ordinaryHistoryPreserved=true previewCannotInfer=true")
+    }
 }
 #endif

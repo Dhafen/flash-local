@@ -63,6 +63,31 @@ def arithmetic_report(batch=False):
 
 
 class LESAnalysisTests(unittest.TestCase):
+    def test_native_ranking_does_not_claim_equivalent_legacy_output_or_promote_chat(self):
+        data = arithmetic_report()
+        for item in data['measurements']:
+            if item['measurement']['backend'] == 'existingGGUF':
+                item['measurement']['outputTokenSHA256'] = 'b' * 64
+        result = analyze(data)
+        self.assertTrue(all(c['fastestComparableBackend'] is None for c in result['comparisons']))
+        self.assertTrue(all(c['fastestComparableBackend'] == 'omniLookahead' for c in result['nativeComparisons']))
+        self.assertTrue(all(c['speedupOverExisting'] is None for c in result['nativeComparisons']))
+        self.assertIsNone(result['recommendedAppBackend'])
+        self.assertFalse(result['fullModelNumericsVerified'])
+
+    def test_native_ranking_rejects_missing_different_short_hot_or_unvalidated_runs(self):
+        for changed in ('missing', 'output', 'short', 'hot', 'gate'):
+            data = arithmetic_report()
+            run = next(i for i in data['measurements'] if i['measurement']['backend'] == 'omniPageCache')
+            if changed == 'missing': data['measurements'].remove(run)
+            elif changed == 'output': run['measurement']['outputTokenSHA256'] = 'b' * 64
+            elif changed == 'short':
+                run['measurement']['generatedTokens'] = 127; run['hasRequired128Tokens'] = False
+            elif changed == 'hot': run['measurement']['maximumThermalState'] = 2
+            else: data['numericalCheck']['arithmeticCheck']['callbackFreePageCache']['sameGreedy'] = False
+            result = analyze(data)
+            self.assertIsNone(result['nativeComparisons'][0]['fastestComparableBackend'], changed)
+
     def test_exact_expert_sets_allow_only_reference_rank_permutation_with_strict_logits(self):
         data = arithmetic_report(True)
         item = data['numericalCheck']['arithmeticCheck']

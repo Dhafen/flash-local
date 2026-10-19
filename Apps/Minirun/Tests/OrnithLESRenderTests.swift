@@ -10,15 +10,25 @@ import AppKit
 
 @MainActor
 final class OrnithLESRenderTests: XCTestCase {
+    private enum Fixture: String, CaseIterable { case missing, preview, chatThinking = "chat-thinking", chatComplete = "chat-complete" }
     func testMissingAndPreviewChatDrawInBothAppearances() throws {
         var captures: [ColorScheme: [Data]] = [:]
-        for preview in [false, true] {
-            let model = preview ? OrnithLESAppModel.reviewPreview() : OrnithLESAppModel(modelsRoot: FileManager.default.temporaryDirectory, privateRoot: FileManager.default.temporaryDirectory, documents: FileManager.default.temporaryDirectory)
+        for fixture in Fixture.allCases {
+            let model: OrnithLESAppModel
+            switch fixture {
+            case .missing: model = OrnithLESAppModel(modelsRoot: FileManager.default.temporaryDirectory, privateRoot: FileManager.default.temporaryDirectory, documents: FileManager.default.temporaryDirectory)
+            case .preview: model = .reviewPreview()
+            case .chatThinking: model = .reviewChatPreview(thinking: true)
+            case .chatComplete: model = .reviewChatPreview(thinking: false)
+            }
             for scheme in [ColorScheme.light, .dark] {
                 // ImageRenderer omits ScrollView contents and replaces native
                 // text fields with yellow placeholders. Host real controls in
                 // a real window before capturing, so a PNG proves actual UI.
-                let content = OrnithLESPage(model: model).environment(\.colorScheme, scheme)
+                let content = Group {
+                    if fixture == .chatThinking || fixture == .chatComplete { OrnithLESChatPage(model: model) }
+                    else { OrnithLESPage(model: model) }
+                }.environment(\.colorScheme, scheme)
                 let data: Data
                 #if canImport(UIKit)
                 let host = UIHostingController(rootView: content)
@@ -59,13 +69,13 @@ final class OrnithLESRenderTests: XCTestCase {
                 #endif
                 XCTAssertGreaterThan(data.count, 10000)
                 let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.png")
-                attachment.name = "ornith-les-\(platform)-\(preview ? "preview" : "missing")-\(scheme == .dark ? "dark" : "light").png"
+                attachment.name = "ornith-les-\(platform)-\(fixture.rawValue)-\(scheme == .dark ? "dark" : "light").png"
                 attachment.lifetime = .keepAlways; add(attachment)
                 captures[scheme, default: []].append(data)
             }
         }
         for scheme in [ColorScheme.light, .dark] {
-            XCTAssertEqual(captures[scheme]?.count, 2)
+            XCTAssertEqual(captures[scheme]?.count, 4)
             XCTAssertNotEqual(captures[scheme]?[0], captures[scheme]?[1],
                 "Missing-model and preview pages must show different visible content, not the same empty viewport")
         }

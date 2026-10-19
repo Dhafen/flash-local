@@ -129,6 +129,7 @@ jobs:
           xcodebuild test -scheme minirun-Package -destination 'platform=macOS' \
             -only-testing:OrnithLESTests -only-testing:ModelAdaptersTests/CanonicalQwen35TokenizerParityTests \
             -only-testing:ModelAdaptersTests/QwenThinkingTextTests \
+            -only-testing:MinirunRunnersTests/OrnithLESChatTests \
             -skipPackagePluginValidation -skipMacroValidation \
             > .work/les-swift-tests.log 2>&1
           tail -12 .work/les-swift-tests.log
@@ -141,6 +142,7 @@ jobs:
           grep 'ORNITH_DEQUANTIZED_SWIFT explicitMode=true defaultUnchanged=true boundedScratch=true noPayload=true syntheticOnly=true' .work/les-swift-tests.log
           grep 'ORNITH_ARITHMETIC_GATE independentReference=true originalDiscrepancyPreserved=true fullRoutingRequired=true callbackFreeRequired=true batchFallback=true syntheticOnly=true' .work/les-swift-tests.log
           grep 'ORNITH_EXPERT_SET_GATE completeSetsRequired=true rankPermutationOnly=true predictionRankedTraceUnchanged=true strictLogits=true missingProofRejected=true batchFallback=true syntheticOnly=true' .work/les-swift-tests.log
+          grep 'ORNITH_CHAT_POLICY inProcessGate=true matchingModelAndRuntime=true exactPrefixOnly=true ordinaryEngineUnchanged=true syntheticOnly=true' .work/les-swift-tests.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:

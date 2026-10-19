@@ -12,6 +12,7 @@ public final class LESControl: @unchecked Sendable {
     private var observedPeak: UInt64 = 0
     public init() {}
     public func cancel() { lock.lock(); cancelled = true; lock.unlock() }
+    public var isCancellationRequested: Bool { lock.lock(); defer { lock.unlock() }; return cancelled }
     public var maximumObservedFootprintBytes: UInt64 { lock.lock(); defer { lock.unlock() }; return observedPeak }
     public func shouldAbort() -> Bool {
         let sample = ProcessFootprint.current()

@@ -11,10 +11,20 @@ struct OrnithLESView: View {
     var existing: VerifiedGGUFArtifact?
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
+    private enum Pane: String, CaseIterable { case chat = "Snabbchatt", comparison = "Jämförelse" }
+    @State private var pane: Pane = .chat
     var body: some View {
         NavigationStack {
-            OrnithLESPage(model: model, start: { model.start(existing: existing) })
-                .navigationTitle("Ornith LES")
+            VStack(spacing: 0) {
+                Picker("Ornith", selection: $pane) {
+                    ForEach(Pane.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                }.pickerStyle(.segmented).padding(.horizontal).padding(.bottom, 8).disabled(model.isBusy)
+                switch pane {
+                case .chat: OrnithLESChatPage(model: model, activate: { model.activateChat(existing: existing) })
+                case .comparison: OrnithLESPage(model: model, start: { model.start(existing: existing) })
+                }
+            }
+                .navigationTitle("Ornith")
                 .toolbar { ToolbarItem(placement: .cancellationAction) {
                     Button("Stäng") { Task { await model.shutdown(); dismiss() } }
                 } }
@@ -86,6 +96,80 @@ struct OrnithLESPage: View {
                     .font(.caption).foregroundStyle(.secondary)
             }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
         }.background(MRColor.abyss).tint(MRColor.tierPinned)
+    }
+}
+/// A separate experimental conversation; the ordinary chat keeps its engine
+/// and saved history. The parent sheet owns inference cancellation/teardown.
+struct OrnithLESChatPage: View {
+    @Bindable var model: OrnithLESAppModel
+    var activate: () -> Void = {}
+    var body: some View {
+        VStack(spacing: 0) {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        header
+                        ForEach(model.chatMessages) { message in
+                            REAMMessageRow(message: message, isGenerating: model.isBusy && message.id == model.chatMessages.last?.id)
+                                .id(message.id)
+                        }
+                    }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .onChange(of: model.chatMessages.count) { _, _ in
+                    if let id = model.chatMessages.last?.id { proxy.scrollTo(id, anchor: .bottom) }
+                }
+            }
+            Divider()
+            HStack(alignment: .bottom, spacing: 12) {
+                TextField("Skriv ett meddelande…", text: $model.chatDraft, axis: .vertical)
+                    .lineLimit(1...6).textFieldStyle(.plain).submitLabel(.send)
+                    .onSubmit { model.sendChat() }.disabled(!model.canSendChat)
+                    .accessibilityLabel("Meddelande i snabbchatten")
+                Button { model.sendChat() } label: { Image(systemName: "arrow.up.circle.fill").font(.title) }
+                    .accessibilityLabel("Skicka i snabbchatten")
+                    .disabled(!model.canSendChat || model.chatDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }.padding(16)
+        }.background(MRColor.abyss).tint(MRColor.tierPinned)
+    }
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Ornith snabbchatt").font(.title2.bold())
+            Text("Experimentell motor · din befintliga GGUF · 4 096 token kontextgräns")
+                .font(.caption).foregroundStyle(.secondary)
+            Text(model.status).font(.callout).accessibilityIdentifier("ornith-chat-status")
+            if let error = model.error { Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled) }
+            if model.isBusy {
+                HStack { ProgressView(); Spacer(); Button("Stoppa", role: .cancel) { model.stop() } }
+            } else if !model.chatReady {
+                Button("Aktivera snabbchatten") { activate() }.buttonStyle(.borderedProminent).disabled(!model.canStart)
+                Text("Första starten kontrollerar numeriken mot originalvikterna. Ingen modell hämtas.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Toggle("Tänkande", isOn: $model.chatThinkingEnabled).disabled(!model.canStart)
+                .accessibilityIdentifier("ornith-chat-thinking")
+            if let progress = model.chatProgress, model.isBusy {
+                Text(String(format: "Appminne %.2f GB · läsanrop %.2f GB · %d token", Double(progress.footprintBytes) / 1e9,
+                    Double(progress.ioBytesRead) / 1e9, progress.generatedTokens)).font(.caption.monospacedDigit())
+            }
+            if let summary = model.chatSummary {
+                if let speed = summary.decodeTokensPerSecond {
+                    Text(String(format: "%.2f token/s · prompt %.2f s · %d återanvända token", speed,
+                        summary.prefillSeconds, summary.reusedPromptTokens)).font(.caption.monospacedDigit())
+                }
+                Button("Spara mätning i Filer", systemImage: "chart.bar.doc.horizontal") { model.saveChatMeasurement() }
+                    .disabled(!model.canStart)
+                Text("Token-ID:n och mätvärden sparas lokalt när du trycker. Inget skickas iväg.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+            if let url = model.chatMeasurementURL { ShareLink("Dela chattmätning", item: url) }
+            if !model.chatMessages.isEmpty {
+                Button("Rensa snabbchatten", role: .destructive) { model.clearChat() }.disabled(!model.canStart)
+            }
+            Text("Kort numerikkontroll krävs. Full modellkvalitet och lång kontext är ännu inte verifierade. Samtalet hålls separat i den här vyn.")
+                .font(.caption2).foregroundStyle(.secondary)
+            Text("OS-filcache ingår inte i det redovisade appminnet. Återläsningar kan komma från cachen.")
+                .font(.caption2).foregroundStyle(.secondary)
+        }
     }
 }
 #endif
