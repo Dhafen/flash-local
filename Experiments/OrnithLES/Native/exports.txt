@@ -5,5 +5,6 @@ _flo_vocabulary_size
 _flo_decode
 _flo_reset
 _flo_snapshot
+_flo_io_snapshot
 _flo_last_error
 _flo_revision

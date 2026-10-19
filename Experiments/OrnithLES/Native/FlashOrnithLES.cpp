@@ -7,6 +7,7 @@
 #include "llama-context.h"
 #include "llama-model.h"
 #include "llama-moe-slot.h"
+#include "flash-local-io-pool.h"
 #include "gguf.h"
 #include <nlohmann/json.hpp>
 #include <sys/stat.h>
@@ -300,6 +301,11 @@ flo_context * flo_open(int source, const char * directory, flo_options o, flo_ab
         }
         result->context = llama_init_from_model(result->model, cp);
         if (!result->context) throw std::runtime_error(loader_diagnostics.describe("LES context allocation failed"));
+        if (streaming && o.persistent_io) {
+            auto * slots = result->context->flash_local_slots();
+            require(slots != nullptr, "Persistent I/O requires the streamed expert runtime");
+            slots->flash_local_configure_io_pool(true, o.io_threads);
+        }
         result->vocabulary = llama_vocab_n_tokens(llama_model_get_vocab(result->model));
         result->batch = (int)cp.n_ubatch; result->capacity = o.context_tokens;
         check_abort(abort, user); return result.release();
@@ -357,5 +363,15 @@ flo_metrics flo_snapshot(const flo_context * c) {
         &out.device_allocated_bytes, &out.metal_device_observed);
     return out;
 }
+flo_io_metrics flo_io_snapshot(const flo_context * c) {
+    flo_io_metrics out{};
+    out.live_helpers = flash_local::bounded_io_pool::live_helpers();
+    if (c && c->context->flash_local_slots()) {
+        const auto value = c->context->flash_local_slots()->flash_local_io_pool_snapshot();
+        out.enabled = value.enabled; out.requested_readers = value.readers;
+        out.thread_starts = value.thread_starts; out.waves = value.waves; out.jobs = value.jobs;
+    }
+    return out;
+}
 const char * flo_last_error() { return last_error.c_str(); }
-const char * flo_revision() { return "96bbf61710d44421ea54e63f5194f9b17c20d877+flash-local-tensor-major-v1"; }
+const char * flo_revision() { return "96bbf61710d44421ea54e63f5194f9b17c20d877+flash-local-tensor-major-pool-v2"; }

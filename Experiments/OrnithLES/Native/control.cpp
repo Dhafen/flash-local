@@ -18,7 +18,8 @@
 #include <set>
 namespace fs = std::filesystem;
 using json = nlohmann::json;
-struct output { std::vector<std::vector<float>> logits; std::vector<int> positions; flo_metrics metrics; };
+struct output { std::vector<std::vector<float>> logits; std::vector<int> positions; flo_metrics metrics; flo_io_metrics io; };
+static uint64_t pool_pairs = 0, pool_used = 0, pool_jobs = 0;
 static void routing_trace_control() {
     std::array<int32_t, 512> padded;
     padded.fill(-1);
@@ -99,7 +100,7 @@ struct layer_trace {
     }
 };
 static output evaluate(int fd, const char * dir, bool metal, int depth, int steps, int cache = 8, int prefill = 0,
-                       bool trace_layers = false, bool trace_routing = true) {
+                       bool trace_layers = false, bool trace_routing = true, int persistent_override = -1) {
     if (trace_layers && prefill) throw std::runtime_error("Layer controls use single-token forwards");
     layer_trace trace;
     flo_options options{};
@@ -107,6 +108,10 @@ static output evaluate(int fd, const char * dir, bool metal, int depth, int step
     options.cache_slots_per_layer = cache;
     options.lookahead_depth = depth; options.io_threads = 2; options.cpu_threads = 2;
     options.metal = metal; options.trace_routing = trace_routing; options.memory_ceiling_bytes = 5500000000ULL;
+    options.persistent_io = dir && (persistent_override < 0 ? std::getenv("ORNITH_LES_PERSISTENT_IO") != nullptr : persistent_override != 0);
+    if (options.persistent_io) {
+        if (const char * readers = std::getenv("ORNITH_LES_IO_READERS")) options.io_threads = std::atoi(readers);
+    }
     if (trace_layers) { options.checkpoint = layer_trace::capture; options.checkpoint_user = &trace; }
     flo_context * context = flo_open(fd, dir, options, nullptr, nullptr);
     if (!context) throw std::runtime_error(flo_last_error());
@@ -126,6 +131,15 @@ static output evaluate(int fd, const char * dir, bool metal, int depth, int step
             first += count; out.positions.push_back(first - 1);
         }
         out.metrics = flo_snapshot(context);
+        out.io = flo_io_snapshot(context);
+        if (options.persistent_io) {
+            if (!out.io.enabled || out.io.requested_readers != options.io_threads ||
+                (out.io.waves && (out.io.thread_starts != uint64_t(options.io_threads - 1) || !out.io.jobs))) {
+                throw std::runtime_error("Persistent I/O controls did not observe the configured workers");
+            }
+        } else if (out.io.enabled || out.io.thread_starts || out.io.waves || out.io.jobs) {
+            throw std::runtime_error("Default execution unexpectedly enabled persistent I/O");
+        }
         if (trace_routing && !out.metrics.routing_decisions) throw std::runtime_error("Routing trace was not executed");
         if (!trace_routing && !trace_layers && (out.metrics.routing_decisions || out.metrics.canonical_routing_digest || out.metrics.canonical_expert_set_digest ||
                 out.metrics.probe_samples)) throw std::runtime_error("Callback-free execution unexpectedly observed tensors");
@@ -139,8 +153,19 @@ static output evaluate(int fd, const char * dir, bool metal, int depth, int step
     } catch (...) { flo_close(context); throw; }
     flo_close(context);
     const auto released = flo_snapshot(nullptr);
+    if (flo_io_snapshot(nullptr).live_helpers) throw std::runtime_error("Persistent readers survived native teardown");
     if (released.live_contexts || released.live_metal_buffers || released.owned_metal_bytes || released.mapped_metal_bytes)
         throw std::runtime_error("Native context or buffer ownership survived close");
+    if (options.persistent_io) {
+        const auto legacy = evaluate(fd, dir, metal, depth, steps, cache, prefill, trace_layers, trace_routing, 0);
+        if (out.logits != legacy.logits || out.positions != legacy.positions ||
+            out.metrics.canonical_routing_digest != legacy.metrics.canonical_routing_digest ||
+            out.metrics.canonical_expert_set_digest != legacy.metrics.canonical_expert_set_digest) {
+            throw std::runtime_error("Persistent reader scheduling changed logits or actual routing");
+        }
+        ++pool_pairs;
+        if (out.io.waves) { ++pool_used; pool_jobs += out.io.jobs; }
+    }
     return out;
 }
 static double compare(const output & a, const output & b, bool routing = true) {
@@ -265,6 +290,16 @@ int main(int argc, char ** argv) {
             {"resetBitwiseIdentical", true}, {"sameGreedy", true}, {"modelRequantized", false},
             {"gpuTimestampsAvailable", false},
             {"expertPayloadCopied", false}, {"positions", steps}, {"cpuLogits", cpu.logits}};
+        const bool pool_requested = std::getenv("ORNITH_LES_PERSISTENT_IO") != nullptr;
+        if (pool_requested && (!pool_pairs || !pool_used || !pool_jobs)) {
+            throw std::runtime_error("No real streamed expert wave exercised the persistent pool");
+        }
+        report["persistentIORequested"] = pool_requested;
+        report["pooledLegacyComparisons"] = pool_pairs;
+        report["pooledContextsUsed"] = pool_used;
+        report["pooledExpertJobs"] = pool_jobs;
+        report["pooledLegacyBitwiseLogits"] = pool_requested && pool_pairs > 0;
+        report["pooledOwnersReleased"] = flo_io_snapshot(nullptr).live_helpers == 0;
         std::ofstream out(argv[3]); out << report.dump(2) << '\n'; out.close(); close(fd);
         std::cout << "ORNITH_LES_CONTROL cpuMaxAbs=" << error << " metalExecutionVerified=false"
                   << " routing=true reset=true noRequantization=true noExpertCopy=true syntheticOnly=true\n";
@@ -274,6 +309,8 @@ int main(int argc, char ** argv) {
                   << layer_error << " syntheticOnly=true\n";
         std::cout << "ORNITH_CALLBACK_FREE variants=6 serialAndBatch=true fullVocabulary=true reset=true noObservers=true maxAbs="
                   << callback_free_error << " syntheticOnly=true\n";
+        if (pool_requested) std::cout << "ORNITH_POOLED_NATIVE comparisons=" << pool_pairs << " used=" << pool_used
+            << " jobs=" << pool_jobs << " logitsBitwise=true routing=true ownerTeardown=true syntheticOnly=true physicalPhone=false\n";
         return 0;
     } catch (const std::exception & e) { std::cerr << e.what() << '\n'; return 1; }
 }

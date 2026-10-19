@@ -95,6 +95,22 @@ jobs:
             grep 'ORNITH_LAYER_CONTROL mainLayers=4 complete=true rawDeltaNetDistinct=true finalLayerMatched=true ' "$log"
             grep 'ORNITH_CALLBACK_FREE variants=6 serialAndBatch=true fullVocabulary=true reset=true noObservers=true ' "$log"
           done
+      - name: Compare persistent I/O with the unchanged legacy schedule
+        run: |
+          set -o pipefail
+          for readers in 1 4 8; do
+            for kind in f32 mixed top8; do
+              input=.test-fixtures/synthetic-ornith.gguf
+              if [ "$kind" = mixed ]; then input=.test-fixtures/synthetic-ornith-mixed.gguf; fi
+              if [ "$kind" = top8 ]; then input=.test-fixtures/synthetic-ornith-top8.gguf; fi
+              ORNITH_LES_PERSISTENT_IO=1 ORNITH_LES_IO_READERS="$readers" \
+                .work/ornith-les-macos/bin/ornith-les-control "$input" \
+                ".work/les-pooled-$kind-$readers" ".work/les-pooled-$kind-$readers.json" \
+                > ".work/les-pooled-$kind-$readers.log" 2>&1
+              tail -2 ".work/les-pooled-$kind-$readers.log"
+              grep 'ORNITH_POOLED_NATIVE comparisons=.*logitsBitwise=true routing=true ownerTeardown=true syntheticOnly=true physicalPhone=false' ".work/les-pooled-$kind-$readers.log"
+            done
+          done
       - name: Compare both complete synthetic graphs with the existing pinned CPU reference
         run: |
           python3 scripts/run_ornith_les_reference.py
@@ -152,6 +168,8 @@ jobs:
           include-hidden-files: true
           path: |
             .work/les-metal-projections.json
+            .work/les-pooled-*.json
+            .work/les-pooled-*.log
             .work/les-metal-projections.log
             .work/ornith-les-runtime/build.log
             .work/ornith-les-runtime/build-manifest.json

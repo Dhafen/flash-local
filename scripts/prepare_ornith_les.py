@@ -169,6 +169,50 @@ def patched_files(source):
     replace("ggml/src/ggml-metal/ggml-metal.metal",
             "    const float d   = il < 2 ? xb->d : xb->d / 16.h;",
             "    const float d   = il < 2 ? xb->d : float(xb->d) / 16.f;")
+    # Opt-in scheduling candidate. It changes only completion of the same
+    # expert reads; the original per-wave thread path remains the default.
+    result["src/flash-local-io-pool.h"] = (pathlib.Path(__file__).resolve().parents[1] /
+        "Experiments/OrnithLES/Native/BoundedIOPool.h").read_text(encoding="utf-8")
+    replace("src/llama-moe-slot.cpp", '#include "llama-moe-experts.h"',
+        '#include "llama-moe-experts.h"\n#include "flash-local-io-pool.h"')
+    replace("src/llama-moe-slot.cpp", "    const llama_model & model;", """    bool flash_local_pool_enabled = false;
+    int flash_local_pool_readers = 4;
+    std::unique_ptr<flash_local::bounded_io_pool> flash_local_pool;
+    const llama_model & model;""")
+    replace("src/llama-moe-slot.cpp",
+        "        t.n_th = std::max(1, std::min(moe_ssd_io_threads(), n));",
+        "        t.n_th = std::max(1, std::min(flash_local_pool_enabled ? flash_local_pool_readers : moe_ssd_io_threads(), n));")
+    replace("src/llama-moe-slot.cpp", "        if (t.n_th == 1) {", """        if (flash_local_pool_enabled) {
+            if (!flash_local_pool) {
+                flash_local_pool = std::make_unique<flash_local::bounded_io_pool>(flash_local_pool_readers);
+            }
+            flash_local_pool->run((size_t)n, [&](size_t index) { read_one((int)index); });
+        } else if (t.n_th == 1) {""")
+    replace("src/llama-moe-slot.h", "    bool uses_layer(int layer) const;", """    struct io_pool_counters {
+        bool enabled;
+        int readers;
+        uint64_t thread_starts, waves, jobs;
+    };
+    // Called once by flo_open before any decode, never while a wave is active.
+    void flash_local_configure_io_pool(bool enabled, int readers);
+    io_pool_counters flash_local_io_pool_snapshot() const;
+    bool uses_layer(int layer) const;""")
+    replace("src/llama-moe-slot.cpp", "int llama_moe_slot_runtime::decode_window() const {", """void llama_moe_slot_runtime::flash_local_configure_io_pool(bool enabled, int readers) {
+    if (readers < 1 || readers > 8 || pimpl->flash_local_pool) {
+        throw std::invalid_argument("Invalid or late persistent I/O configuration");
+    }
+    pimpl->flash_local_pool_enabled = enabled;
+    pimpl->flash_local_pool_readers = readers;
+}
+
+llama_moe_slot_runtime::io_pool_counters llama_moe_slot_runtime::flash_local_io_pool_snapshot() const {
+    const auto * pool = pimpl->flash_local_pool.get();
+    return {pimpl->flash_local_pool_enabled, pimpl->flash_local_pool_readers,
+        pool ? pool->thread_launches() : 0, pool ? pool->completed_waves() : 0,
+        pool ? pool->completed_jobs() : 0};
+}
+
+int llama_moe_slot_runtime::decode_window() const {""")
     return result
 
 
@@ -185,9 +229,11 @@ def prepare(root, run=None):
         raise ValueError("LES source moved; refusing an unreviewed revision")
     record = source / "flash-local-source.json"
     script_hash = hashlib.sha256(pathlib.Path(__file__).read_bytes()).hexdigest()
+    pool_header_hash = hashlib.sha256((pathlib.Path(__file__).resolve().parents[1] /
+        "Experiments/OrnithLES/Native/BoundedIOPool.h").read_bytes()).hexdigest()
     if record.exists():
         saved = json.loads(record.read_text())
-        if saved["patchScriptSHA256"] != script_hash or any(
+        if saved["patchScriptSHA256"] != script_hash or saved.get("poolHeaderSHA256") != pool_header_hash or any(
                 hashlib.sha256((source / name).read_bytes()).hexdigest() != digest
                 for name, digest in saved["patchedSHA256"].items()):
             raise ValueError("LES local patch changed; use a new clean build-input directory")
@@ -200,10 +246,11 @@ def prepare(root, run=None):
         (source / name).write_text(text, encoding="utf-8", newline="\n")
     record.write_text(json.dumps(dict(revision=REVISION, repository=REPOSITORY,
         patchScriptSHA256=script_hash,
+        poolHeaderSHA256=pool_header_hash,
         patchedSHA256={name: hashlib.sha256((source / name).read_bytes()).hexdigest() for name in files},
         changes=["tensor-major direct GGUF reads", "aggregate I/O and Metal telemetry", "exclude unused MTP prediction",
                  "Apple VM-backed page buffers with symmetric deallocation", "native buffer lifetime accounting",
-                 "Q4_K GPU nibble-scale adjustment in F32"],
+                 "Q4_K GPU nibble-scale adjustment in F32", "opt-in bounded persistent expert I/O workers"],
         routingChanged=False, quantizationChanged=False), indent=2) + "\n")
     return source
 

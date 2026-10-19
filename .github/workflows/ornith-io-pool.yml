@@ -2,6 +2,10 @@ name: Isolated I/O worker candidate
 on:
   push:
     branches: [codex/ornith-persistent-io]
+    paths:
+      - 'Experiments/OrnithLES/Native/BoundedIOPool.h'
+      - 'Experiments/OrnithLES/Native/io-pool-control.cpp'
+      - '.github/workflows/ornith-io-pool.yml'
   workflow_dispatch:
 permissions:
   contents: read

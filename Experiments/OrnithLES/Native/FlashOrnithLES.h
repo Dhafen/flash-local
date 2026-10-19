@@ -32,7 +32,14 @@ typedef struct {
     // Borrowed values live only during the callback. Never enabled for timing.
     flo_checkpoint checkpoint;
     void * checkpoint_user;
+    // Experimental scheduling only; default false preserves the released path.
+    bool persistent_io;
 } flo_options;
+typedef struct {
+    bool enabled;
+    int32_t requested_readers;
+    uint64_t thread_starts, waves, jobs, live_helpers;
+} flo_io_metrics;
 // Input is a caller-verified open regular file, not a path that can be replaced.
 // Writes only a small dense GGUF and a manifest. Routed weights stay in input.
 // The output directory must be empty and owned by the caller. No quantization.
@@ -46,6 +53,7 @@ int flo_decode(flo_context *, const int32_t * tokens, int32_t count,
                float * logits, int32_t capacity);
 void flo_reset(flo_context *);
 flo_metrics flo_snapshot(const flo_context *);
+flo_io_metrics flo_io_snapshot(const flo_context *);
 const char * flo_last_error(void);
 const char * flo_revision(void);
 #ifdef __cplusplus
