@@ -23,6 +23,7 @@ typedef struct {
     double probe_backend_max, probe_cpu_max, probe_backend_squared, probe_cpu_squared, probe_reference_squared;
     uint64_t canonical_expert_set_digest;
     uint64_t configured_physical_batch_tokens, maximum_physical_batch_tokens;
+    uint64_t skipped_intermediate_output_batches;
 } flo_metrics;
 typedef struct {
     int32_t context_tokens, prefill_slots, cache_slots_per_layer;

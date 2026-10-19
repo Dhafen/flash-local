@@ -12,6 +12,7 @@ public struct LESMemoryPlan: Codable, Sendable, Equatable {
     public let kvBytes: UInt64
     public let ssmBytes: UInt64
     public let runtimeReserveBytes: UInt64
+    public let batchScratchReserveBytes: UInt64?
     public let prefillSlots: Int
     public let cacheSlotsPerLayer: Int
     public let lookaheadDepth: Int
@@ -64,7 +65,14 @@ public struct LESMemoryPlan: Codable, Sendable, Equatable {
         ssmBytes = UInt64(config.recurrentLayers * config.recurrentHeads *
             config.recurrentStateSize * config.recurrentStateSize * 4) + (4 << 20)
         // Includes the native runtime's 1 GiB reservation plus a stop margin.
-        runtimeReserveBytes = (1 << 30) + (128 << 20)
+        // Conservative allowance for larger transient recurrent-state,
+        // attention-score and vocabulary tensors, including allocator slack.
+        // It is an admission bound, not a measured peak or throughput claim.
+        let elementsPerToken = config.recurrentHeads * config.recurrentStateSize * config.recurrentStateSize +
+            config.attentionHeads * contextTokens + config.vocabularySize + config.hiddenSize * 16
+        let extraScratch = UInt64(max(0, physicalBatchTokens - 4)) * max(32 << 20, UInt64(elementsPerToken) * 4 * 8)
+        batchScratchReserveBytes = extraScratch
+        runtimeReserveBytes = (1 << 30) + (128 << 20) + extraScratch
         let fixed = baselineFootprintBytes + denseBytes + kvBytes + ssmBytes + runtimeReserveBytes
         let staging = groups.values.reduce(UInt64(0)) { $0 + $1.bytes * UInt64(stagingSlots) }
         let perSlot = groups.values.reduce(UInt64(0)) { $0 + $1.bytes * $1.layers }

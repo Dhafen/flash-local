@@ -1,0 +1,59 @@
+name: Ornith prompt batch controls
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/ornith-prompt-controls]
+    paths:
+      - '.github/workflows/ornith-prefill.yml'
+      - 'Experiments/OrnithLES/Native/**'
+permissions:
+  contents: read
+concurrency:
+  group: ornith-prefill-${{ github.ref }}
+  cancel-in-progress: true
+defaults:
+  run:
+    shell: bash
+jobs:
+  batch-controls:
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - run: sudo xcode-select -s /Applications/Xcode_26.2.app
+      - run: python3 scripts/build_ornith_les.py --mac-only
+      - name: F32, mixed quantization and wide top-eight complete graphs
+        run: |
+          set -o pipefail
+          python3 scripts/make_qwen4exp_test_model.py --ornith
+          python3 scripts/make_qwen4exp_test_model.py --ornith --mixed
+          python3 scripts/make_qwen4exp_test_model.py --ornith --wide-experts
+          .work/ornith-les-macos/bin/ornith-les-mixed-fixture \
+            .test-fixtures/synthetic-ornith-mixed-source.gguf .test-fixtures/synthetic-ornith-mixed.gguf --ornith
+          for kind in f32 mixed top8; do
+            input=.test-fixtures/synthetic-ornith.gguf
+            if test "$kind" != f32; then input=.test-fixtures/synthetic-ornith-$kind.gguf; fi
+            .work/ornith-les-macos/bin/ornith-les-control "$input" .work/prefill-$kind .work/prefill-$kind.json \
+              > .work/prefill-$kind.log 2>&1
+            tail -5 .work/prefill-$kind.log
+            grep 'ORNITH_PREFILL_TUNING variants=16 physical=1,4,8,16 evaluationThrough32=true actualDimensions=true fullVocabulary=true canonicalRouting=true callbackFree=true unneededHeadsSkipped=true ' .work/prefill-$kind.log
+          done
+          python3 - <<'PY'
+          import hashlib, json, pathlib, subprocess
+          files = ['Experiments/OrnithLES/Native/FlashOrnithLES.cpp', 'Experiments/OrnithLES/Native/FlashOrnithLES.h',
+                   'Experiments/OrnithLES/Native/control.cpp', 'scripts/prepare_ornith_les.py']
+          data = dict(sourceRevision=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),
+              syntheticOnly=True, physicalPhone=False, inputs={p:hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest() for p in files})
+          pathlib.Path('.work/prefill-source.json').write_text(json.dumps(data,indent=2)+'\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ornith-prefill-controls
+          path: |
+            .work/prefill-*.json
+            .work/prefill-*.log
+            .work/ornith-les-runtime/build.log
+          retention-days: 7

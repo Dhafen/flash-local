@@ -263,6 +263,8 @@ int main(int argc, char ** argv) {
             if (tuned.metrics.configured_physical_batch_tokens != uint64_t(physical) ||
                 tuned.metrics.maximum_physical_batch_tokens != uint64_t(physical))
                 throw std::runtime_error("Requested physical batch was not actually executed");
+            if (evaluation > physical && tuned.metrics.skipped_intermediate_output_batches == 0)
+                throw std::runtime_error("Intermediate output selection was not actually exercised");
             tuning_error = std::max(tuning_error, compare(tuning_reference, tuned, observed));
             ++tuning_variants;
         }
@@ -280,6 +282,7 @@ int main(int argc, char ** argv) {
             {"batchPrefixLengths", prefixes}, {"batchedPrefillMaximumAbsoluteError", batch_error},
             {"prefillTuningVariants", tuning_variants}, {"prefillTuningMaximumAbsoluteError", tuning_error},
             {"physicalBatchDimensionsActuallyExecuted", {1, 4, 8, 16}},
+            {"intermediateOutputSelectionVerified", true},
             {"resetBitwiseIdentical", true}, {"sameGreedy", true}, {"modelRequantized", false},
             {"gpuTimestampsAvailable", false},
             {"expertPayloadCopied", false}, {"positions", steps}, {"cpuLogits", cpu.logits}};
@@ -293,7 +296,7 @@ int main(int argc, char ** argv) {
         std::cout << "ORNITH_CALLBACK_FREE variants=6 serialAndBatch=true fullVocabulary=true reset=true noObservers=true maxAbs="
                   << callback_free_error << " syntheticOnly=true\n";
         std::cout << "ORNITH_PREFILL_TUNING variants=" << tuning_variants << " physical=1,4,8,16 evaluationThrough32=true"
-                  << " actualDimensions=true fullVocabulary=true canonicalRouting=true callbackFree=true maxAbs="
+                  << " actualDimensions=true fullVocabulary=true canonicalRouting=true callbackFree=true unneededHeadsSkipped=true maxAbs="
                   << tuning_error << " syntheticOnly=true physicalPhone=false\n";
         return 0;
     } catch (const std::exception & e) { std::cerr << e.what() << '\n'; return 1; }

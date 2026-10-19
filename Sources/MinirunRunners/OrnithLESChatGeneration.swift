@@ -79,7 +79,7 @@ public final class OrnithLESChatGeneration {
         self.artifact = artifact; self.control = control
         tokenizer = try CanonicalQwen35Tokenizer(artifact: artifact)
         let plan = try LESBenchmark.plan(artifact, context: 4096, depth: 0, pageCache: true,
-            phase: "chat.omniPageCache", physicalBatchTokens: physicalBatchSize, onAdmission: onAdmission)
+            phase: "chat.omniPageCache", physicalBatchTokens: batch.1, onAdmission: onAdmission)
         native = try LESContext(artifact: artifact, prepared: prepared, plan: plan, control: control)
         guard native.vocabularySize == tokenizer.vocabularySize else {
             native.close(); throw GGUFError.invalid("Tokenizer and native vocabulary disagree")
@@ -187,7 +187,7 @@ public final class OrnithLESChatGeneration {
             prefillConfiguration: prefillConfiguration, prefillCheck: prefillCheck,
             prefillIOBytes: afterPrefill.ioBytes - before.ioBytes, decodeIOBytes: after.ioBytes - afterPrefill.ioBytes,
             maximumObservedFootprintBytes: peak, sessionMaximumObservedFootprintBytes: control.maximumObservedFootprintBytes,
-            thermalStateAtStart: thermal, maximumThermalState: maximumThermal, prefillBatchTokens: batchSize,
+            thermalStateAtStart: thermal, maximumThermalState: maximumThermal, prefillBatchTokens: min(batchSize, physicalBatchSize),
             lowPowerModeAtStart: lowPower, memoryPlan: native.plan,
             stopReason: reason, options: options, reasoningTokens: reasoningTokens, forcedThinkingEndTokens: forcedTokens,
             metricsBefore: before, metricsAfterPrefill: afterPrefill, metricsAfter: after)

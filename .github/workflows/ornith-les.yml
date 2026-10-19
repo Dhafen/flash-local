@@ -145,6 +145,9 @@ jobs:
           grep 'ORNITH_EXPERT_SET_GATE completeSetsRequired=true rankPermutationOnly=true predictionRankedTraceUnchanged=true strictLogits=true missingProofRejected=true batchFallback=true syntheticOnly=true' .work/les-swift-tests.log
           grep 'ORNITH_CHAT_POLICY inProcessGate=true matchingModelAndRuntime=true exactPrefixOnly=true ordinaryEngineUnchanged=true syntheticOnly=true' .work/les-swift-tests.log
           grep 'ORNITH_PREFILL_POLICY actualBatchRequired=true exactExperts=true independentLogits=true callbackFree=true boundedMemory=true syntheticOnly=true' .work/les-swift-tests.log
+          grep 'ORNITH_PREFILL_COMPARISON exactOutputs=true min128Tokens=true partialRejected=true syntheticOnly=true' .work/les-swift-tests.log
+          grep 'ORNITH_SYSTEM_DEFAULT canonicalRoles=true emptyUnchanged=true explicitClientWins=true modelLoaded=false' .work/les-swift-tests.log
+          test "$(grep -c 'ORNITH_PREFILL_MEMORY physical=' .work/les-swift-tests.log)" = 3
           grep 'ORNITH_CHAT_SAMPLING greedyIdentical=true logitsUnchanged=true thinkingBudgetOptIn=true fixtures=128 trainedInference=false' .work/les-swift-tests.log
           grep 'ORNITH_THINKING_BUDGET canonicalClosingTokens=true reasoningSeparated=true modelWeightsLoaded=false phoneInference=false' .work/les-swift-tests.log
       - uses: actions/upload-artifact@v4

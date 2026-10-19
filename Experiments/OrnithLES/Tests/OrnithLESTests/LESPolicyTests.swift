@@ -28,8 +28,30 @@ final class LESPolicyTests: XCTestCase {
             XCTAssertEqual(plan.prefillAllocationBytes * 4, original.prefillAllocationBytes * UInt64(physical))
             XCTAssertEqual(plan.expertAllocationBytes, plan.prefillAllocationBytes)
             XCTAssertLessThanOrEqual(plan.admittedProcessBytes, plan.processCeilingBytes)
+            if physical > 4 { XCTAssertGreaterThan(plan.runtimeReserveBytes, original.runtimeReserveBytes) }
         }
         XCTAssertThrowsError(try LESMemoryPlan(index: idx, contextTokens: 32, footprint: footprint, physicalBatchTokens: 32))
+    }
+    func testPublishedHeaderReservesLargeBatchScratchBeforeUsingIOSHeadroom() throws {
+        let root = try XCTUnwrap(ProcessInfo.processInfo.environment["ORNITH_LES_FIXTURE_ROOT"])
+        let data = try Data(contentsOf: URL(fileURLWithPath: root).appendingPathComponent("ornith.header"))
+        let idx = try GGUFIndex.parse(header: data, fileByteCount: 21_713_463_040)
+        let baseline: UInt64 = 350_000_000
+        func plan(_ physical: Int, available: UInt64? = nil) throws -> LESMemoryPlan {
+            try LESMemoryPlan(index: idx, contextTokens: 4096,
+                footprint: .init(footprintBytes: baseline, peakFootprintBytes: baseline, availableBytes: available),
+                pageCacheOnly: true, physicalBatchTokens: physical)
+        }
+        let small = try plan(4), large = try plan(16)
+        XCTAssertEqual(large.prefillAllocationBytes, small.prefillAllocationBytes * 4)
+        XCTAssertGreaterThan(try XCTUnwrap(large.batchScratchReserveBytes), 0)
+        let middle = small.admittedProcessBytes + (large.admittedProcessBytes - small.admittedProcessBytes) / 2
+        XCTAssertNoThrow(try plan(4, available: middle - baseline))
+        XCTAssertThrowsError(try plan(16, available: middle - baseline))
+        for physical in [4, 8, 16] {
+            let value = try plan(physical)
+            print("ORNITH_PREFILL_MEMORY physical=\(physical) staging=\(value.prefillAllocationBytes) extraScratch=\(value.batchScratchReserveBytes ?? 0) admitted=\(value.admittedProcessBytes) metadataOnly=true phonePeak=false")
+        }
     }
     func testPrefillProofRequiresActualBatchOriginalExpertSetsAndUnobservedLogits() throws {
         let traced: [String: Any] = ["positions": 4, "maximumAbsoluteError": 0.001, "relativeL2Error": 0.0001,

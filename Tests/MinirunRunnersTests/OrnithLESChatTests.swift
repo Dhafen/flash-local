@@ -7,6 +7,16 @@ import MinirunKit
 @testable import MinirunRunners
 
 final class OrnithLESChatTests: XCTestCase {
+    func testBatchBenchmarkRejectsDifferentPartialOrMissingTokenOutputs() {
+        let tokens = Array(0..<129)
+        XCTAssertTrue(OrnithPrefillBenchmark.Report.same128TokenOutputs([tokens, tokens, tokens, tokens]))
+        XCTAssertFalse(OrnithPrefillBenchmark.Report.same128TokenOutputs([tokens, tokens, tokens]))
+        var changed = tokens; changed[128] = 17
+        XCTAssertFalse(OrnithPrefillBenchmark.Report.same128TokenOutputs([tokens, changed, tokens, tokens]))
+        let short = Array(tokens.prefix(127))
+        XCTAssertFalse(OrnithPrefillBenchmark.Report.same128TokenOutputs([short, short, short, short]))
+        print("ORNITH_PREFILL_COMPARISON exactOutputs=true min128Tokens=true partialRejected=true syntheticOnly=true")
+    }
     func testDefaultSamplerIsIdenticalToExistingGreedyAndDoesNotChangeLogits() throws {
         var sampler = LocalTokenSampler(seed: 42)
         let options = LocalGenerationOptions()

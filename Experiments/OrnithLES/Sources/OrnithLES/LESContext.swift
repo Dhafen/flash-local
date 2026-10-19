@@ -35,6 +35,7 @@ public struct LESMetrics: Codable, Sendable, Equatable {
     public let demandCacheHits, demandCacheMisses: UInt64
     public let metalTimestampedCommandBuffers: UInt64
     public let configuredPhysicalBatchTokens, maximumPhysicalBatchTokens: Int?
+    public let skippedIntermediateOutputBatches: UInt64?
     init(_ value: flo_metrics) {
         ioBytes = value.io_bytes; ioCalls = value.io_calls; expertReads = value.misses
         selectedExpertUnion = value.selected_experts; predictions = value.predicted
@@ -48,6 +49,7 @@ public struct LESMetrics: Codable, Sendable, Equatable {
         metalTimestampedCommandBuffers = value.timestamped_command_buffers
         configuredPhysicalBatchTokens = Int(value.configured_physical_batch_tokens)
         maximumPhysicalBatchTokens = Int(value.maximum_physical_batch_tokens)
+        skippedIntermediateOutputBatches = value.skipped_intermediate_output_batches
     }
 }
 
