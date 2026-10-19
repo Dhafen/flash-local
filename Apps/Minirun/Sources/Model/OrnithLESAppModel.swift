@@ -8,11 +8,12 @@ import ModelAdapters
 import StorageCore
 
 private enum LESChatPresentationError: Error, LocalizedError {
-    case notReady, streamFull
+    case notReady, streamFull, numericalCheck
     var errorDescription: String? {
         switch self {
         case .notReady: "Snabbchatten behöver aktiveras."
         case .streamFull: "Gränssnittet hann inte ta emot texten. Genereringen stoppades."
+        case .numericalCheck: "Numerikkontrollen avvek. Snabbchatten aktiverades inte."
         }
     }
 }
@@ -98,7 +99,7 @@ private actor LESAppWorker {
     }
     func prepareChat(modelsRoot: URL, privateRoot: URL, existing: VerifiedGGUFArtifact?, control: LESControl,
                      progress: @Sendable (String) -> Void,
-                     onCheck: @Sendable (LESNumericalCheck) -> Void) throws {
+                     onCheck: @Sendable (LESNumericalCheck) -> Void) throws -> LESNumericalCheck {
         chat?.close(); chat = nil
         try prepareFiles(modelsRoot: modelsRoot, privateRoot: privateRoot, existing: existing, control: control, progress: progress)
         guard let artifact, let prepared else { throw CancellationError() }
@@ -109,8 +110,10 @@ private actor LESAppWorker {
         }
         guard let check = chatCheck else { throw CancellationError() }
         onCheck(check)
+        guard check.nativeBenchmarkAdmitted else { return check }
         chat = try OrnithLESChatGeneration(artifact: artifact, prepared: prepared, check: check,
             control: control, onAdmission: { self.admissions.append($0) })
+        return check
     }
     func generateChat(messages: [Qwen35ChatMessage], thinking: Bool,
                       events: AsyncThrowingStream<Qwen4ExpTextGeneration.Event, Error>.Continuation)
@@ -259,12 +262,18 @@ final class OrnithLESAppModel {
             guard let self else { return }
             defer { if activeID == id { activeID = nil; control = nil; isBusy = false; operation = nil } }
             do {
-                try await worker.prepareChat(modelsRoot: modelsRoot, privateRoot: privateRoot, existing: existing,
+                let check = try await worker.prepareChat(modelsRoot: modelsRoot, privateRoot: privateRoot, existing: existing,
                     control: flag, progress: { [weak self] value in
                         Task { @MainActor in guard let self, self.activeID == id else { return }; self.status = value }
                     }, onCheck: { [weak self] value in
                         Task { @MainActor in guard let self, self.activeID == id else { return }; self.numericalCheck = value }
                     })
+                // The awaited owner result is authoritative. Progress tasks
+                // may arrive after this operation has left its active ID.
+                numericalCheck = check
+                guard check.nativeBenchmarkAdmitted else {
+                    throw LESChatPresentationError.numericalCheck
+                }
                 if flag.isCancellationRequested { throw CancellationError() }
                 chatReady = true; status = "Snabbchatten är redo · samma Ornith-GGUF · OS-cache."
             } catch {
