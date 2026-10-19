@@ -1,0 +1,32 @@
+name: Isolated I/O worker candidate
+on:
+  push:
+    branches: [codex/ornith-persistent-io]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  pool-control:
+    strategy:
+      matrix:
+        runner: [ubuntu-24.04, macos-26]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Check reader reuse, bytes, failures and owner teardown under sanitizers
+        run: |
+          mkdir -p .work
+          clang++ -std=c++17 -O1 -g -pthread -fsanitize=address,undefined \
+            -fno-omit-frame-pointer Experiments/OrnithLES/Native/io-pool-control.cpp \
+            -o .work/io-pool-control
+          .work/io-pool-control | tee .work/io-pool-controls.log
+          grep 'byteIdentical=true exactlyOnce=true threadsReused=true failuresDrained=true ownersReleased=true modelLoaded=false physicalPhone=false' .work/io-pool-controls.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: io-pool-${{ matrix.runner }}
+          path: .work/io-pool-controls.log
+          retention-days: 7
