@@ -3,7 +3,39 @@
 This isolated experiment reuses the installed Ornith Q4_K_M: 21,713,463,040
 bytes, SHA-256 `42739874cc2ccfdb8523b23fbe52e29b2a7555c8176737ca9ca0b5d59859d41f`.
 Production GGUF/REAM and Swiftlet/QPack paths are unchanged. Native controls
-must pass before app integration; no phone throughput is claimed.
+pass before app integration. The separate [phone-121 measurements](ORNITH-PHONE-121.md)
+now provide a completed native-mode comparison; general quality is not established.
+
+## Experimental page-cache chat, build 123
+
+Private TestFlight 123 at `4d3f45e3520c67657b6863457c2e88e6ca2ce2d9` adds a separate chat selected from the
+measured native winner in [phone build 121](ORNITH-PHONE-121.md). It uses the
+same installed GGUF, real top-eight choices, canonical tokenizer/template,
+bounded native memory and existing reasoning parser. A fresh in-process
+reference admission is required; imported reports cannot activate it. Only
+an exact complete token prefix reuses SSM/KV. Changed histories reset safely.
+Stop, backgrounding and memory pressure end native ownership. Saved ordinary
+chat is not changed or automatically switched. This experimental view keeps
+its conversation separately in memory and uses explicit local report export.
+
+Build 123 also fixes a Q4_K GPU dequantizer intermediate: promote the FP16
+scale to F32 **before** dividing by 16. Model bytes and quantization remain
+identical. The same generated 2048-column/64-row fixtures at three amplitudes
+reproduced Q4_K relative L2 errors 0.0388795, 0.00443827 and 0.00053942 before
+the change. Six Q4_K/Q6_K actual Metal GET_ROWS cases are now exactly equal
+to CPU decoding, with unchanged 1e-4 bounds. The [before run](https://github.com/Dhafen/flash-local/actions/runs/39159409801)
+and [corrected component run](https://github.com/Dhafen/flash-local/actions/runs/39159892997)
+use identical control source; only the patch script differs. The complete
+native projection probe remains explicitly unavailable on the hosted virtual
+GPU. These component results do not prove the trained phone batch-four issue
+is fixed. Fresh phone admission must decide that.
+
+The [full build/delivery](https://github.com/Dhafen/flash-local/actions/runs/39187166866) passes 24 selected Swift functions, three
+Apple slices and all retained native/reference/app/package/QPack controls,
+with 44 captures actually reviewed and independent private availability.
+Phone build-123 generation/performance, sustained long-context operation and
+general quality remain to be measured. No experimental backend is promoted
+automatically into ordinary chat.
 
 ## Source inspection
 

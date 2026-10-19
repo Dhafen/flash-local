@@ -1,6 +1,37 @@
 # Private internal TestFlight delivery
 
-Latest delivered version **0.1.0 (121)**, app source
+Latest delivered version **0.1.0 (123)**, app source `4d3f45e3520c67657b6863457c2e88e6ca2ce2d9`, is
+available to the existing private internal group. [Full delivery run 39187166866](https://github.com/Dhafen/flash-local/actions/runs/39187166866)
+passes 24 selected Swift functions, all native/reference/QPack controls,
+581 app tests and 474 package invocations (9 environment skips).
+All 44 actual Mac/iOS light/dark captures, including active and completed
+experimental reasoning/chat, were visually reviewed. The device archive is
+38,409,438 bytes and contains no model weights.
+
+The real Apple signature/profile, both memory entitlements and privacy manifest
+pass. A fresh independent audit confirms `VALID`, `INTERNAL_ONLY`,
+`IN_BETA_TESTING`, nonexpired, the exact private group and unchanged sole-owner
+membership. Sealed IPA SHA256: `ac55bc466f7ff37b5d37103f5516a6f7161d22bb857c9edb06ede60b539499e1`.
+
+Update without uninstalling or downloading weights again. Open **Öppna Ornith
+snabbchatt**, select **Snabbchatt** and press **Aktivera snabbchatten**. Initial
+activation performs the independent original-weight reference/expert-set and
+callback-free checks. Keep the app open. Failed admission never opens a chat
+engine. The actual check determines serial or separately validated batch-four
+prefill. The ordinary chat and its saved files retain their original engine.
+
+The **Jämförelse** tab retains the fixed-prompt, four-mode, twice-128-token
+benchmark. Turn off Low Power Mode, declare airplane mode only if actually
+enabled and share the locally exported report. Chat also offers explicit local
+measurement export with token IDs; no report is uploaded automatically.
+
+The [phone-121 results](ORNITH-PHONE-121.md) establish the earlier native-mode
+comparison; corrected build-123 performance and trained numerics still require
+phone execution. Short admission is not general quality or long-context proof.
+
+## Previous build 121
+
+Delivered version **0.1.0 (121)**, app source
 `a30fe6eefa4fd9bcc73257dbde5d75a10ab977ec`, is available to the existing
 private internal group. [Full delivery run 39151820985](https://github.com/Dhafen/flash-local/actions/runs/39151820985)
 passed 21 selected Swift functions, three independent five-forward F32 graph
@@ -25,8 +56,9 @@ verified model preparation is reused. The new checksum must establish that
 the same eight distinct experts were selected, alongside the unchanged
 full-logit/callback-free limits. Failed batch-four still selects independently
 verified serial prefill. Share the new `ornith-les-…json` report even if
-admission stops. No physical build-121 throughput or expert-set agreement is
-yet verified, and the ordinary chat does not change backend automatically.
+admission stops. The subsequent [physical build-121 report](ORNITH-PHONE-121.md) passes the serial
+independent expert-set gate and measures native page cache at 4.85–5.02 token/s.
+General model quality remains unverified and ordinary chat does not switch automatically.
 
 ## Previous build 120
 
