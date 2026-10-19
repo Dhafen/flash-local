@@ -43,6 +43,12 @@ final class OrnithLESChatTests: XCTestCase {
             let check = try JSONDecoder().decode(LESNumericalCheck.self, from: JSONSerialization.data(withJSONObject: raw))
             XCTAssertTrue(check.nativeBenchmarkAdmitted)
             XCTAssertEqual(try OrnithLESChatGeneration.validatedPrefill(check, modelSHA256: "model", nativeRevision: "native"), batch)
+            let selected = try OrnithLESChatGeneration.validatedBatch(.init(), proof: nil, baseline: check,
+                modelSHA256: "model", nativeRevision: "native")
+            XCTAssertEqual(selected.0, batch); XCTAssertEqual(selected.1, 4)
+            var tuning = LESPrefillConfiguration(); tuning.evaluationTokens = 32; tuning.physicalTokens = 8
+            XCTAssertThrowsError(try OrnithLESChatGeneration.validatedBatch(tuning, proof: nil, baseline: check,
+                modelSHA256: "model", nativeRevision: "native"))
             XCTAssertThrowsError(try OrnithLESChatGeneration.validatedPrefill(check, modelSHA256: "changed", nativeRevision: "native"))
             XCTAssertThrowsError(try OrnithLESChatGeneration.validatedPrefill(check, modelSHA256: "model", nativeRevision: "changed"))
         }

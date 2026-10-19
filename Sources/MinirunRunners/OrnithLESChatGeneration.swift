@@ -16,6 +16,9 @@ public final class OrnithLESChatGeneration {
         public let promptTokenIDs, generatedTokenIDs: [Int]
         public let reusedPromptTokens, evaluatedPromptTokens, decodeForwardPasses: Int
         public let prefillSeconds, decodeForwardSeconds, elapsedSeconds: Double
+        public let evaluationBatchTokens, physicalBatchTokens: Int
+        public let prefillConfiguration: LESPrefillConfiguration
+        public let prefillCheck: LESPrefillCheck?
         public let prefillIOBytes, decodeIOBytes, maximumObservedFootprintBytes: UInt64
         public let sessionMaximumObservedFootprintBytes: UInt64
         public let thermalStateAtStart, maximumThermalState, prefillBatchTokens: Int
@@ -34,6 +37,9 @@ public final class OrnithLESChatGeneration {
     private let control: LESControl
     private let native: LESContext
     private let batchSize: Int
+    private let physicalBatchSize: Int
+    private let prefillConfiguration: LESPrefillConfiguration
+    private let prefillCheck: LESPrefillCheck?
     private var stateTokens: [Int] = []
     private var stateLogits: [Float] = []
     private var running = false
@@ -50,14 +56,30 @@ public final class OrnithLESChatGeneration {
         !previous.isEmpty && prompt.starts(with: previous) && (previous.count < prompt.count || hasLogits)
             ? previous.count : 0
     }
+    static func validatedBatch(_ configuration: LESPrefillConfiguration, proof: LESPrefillCheck?,
+                               baseline: LESNumericalCheck, modelSHA256: String, nativeRevision: String) throws -> (Int, Int) {
+        let legacy = try validatedPrefill(baseline, modelSHA256: modelSHA256, nativeRevision: nativeRevision)
+        try configuration.validate()
+        if configuration == LESPrefillConfiguration() { return (legacy, 4) }
+        let physical = try configuration.physicalTokens(checkedDefault: legacy)
+        var effective = configuration; effective.physicalTokens = physical
+        guard let proof, proof.passed, proof.configuration == effective,
+              proof.modelSHA256 == modelSHA256, proof.nativeRevision == nativeRevision else {
+            throw GGUFError.invalid("Den valda batchen har inte klarat sin egen kontroll mot originalvikterna.")
+        }
+        return (configuration.evaluationTokens, physical)
+    }
     public init(artifact: VerifiedGGUFArtifact, prepared: URL, check: LESNumericalCheck, control: LESControl,
+                prefillConfiguration: LESPrefillConfiguration = .init(), prefillCheck: LESPrefillCheck? = nil,
                 onAdmission: (LESMemoryAdmission) -> Void = { _ in }) throws {
-        batchSize = try Self.validatedPrefill(check, modelSHA256: artifact.manifest.sha256,
+        let batch = try Self.validatedBatch(prefillConfiguration, proof: prefillCheck, baseline: check, modelSHA256: artifact.manifest.sha256,
             nativeRevision: LESContext.revision)
+        batchSize = batch.0; physicalBatchSize = batch.1
+        self.prefillConfiguration = prefillConfiguration; self.prefillCheck = prefillCheck
         self.artifact = artifact; self.control = control
         tokenizer = try CanonicalQwen35Tokenizer(artifact: artifact)
         let plan = try LESBenchmark.plan(artifact, context: 4096, depth: 0, pageCache: true,
-            phase: "chat.omniPageCache", onAdmission: onAdmission)
+            phase: "chat.omniPageCache", physicalBatchTokens: physicalBatchSize, onAdmission: onAdmission)
         native = try LESContext(artifact: artifact, prepared: prepared, plan: plan, control: control)
         guard native.vocabularySize == tokenizer.vocabularySize else {
             native.close(); throw GGUFError.invalid("Tokenizer and native vocabulary disagree")
@@ -161,6 +183,8 @@ public final class OrnithLESChatGeneration {
         return Summary(promptTokenIDs: prompt, generatedTokenIDs: generated, reusedPromptTokens: reused,
             evaluatedPromptTokens: prompt.count - reused, decodeForwardPasses: passes,
             prefillSeconds: prefillSeconds, decodeForwardSeconds: decodeSeconds, elapsedSeconds: MonotonicClock.seconds(since: start),
+            evaluationBatchTokens: batchSize, physicalBatchTokens: physicalBatchSize,
+            prefillConfiguration: prefillConfiguration, prefillCheck: prefillCheck,
             prefillIOBytes: afterPrefill.ioBytes - before.ioBytes, decodeIOBytes: after.ioBytes - afterPrefill.ioBytes,
             maximumObservedFootprintBytes: peak, sessionMaximumObservedFootprintBytes: control.maximumObservedFootprintBytes,
             thermalStateAtStart: thermal, maximumThermalState: maximumThermal, prefillBatchTokens: batchSize,

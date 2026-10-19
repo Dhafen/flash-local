@@ -7,6 +7,61 @@ import MinirunKit
 @testable import OrnithLES
 
 final class LESPolicyTests: XCTestCase {
+    func testPrefillConfigurationSeparatesLogicalAndPhysicalLimits() throws {
+        var options = LESPrefillConfiguration()
+        XCTAssertEqual(options.evaluationTokens, 4); XCTAssertEqual(options.physicalTokens, 0)
+        XCTAssertEqual(try options.physicalTokens(checkedDefault: 4), 4)
+        XCTAssertEqual(try options.physicalTokens(checkedDefault: 1), 1)
+        options.evaluationTokens = 32; options.physicalTokens = 16
+        try options.validate(); XCTAssertEqual(try options.physicalTokens(checkedDefault: 4), 16)
+        options.evaluationTokens = 8; XCTAssertThrowsError(try options.validate())
+        options.physicalTokens = 3; XCTAssertThrowsError(try options.validate())
+        options.evaluationTokens = 4096; options.physicalTokens = 0; XCTAssertThrowsError(try options.validate())
+    }
+    func testLargerPhysicalBatchesBudgetTheCompleteExpertUnion() throws {
+        let idx = try index()
+        let original = try LESMemoryPlan(index: idx, contextTokens: 32, footprint: footprint, pageCacheOnly: true)
+        for physical in [1, 4, 8, 16] {
+            let plan = try LESMemoryPlan(index: idx, contextTokens: 32, footprint: footprint,
+                pageCacheOnly: true, physicalBatchTokens: physical)
+            XCTAssertEqual(plan.prefillSlots, physical * 8)
+            XCTAssertEqual(plan.prefillAllocationBytes * 4, original.prefillAllocationBytes * UInt64(physical))
+            XCTAssertEqual(plan.expertAllocationBytes, plan.prefillAllocationBytes)
+            XCTAssertLessThanOrEqual(plan.admittedProcessBytes, plan.processCeilingBytes)
+        }
+        XCTAssertThrowsError(try LESMemoryPlan(index: idx, contextTokens: 32, footprint: footprint, physicalBatchTokens: 32))
+    }
+    func testPrefillProofRequiresActualBatchOriginalExpertSetsAndUnobservedLogits() throws {
+        let traced: [String: Any] = ["positions": 4, "maximumAbsoluteError": 0.001, "relativeL2Error": 0.0001,
+            "sameGreedy": true, "routingObserved": true, "routingDecisions": 8000, "canonicalExpertSetDigest": 41,
+            "configuredPhysicalBatchTokens": 8, "maximumPhysicalBatchTokens": 8]
+        let free: [String: Any] = ["positions": 4, "maximumAbsoluteError": 0.001, "relativeL2Error": 0.0001,
+            "sameGreedy": true, "routingObserved": false,
+            "configuredPhysicalBatchTokens": 8, "maximumPhysicalBatchTokens": 8]
+        let raw: [String: Any] = ["modelSHA256": "model", "nativeRevision": "native",
+            "referenceRevision": Qwen4ExpCPUReference.sourceRevision,
+            "configuration": ["evaluationTokens": 32, "physicalTokens": 8],
+            "contextTokens": 4096, "promptTokens": 22, "forwardCount": 25,
+            "referenceMetrics": ["denseCalls": 10000, "expertCalls": 3000, "rows": 100000,
+                "maximumScratchBytes": 786432, "routingDecisions": 8000, "canonicalRoutingDigest": 23,
+                "canonicalExpertSetDigest": 41],
+            "observed": traced, "callbackFree": free]
+        func proof(_ value: [String: Any]) throws -> LESPrefillCheck {
+            try JSONDecoder().decode(LESPrefillCheck.self, from: JSONSerialization.data(withJSONObject: value))
+        }
+        XCTAssertTrue(try proof(raw).passed)
+        for key in ["maximumPhysicalBatchTokens", "configuredPhysicalBatchTokens", "canonicalExpertSetDigest", "routingDecisions"] {
+            var changed = raw, observed = traced; observed.removeValue(forKey: key); changed["observed"] = observed
+            XCTAssertFalse(try proof(changed).passed)
+        }
+        var changed = raw, observed = traced; observed["maximumAbsoluteError"] = 0.02; changed["observed"] = observed
+        XCTAssertFalse(try proof(changed).passed)
+        changed = raw; var callback = free; callback["routingObserved"] = true; changed["callbackFree"] = callback
+        XCTAssertFalse(try proof(changed).passed)
+        changed = raw; callback = free; callback["maximumPhysicalBatchTokens"] = 4; changed["callbackFree"] = callback
+        XCTAssertFalse(try proof(changed).passed)
+        print("ORNITH_PREFILL_POLICY actualBatchRequired=true exactExperts=true independentLogits=true callbackFree=true boundedMemory=true syntheticOnly=true")
+    }
     private func index() throws -> GGUFIndex {
         let root = try XCTUnwrap(ProcessInfo.processInfo.environment["ORNITH_LES_FIXTURE_ROOT"])
         let data = try Data(contentsOf: URL(fileURLWithPath: root).appendingPathComponent("synthetic-ornith.gguf"))

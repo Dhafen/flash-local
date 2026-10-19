@@ -34,6 +34,7 @@ public struct LESMetrics: Codable, Sendable, Equatable {
     public let canonicalExpertSetDigest: UInt64?
     public let demandCacheHits, demandCacheMisses: UInt64
     public let metalTimestampedCommandBuffers: UInt64
+    public let configuredPhysicalBatchTokens, maximumPhysicalBatchTokens: Int?
     init(_ value: flo_metrics) {
         ioBytes = value.io_bytes; ioCalls = value.io_calls; expertReads = value.misses
         selectedExpertUnion = value.selected_experts; predictions = value.predicted
@@ -45,6 +46,8 @@ public struct LESMetrics: Codable, Sendable, Equatable {
         canonicalExpertSetDigest = value.canonical_expert_set_digest
         demandCacheHits = value.demand_hits; demandCacheMisses = value.demand_misses
         metalTimestampedCommandBuffers = value.timestamped_command_buffers
+        configuredPhysicalBatchTokens = Int(value.configured_physical_batch_tokens)
+        maximumPhysicalBatchTokens = Int(value.maximum_physical_batch_tokens)
     }
 }
 
