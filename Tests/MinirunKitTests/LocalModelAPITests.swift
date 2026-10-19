@@ -19,6 +19,8 @@ final class LocalModelAPITests: XCTestCase {
         var defaults = LocalGenerationOptions(); defaults.maximumNewTokens = 1024; defaults.thinkingBudget = 128
         let inherited = try LocalChatRequest(data: body(), defaults: defaults)
         XCTAssertEqual(inherited.options, defaults)
+        let reset = try LocalChatRequest(data: body(["thinking_budget": NSNull(), "stream_options": NSNull()]), defaults: defaults)
+        XCTAssertNil(reset.options.thinkingBudget); XCTAssertFalse(reset.includeUsage)
         XCTAssertFalse(try LocalChatRequest(data: body(["thinking_budget": 0])).options.thinkingEnabled)
     }
     func testUnsupportedToolsAndInvalidParametersFailBeforeInference() throws {
@@ -34,7 +36,7 @@ final class LocalModelAPITests: XCTestCase {
     func testTextPartsSystemAndAssistantReasoningAreRetained() throws {
         let request = try LocalChatRequest(data: body(["messages": [
             ["role": "system", "content": "local"], ["role": "user", "content": "question"],
-            ["role": "assistant", "content": "answer", "reasoning_content": "reasoning"],
+            ["role": "assistant", "content": "answer", "reasoning_content": "reasoning", "tool_calls": NSNull(), "function_call": NSNull()],
             ["role": "user", "content": [["type": "text", "text": "next"], ["type": "text", "text": " question"]]]]]))
         XCTAssertEqual(request.messages.count, 4); XCTAssertEqual(request.messages[2].reasoning, "reasoning")
         XCTAssertEqual(request.messages.last?.content, "next question")

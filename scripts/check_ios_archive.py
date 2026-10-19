@@ -81,6 +81,9 @@ def inspect(archive):
     for key, value in expected.items():
         if info.get(key) != value:
             raise ValueError("Incorrect device archive metadata: " + key)
+    purpose = info.get("NSLocalNetworkUsageDescription")
+    if not isinstance(purpose, str) or not purpose.strip():
+        raise ValueError("Missing local network purpose: NSLocalNetworkUsageDescription")
     device_executable(app / "FlashLocal")
     privacy_manifest(app / "PrivacyInfo.xcprivacy")
     prohibited = {".gguf", ".safetensors", ".p8", ".p12", ".pem", ".key", ".dpapi", ".mobileprovision"}
@@ -108,6 +111,7 @@ def inspect(archive):
             "version": info.get("CFBundleShortVersionString"), "build": info.get("CFBundleVersion"),
             "appBytes": total, "files": count, "modelPayloadBundled": False,
             "privacyManifestVerified": True,
+            "localNetworkPurposeDeclared": True,
             "signed": False, "installedOnIPhone": False, "uploadedToTestFlight": False}
 
 

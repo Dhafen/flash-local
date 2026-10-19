@@ -20,7 +20,8 @@ class ArchiveChecks(unittest.TestCase):
         self.app.mkdir(parents=True)
         self.info = {"CFBundleIdentifier": "com.dhafen.flashlocal", "CFBundleExecutable": "FlashLocal",
                      "DTPlatformName": "iphoneos", "UIFileSharingEnabled": True,
-                     "LSSupportsOpeningDocumentsInPlace": True, "UIDeviceFamily": [1]}
+                     "LSSupportsOpeningDocumentsInPlace": True, "UIDeviceFamily": [1],
+                     "NSLocalNetworkUsageDescription": "Serve the local model to your computer"}
         self.write_info()
         self.write_binary(2)
         (self.app / "QwenModelLicense.txt").write_bytes(
@@ -54,6 +55,17 @@ class ArchiveChecks(unittest.TestCase):
         self.assertFalse(result["signed"])
         self.assertFalse(result["uploadedToTestFlight"])
         self.assertTrue(result['privacyManifestVerified'])
+        self.assertTrue(result['localNetworkPurposeDeclared'])
+
+    def test_missing_or_empty_local_network_purpose_refuses_archive(self):
+        for value in [None, "", " ", 42]:
+            if value is None:
+                self.info.pop('NSLocalNetworkUsageDescription', None)
+            else:
+                self.info['NSLocalNetworkUsageDescription'] = value
+            self.write_info()
+            with self.assertRaisesRegex(ValueError, 'NSLocalNetworkUsageDescription'):
+                check.inspect(self.archive)
 
     def test_missing_or_malformed_privacy_manifest_refuses_archive(self):
         path = self.app / 'PrivacyInfo.xcprivacy'

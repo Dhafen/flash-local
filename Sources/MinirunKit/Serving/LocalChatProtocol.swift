@@ -91,7 +91,7 @@ public struct LocalChatRequest: Sendable {
         if let seed = try integer("seed") { options.seed = UInt64(seed) }
         options.thinkingBudget = object.keys.contains("thinking_budget") ? try integer("thinking_budget") : defaults.thinkingBudget
         options.enableThinking = try boolean("enable_thinking", fallback: defaults.enableThinking)
-        if let value = object["chat_template_kwargs"] {
+        if let value = object["chat_template_kwargs"], !(value is NSNull) {
             guard let kwargs = value as? [String: Any], Set(kwargs.keys).isSubset(of: ["enable_thinking"]) else {
                 throw LocalAPIError.invalid("chat_template_kwargs", "Only enable_thinking is supported")
             }
@@ -100,7 +100,7 @@ public struct LocalChatRequest: Sendable {
         try options.validate()
         self.options = options
         stream = try boolean("stream", fallback: false)
-        if let value = object["stream_options"] {
+        if let value = object["stream_options"], !(value is NSNull) {
             guard let values = value as? [String: Any], Set(values.keys).isSubset(of: ["include_usage", "include_obfuscation"]) else {
                 throw LocalAPIError.invalid("stream_options", "Unsupported stream options")
             }
@@ -121,9 +121,14 @@ public struct LocalChatRequest: Sendable {
                 content = parts.compactMap { $0["text"] as? String }.joined()
             } else { throw LocalAPIError.invalid("messages", "Only text content is supported") }
             let reasoning = value["reasoning_content"] as? String
+            if let rawReasoning = value["reasoning_content"], !(rawReasoning is NSNull), !(rawReasoning is String) {
+                throw LocalAPIError.invalid("messages", "reasoning_content must be text")
+            }
             guard reasoning == nil || role == "assistant" else { throw LocalAPIError.invalid("messages", "Only assistants have reasoning_content") }
-            if value["tool_calls"] != nil || value["function_call"] != nil {
-                throw LocalAPIError.invalid("messages", "Tool-call history is not implemented")
+            for key in ["tool_calls", "function_call"] {
+                if let field = value[key], !(field is NSNull), (field as? [Any])?.isEmpty != true {
+                    throw LocalAPIError.invalid("messages", "Tool-call history is not implemented")
+                }
             }
             size += content.utf8.count + (reasoning?.utf8.count ?? 0)
             guard size <= 262144 else { throw LocalAPIError(status: 413, message: "Conversation is too large") }
