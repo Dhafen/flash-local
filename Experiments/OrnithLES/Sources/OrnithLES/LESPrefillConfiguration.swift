@@ -1,4 +1,5 @@
 import Foundation
+import GGUFCore
 import ModelAdapters
 
 /// Load-time scheduling only. Context, routing and weights are unchanged.

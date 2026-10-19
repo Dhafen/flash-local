@@ -41,7 +41,8 @@ public struct LESMemoryPlan: Codable, Sendable, Equatable {
         requestedLookaheadDepth = pageCacheOnly ? 0 : min(lookaheadDepth, config.experts)
         // A microbatch may choose eight different experts for every token.
         // Budget the complete union before increasing graph dimensions.
-        prefillSlots = physicalBatchTokens * 8
+        let stagingSlots = physicalBatchTokens * 8
+        prefillSlots = stagingSlots
         var groups: [String: (bytes: UInt64, layers: UInt64)] = [:]
         var dense = UInt64(index.headerByteCount + 65536)
         for tensor in index.tensors.values {
@@ -65,7 +66,7 @@ public struct LESMemoryPlan: Codable, Sendable, Equatable {
         // Includes the native runtime's 1 GiB reservation plus a stop margin.
         runtimeReserveBytes = (1 << 30) + (128 << 20)
         let fixed = baselineFootprintBytes + denseBytes + kvBytes + ssmBytes + runtimeReserveBytes
-        let staging = groups.values.reduce(UInt64(0)) { $0 + $1.bytes * UInt64(prefillSlots) }
+        let staging = groups.values.reduce(UInt64(0)) { $0 + $1.bytes * UInt64(stagingSlots) }
         let perSlot = groups.values.reduce(UInt64(0)) { $0 + $1.bytes * $1.layers }
         prefillAllocationBytes = staging; expertBytesPerSlot = perSlot
         let detail = "baseline=\(footprint.footprintBytes) available=\(footprint.availableBytes.map { String($0) } ?? "unknown") ceiling=\(processCeilingBytes) dense=\(denseBytes) KV=\(kvBytes) SSM=\(ssmBytes) reserve=\(runtimeReserveBytes) staging=\(staging) bytesPerSlot=\(perSlot)"
