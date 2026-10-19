@@ -1,5 +1,11 @@
 # Private internal TestFlight delivery
 
+Physical [build-123 evidence](ORNITH-PHONE-123.md) now includes eight completed
+128-token runs, independently admitted batch-four prefill and a completed
+quick-chat screenshot. Page-cache decode is 4.08-4.30 token/s; prefill is
+7.19-7.25 prompt token/s. The separate screenshot shows 4.50 token/s.
+General quality, sustained workloads and long context are still unverified.
+
 Latest delivered version **0.1.0 (123)**, app source `4d3f45e3520c67657b6863457c2e88e6ca2ce2d9`, is
 available to the existing private internal group. [Full delivery run 39187166866](https://github.com/Dhafen/flash-local/actions/runs/39187166866)
 passes 24 selected Swift functions, all native/reference/QPack controls,
@@ -26,8 +32,9 @@ enabled and share the locally exported report. Chat also offers explicit local
 measurement export with token IDs; no report is uploaded automatically.
 
 The [phone-121 results](ORNITH-PHONE-121.md) establish the earlier native-mode
-comparison; corrected build-123 performance and trained numerics still require
-phone execution. Short admission is not general quality or long-context proof.
+comparison; the [phone-123 report](ORNITH-PHONE-123.md) now confirms the short
+trained numerical control and batch-four admission. Broader quality, sustained
+chat performance and long-context correctness remain unverified.
 
 ## Previous build 121
 

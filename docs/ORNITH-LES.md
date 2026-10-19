@@ -3,8 +3,9 @@
 This isolated experiment reuses the installed Ornith Q4_K_M: 21,713,463,040
 bytes, SHA-256 `42739874cc2ccfdb8523b23fbe52e29b2a7555c8176737ca9ca0b5d59859d41f`.
 Production GGUF/REAM and Swiftlet/QPack paths are unchanged. Native controls
-pass before app integration. The separate [phone-121 measurements](ORNITH-PHONE-121.md)
-now provide a completed native-mode comparison; general quality is not established.
+pass before app integration. The [phone-121 measurements](ORNITH-PHONE-121.md)
+and subsequent [phone-123 batch-four comparison](ORNITH-PHONE-123.md) provide
+completed native-mode comparisons; general quality is not established.
 
 ## Experimental page-cache chat, build 123
 
@@ -27,15 +28,18 @@ to CPU decoding, with unchanged 1e-4 bounds. The [before run](https://github.com
 and [corrected component run](https://github.com/Dhafen/flash-local/actions/runs/39159892997)
 use identical control source; only the patch script differs. The complete
 native projection probe remains explicitly unavailable on the hosted virtual
-GPU. These component results do not prove the trained phone batch-four issue
-is fixed. Fresh phone admission must decide that.
+GPU. Those component results alone do not prove trained-model correctness.
+The subsequent [physical build-123 report](ORNITH-PHONE-123.md) now admits
+batch-four against the independent original-weight reference and exact expert
+sets. Page-cache prefill reaches 7.19-7.25 token/s, decode 4.08-4.30 token/s.
 
 The [full build/delivery](https://github.com/Dhafen/flash-local/actions/runs/39187166866) passes 24 selected Swift functions, three
 Apple slices and all retained native/reference/app/package/QPack controls,
 with 44 captures actually reviewed and independent private availability.
-Phone build-123 generation/performance, sustained long-context operation and
-general quality remain to be measured. No experimental backend is promoted
-automatically into ordinary chat.
+The phone comparison completes eight 128-token runs; a separate quick-chat
+screenshot shows a completed answer with reasoning and 4.50 token/s.
+Sustained workloads, long-context operation and general quality remain to be
+measured. No experimental backend is promoted automatically into ordinary chat.
 
 ## Source inspection
 
@@ -99,7 +103,7 @@ toward admission. No static MiniCPM expert-frequency/prewarm table is reused.
 | Candidate | Current evidence | Next decision |
 | --- | --- | --- |
 | A: existing packed GGUF/MLX | Phone build 107: 1.931 decode forwards/s, 190 forwards; 3.954 GB peak; uncontrolled prompt/cache | Same fixed prompt, at least 128 decode steps per mode |
-| B: llama.cpp-omni LES | Build 120 serial logits satisfy the independent reference limits; build 121 adds host-validated exact expert-set controls | Verify those sets on the phone and measure at least 128 tokens per mode; keep failing batch-four disabled |
+| B: llama.cpp-omni LES | Phone 123 admits independent logits, exact expert sets and batch-four; eight 128-token runs favor page cache at 4.08-4.30 tok/s | Reduce measured expert-install and dispatch costs; retain fresh numerical admission before experimental chat |
 | C: Flash-MoE pipeline | Code inspected; fused expert/pointwise kernels, deferred command buffers, parallel pread; no redistribution license found | Do not copy; compare permitted independently implemented techniques |
 | Swiftlet/QPack | Build 97 delivered, grouped kernels conditionally activated after four-position replay; no phone result | Different checkpoint quantization, so cannot be an identical-weight A/B |
 

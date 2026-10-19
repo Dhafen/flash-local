@@ -14,28 +14,31 @@ reuses only exact token prefixes and exports measurements locally. The ordinary
 GGUF/REAM engines and saved conversations remain available. Update without
 uninstalling or downloading the model again. [Delivery and instructions](docs/TESTFLIGHT.md).
 
-The supplied physical iPhone18,2 **build-121** comparison completed eight
+The supplied physical iPhone18,2 **build-123** comparison completed eight
 128-token runs on one fixed prompt. Decode rates, initially empty/warm app cache:
 
 | Engine | Decode token/s, first / warm |
 | --- | ---: |
-| Existing GGUF | 1.192 / 1.178 |
-| Native expert cache | 3.278 / 3.703 |
-| Native LES depth 4 | 4.087 / 4.156 |
-| Native OS page cache | 5.015 / 4.850 |
+| Existing GGUF | 1.156 / 1.151 |
+| Native expert cache | 3.675 / 3.664 |
+| Native LES depth 4 | 4.044 / 3.834 |
+| Native OS page cache | 4.299 / 4.082 |
 
 All six native outputs are identical; page cache wins their comparison in both
 runs. The ordinary engine has a different output digest, so an output-equivalent
 four-way speedup is not established. Exact expert sets and the short independent
-original-weight F32/double logit gate pass. Batch-four fails in 121, which uses
-serial prefill. The original quantized-operand CPU discrepancy remains visible.
+original-weight F32/double logit gate pass. Batch-four now also passes on the
+trained phone model. Page-cache prefill reaches 7.253 / 7.189 prompt token/s;
+decode is lower than in the [build-121 session](docs/ORNITH-PHONE-121.md).
+The original quantized-operand CPU discrepancy remains visible.
 OS-cache coldness is uncontrolled and process footprint does not represent all
-file-cache RAM. [Measurements and limits](docs/ORNITH-PHONE-121.md).
+file-cache RAM. [Measurements and limits](docs/ORNITH-PHONE-123.md).
 
 Build 123 corrects a reproduced Q4_K Metal scale-precision error without
 requantization. Six actual untrained GPU row controls now match CPU decoding
 exactly; the hosted virtual GPU cannot run the complete native projection probe.
-The corrected trained model and new chat still require physical phone testing.
+The phone report admits corrected batch-four execution; a separate quick-chat
+screenshot shows 4.50 token/s and completed reasoning/answer UI.
 This is not a 10–15 token/s claim or general quality validation.
 
 The [complete delivery run](https://github.com/Dhafen/flash-local/actions/runs/39187166866) passes 24 selected native/chat Swift functions,
