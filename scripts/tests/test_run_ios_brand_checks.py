@@ -73,9 +73,9 @@ class IOSBrandGateTests(unittest.TestCase):
         )
 
     def test_standard_gate_accepts_all_three_without_les(self):
-        three = "** TEST SUCCEEDED **\\n" + "".join(
-            f"Test Suite '{suite.rsplit('/', 1)[-1]}' passed\\n"
-            for suite in (*visual.TEST_SUITES, visual.LES_SUITE)
+        three = "** TEST SUCCEEDED **\n" + "".join(
+            f"Test Suite '{suite.rsplit('/', 1)[-1]}' passed\n"
+            for suite in visual.TEST_SUITES
         )
         self.assertTrue(self.visual_gate_with_fake_xcodebuild(returncode=0, output=three))
 
@@ -91,7 +91,7 @@ class IOSBrandGateTests(unittest.TestCase):
     def test_all_four_pass_with_successful_xcodebuild(self):
         all_four = "** TEST SUCCEEDED **\n" + "".join(
             f"Test Suite '{suite.rsplit('/', 1)[-1]}' passed\n"
-            for suite in visual.TEST_SUITES
+            for suite in (*visual.TEST_SUITES, visual.LES_SUITE)
         )
         self.assertTrue(
             self.visual_gate_with_fake_xcodebuild(returncode=0, output=all_four, les_enabled=True)
