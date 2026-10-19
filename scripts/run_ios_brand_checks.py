@@ -10,7 +10,6 @@ import argparse
 import json
 import os
 from pathlib import Path
-import re
 import shutil
 import signal
 import subprocess
@@ -23,7 +22,6 @@ TEST_SUITES = (
     "MinirunIOSTests/OrnithPerformanceRenderTests",
     "MinirunIOSTests/OrnithLESRenderTests",
 )
-REQUIRED_SUITE = re.compile(r"ForkBrandRenderTests.*passed")
 
 
 def find_simulator(name: str = "iPhone 17 Pro Max") -> str:
@@ -104,9 +102,20 @@ def run_test_attempt(udid: str, *, seconds: int, log: Path, result: Path) -> boo
             print("Timed-out simulator test process group terminated", flush=True)
             return False
     content = log.read_text(encoding="utf-8", errors="replace")
-    # Pass iff xcodebuild passed AND the required brand suite actually ran.
-    okay = code == 0 and bool(REQUIRED_SUITE.search(content)) and "** TEST SUCCEEDED **" in content
-    print(f"Visual test completed: rc={code}, brand-suite={bool(REQUIRED_SUITE.search(content))}, pass={okay}", flush=True)
+    # GitHub's prior visual gate checked only the brand suite. Ensure *each*
+    # requested SwiftUI suite ran and passed, not just an empty successful test run.
+    required_passes = {
+        suite.rsplit("/", 1)[-1]: (
+            f"Test Suite '{suite.rsplit('/', 1)[-1]}' passed" in content
+        )
+        for suite in TEST_SUITES
+    }
+    okay = (
+        code == 0
+        and "** TEST SUCCEEDED **" in content
+        and all(required_passes.values())
+    )
+    print(f"Visual test completed: rc={code}, suites={required_passes}, pass={okay}", flush=True)
     if not okay:
         print("Last 35 log lines:", flush=True)
         print("\n".join(content.splitlines()[-35:]), flush=True)
