@@ -18,6 +18,7 @@ jobs:
           persist-credentials: false
       - name: Check reader reuse, bytes, failures and owner teardown under sanitizers
         run: |
+          set -o pipefail
           mkdir -p .work
           clang++ -std=c++17 -O1 -g -pthread -fsanitize=address,undefined \
             -fno-omit-frame-pointer Experiments/OrnithLES/Native/io-pool-control.cpp \
