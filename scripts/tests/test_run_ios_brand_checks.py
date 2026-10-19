@@ -38,7 +38,7 @@ class IOSBrandGateTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "No available"):
                 visual.find_simulator()
 
-    def visual_gate_with_fake_xcodebuild(self, *, returncode, output):
+    def visual_gate_with_fake_xcodebuild(self, *, returncode, output, les_enabled=False):
         class CompletedPopen:
             pid = 999999
             def __init__(self, argv, stdout, stderr, start_new_session):
@@ -46,7 +46,7 @@ class IOSBrandGateTests(unittest.TestCase):
                 self.assertions = (
                     "-parallel-testing-enabled" in argv
                     and "NO" in argv
-                    and sum(arg.startswith("-only-testing:") for arg in argv) == 4
+                    and sum(arg.startswith("-only-testing:") for arg in argv) == (4 if les_enabled else 3)
                 )
                 stdout.write(output)
                 stdout.flush()
@@ -54,7 +54,7 @@ class IOSBrandGateTests(unittest.TestCase):
                 return returncode
 
         with tempfile.TemporaryDirectory() as d:
-            with mock.patch.object(visual.subprocess, "Popen", CompletedPopen):
+            with mock.patch.dict(visual.os.environ, {"FLASH_LOCAL_ENABLE_LES": "1" if les_enabled else "0"}), mock.patch.object(visual.subprocess, "Popen", CompletedPopen):
                 return visual.run_test_attempt(
                     "FAKE-SIM", seconds=120,
                     log=Path(d) / "ios-brand.log",
@@ -69,8 +69,15 @@ class IOSBrandGateTests(unittest.TestCase):
             "Test Suite 'OrnithPerformanceRenderTests' passed\n"
         )
         self.assertFalse(
-            self.visual_gate_with_fake_xcodebuild(returncode=0, output=three_of_four)
+            self.visual_gate_with_fake_xcodebuild(returncode=0, output=three_of_four, les_enabled=True)
         )
+
+    def test_standard_gate_accepts_all_three_without_les(self):
+        three = "** TEST SUCCEEDED **\\n" + "".join(
+            f"Test Suite '{suite.rsplit('/', 1)[-1]}' passed\\n"
+            for suite in (*visual.TEST_SUITES, visual.LES_SUITE)
+        )
+        self.assertTrue(self.visual_gate_with_fake_xcodebuild(returncode=0, output=three))
 
     def test_failed_xcodebuild_cannot_pass_despite_suite_names(self):
         all_four = "** TEST SUCCEEDED **\n" + "".join(
@@ -87,7 +94,7 @@ class IOSBrandGateTests(unittest.TestCase):
             for suite in visual.TEST_SUITES
         )
         self.assertTrue(
-            self.visual_gate_with_fake_xcodebuild(returncode=0, output=all_four)
+            self.visual_gate_with_fake_xcodebuild(returncode=0, output=all_four, les_enabled=True)
         )
 
 
