@@ -59,6 +59,29 @@ final class OrnithLESChatTests: XCTestCase {
             var tuning = LESPrefillConfiguration(); tuning.evaluationTokens = 32; tuning.physicalTokens = 8
             XCTAssertThrowsError(try OrnithLESChatGeneration.validatedBatch(tuning, proof: nil, baseline: check,
                 modelSHA256: "model", nativeRevision: "native"))
+            var tunedObserved = serial, tunedFree = plain
+            tunedObserved["configuredPhysicalBatchTokens"] = 8; tunedObserved["maximumPhysicalBatchTokens"] = 8
+            tunedFree["configuredPhysicalBatchTokens"] = 8; tunedFree["maximumPhysicalBatchTokens"] = 8
+            var tuned: [String: Any] = ["modelSHA256": "model", "nativeRevision": "native",
+                "referenceRevision": Qwen4ExpCPUReference.sourceRevision,
+                "configuration": ["evaluationTokens": 32, "physicalTokens": 8],
+                "contextTokens": 4096, "promptTokens": 22, "forwardCount": 25,
+                "referenceMetrics": proof["referenceMetrics"]!, "observed": tunedObserved, "callbackFree": tunedFree]
+            func decodeProof() throws -> LESPrefillCheck {
+                try JSONDecoder().decode(LESPrefillCheck.self, from: JSONSerialization.data(withJSONObject: tuned))
+            }
+            let admitted = try OrnithLESChatGeneration.validatedBatch(tuning, proof: decodeProof(), baseline: check,
+                modelSHA256: "model", nativeRevision: "native")
+            XCTAssertEqual(admitted.0, 32); XCTAssertEqual(admitted.1, 8)
+            tuned["modelSHA256"] = "changed"
+            XCTAssertThrowsError(try OrnithLESChatGeneration.validatedBatch(tuning, proof: decodeProof(), baseline: check,
+                modelSHA256: "model", nativeRevision: "native"))
+            tuned["modelSHA256"] = "model"; tuned["nativeRevision"] = "changed"
+            XCTAssertThrowsError(try OrnithLESChatGeneration.validatedBatch(tuning, proof: decodeProof(), baseline: check,
+                modelSHA256: "model", nativeRevision: "native"))
+            tuned["nativeRevision"] = "native"; tuning.evaluationTokens = 16
+            XCTAssertThrowsError(try OrnithLESChatGeneration.validatedBatch(tuning, proof: decodeProof(), baseline: check,
+                modelSHA256: "model", nativeRevision: "native"))
             XCTAssertThrowsError(try OrnithLESChatGeneration.validatedPrefill(check, modelSHA256: "changed", nativeRevision: "native"))
             XCTAssertThrowsError(try OrnithLESChatGeneration.validatedPrefill(check, modelSHA256: "model", nativeRevision: "changed"))
         }

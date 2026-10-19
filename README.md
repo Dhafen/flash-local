@@ -6,6 +6,12 @@ Current target: the official 21.7 GB Ornith 1.5 35B-A3B Q4_K_M GGUF, a total pro
 
 ## Development status
 
+The separate `codex/ornith-prompt-controls` branch adds
+[validated prompt batch settings, an ABBA comparison and editable work instructions](docs/ORNITH-PREFILL.md).
+Physical batches 1/4/8/16 and logical chunks through 32 pass 48 generated
+full-graph controls. App integration/delivery and real-phone performance for
+these new settings are still pending; the delivered checkpoint below is retained.
+
 The isolated branch now implements an authenticated foreground
 [local OpenAI-compatible API and numeric generation controls](docs/ORNITH-LOCAL-API.md),
 including an optional thinking budget. Source-identical host controls exercise

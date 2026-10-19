@@ -374,7 +374,7 @@ struct OrnithAPIPage: View {
                 Toggle("Behåll skärmen vaken", isOn: $model.apiKeepAwake)
                 Text("Modellnamn").font(.caption).foregroundStyle(.secondary)
                 Text(LocalChatRequest.modelID).font(.callout.monospaced()).textSelection(.enabled)
-                Text("Samma Wi-Fi eller Ethernet via USB-C-adapter. HTTP används på det betrodda lokala nätverket. Vanlig USB-kabel kräver att datorn har en nätverksanslutning till telefonen.")
+                Text("Samma Wi-Fi eller Ethernet via USB-C-adapter. HTTP används på det betrodda lokala nätverket. Vanlig USB-kabel kräver separat portvidarebefordran eller nätverksdrivrutin på datorn; den vägen är ännu inte verifierad.")
                     .font(.callout)
                 Text("Låt appen vara öppen i förgrunden. Låsning, bakgrund eller minnestryck stoppar servern. Chatten och API:t delar motorn och hanterar ett anrop åt gången.")
                     .font(.caption).foregroundStyle(.secondary)

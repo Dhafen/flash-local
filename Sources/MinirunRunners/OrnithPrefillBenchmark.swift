@@ -17,9 +17,10 @@ public enum OrnithPrefillBenchmark {
         public let check: LESPrefillCheck?
         public let runs: [Run]
         public var comparable: Bool {
-            runs.map(\.mode) == ["baseline", "candidate", "candidate", "baseline"] &&
+            guard let first = runs.first else { return false }
+            return runs.map(\.mode) == ["baseline", "candidate", "candidate", "baseline"] &&
                 (candidate == LESPrefillConfiguration() || check?.passed == true) &&
-                runs.allSatisfy { $0.generation.promptTokenIDs == runs.first?.generation.promptTokenIDs } &&
+                runs.allSatisfy { $0.generation.promptTokenIDs == first.generation.promptTokenIDs } &&
                 Self.same128TokenOutputs(runs.map { $0.generation.generatedTokenIDs }) &&
                 runs.allSatisfy { $0.generation.decodeForwardPasses >= 128 && !$0.generation.lowPowerModeAtStart &&
                     $0.generation.maximumThermalState == $0.generation.thermalStateAtStart &&
