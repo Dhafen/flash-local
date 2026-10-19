@@ -22,6 +22,10 @@ final class LocalModelAPITests: XCTestCase {
         let reset = try LocalChatRequest(data: body(["thinking_budget": NSNull(), "stream_options": NSNull()]), defaults: defaults)
         XCTAssertNil(reset.options.thinkingBudget); XCTAssertFalse(reset.includeUsage)
         XCTAssertFalse(try LocalChatRequest(data: body(["thinking_budget": 0])).options.thinkingEnabled)
+        // An inactive saved cap must not block a short non-thinking request.
+        let short = try LocalChatRequest(data: body(["max_tokens": 16, "enable_thinking": false]), defaults: defaults)
+        XCTAssertFalse(short.options.thinkingEnabled); XCTAssertEqual(short.options.maximumNewTokens, 16)
+        XCTAssertEqual(short.options.thinkingBudget, 128)
     }
     func testUnsupportedToolsAndInvalidParametersFailBeforeInference() throws {
         let invalid: [[String: Any]] = [["temperature": true], ["temperature": -1], ["top_p": 0], ["max_tokens": 0],
