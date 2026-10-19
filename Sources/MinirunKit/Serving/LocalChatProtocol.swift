@@ -89,7 +89,7 @@ public struct LocalChatRequest: Sendable {
         options.temperature = try numeric("temperature") ?? defaults.temperature
         options.topP = try numeric("top_p") ?? defaults.topP
         if let seed = try integer("seed") { options.seed = UInt64(seed) }
-        options.thinkingBudget = try integer("thinking_budget") ?? defaults.thinkingBudget
+        options.thinkingBudget = object.keys.contains("thinking_budget") ? try integer("thinking_budget") : defaults.thinkingBudget
         options.enableThinking = try boolean("enable_thinking", fallback: defaults.enableThinking)
         if let value = object["chat_template_kwargs"] {
             guard let kwargs = value as? [String: Any], Set(kwargs.keys).isSubset(of: ["enable_thinking"]) else {

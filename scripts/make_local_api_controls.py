@@ -20,7 +20,7 @@ for path in inputs:
     manifest[str(path.relative_to(root)).replace('\\', '/')] = hashlib.sha256(path.read_bytes()).hexdigest()
 (destination/'Package.swift').write_text('''// swift-tools-version: 5.9
 import PackageDescription
-let package = Package(name: "LocalAPIControls", platforms: [.macOS(.v14), .iOS(.v18)],
+let package = Package(name: "LocalAPIControls", platforms: [.macOS(.v14), .iOS("18.0")],
     products: [.library(name: "MinirunKit", targets: ["MinirunKit"])],
     targets: [.target(name: "MinirunKit"), .testTarget(name: "MinirunKitTests", dependencies: ["MinirunKit"])])
 ''')

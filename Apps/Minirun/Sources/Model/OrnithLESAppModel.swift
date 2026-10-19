@@ -188,7 +188,19 @@ final class OrnithLESAppModel {
     private(set) var chatSummary: OrnithLESChatGeneration.Summary?
     private(set) var chatMeasurementURL: URL?
     var chatDraft = ""
-    var chatOptions = LocalGenerationOptions()
+    var chatOptions = LocalGenerationOptions() {
+        didSet {
+            if persistOptions {
+                do {
+                    try chatOptions.validate()
+                    let data = try JSONEncoder().encode(chatOptions)
+                    UserDefaults.standard.set(data, forKey: Self.optionsPreferenceKey)
+                } catch { /* Incomplete numeric edits are not persisted. */ }
+            }
+        }
+    }
+    private static let optionsPreferenceKey = "FlashLocal.Ornith.GenerationOptions.v1"
+    @ObservationIgnored private var persistOptions = false
     var chatThinkingEnabled: Bool {
         get { chatOptions.enableThinking }
         set { chatOptions.enableThinking = newValue }
@@ -222,12 +234,18 @@ final class OrnithLESAppModel {
     static func live() -> OrnithLESAppModel {
         let fm = FileManager.default
         let documents = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        return Self(modelsRoot: documents.appendingPathComponent("Models"),
+        let model = Self(modelsRoot: documents.appendingPathComponent("Models"),
             privateRoot: fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
                 .appendingPathComponent("FlashLocal/OrnithLES"), documents: documents)
+        if let data = UserDefaults.standard.data(forKey: Self.optionsPreferenceKey),
+           let options = try? JSONDecoder().decode(LocalGenerationOptions.self, from: data) {
+            do { try options.validate(); model.chatOptions = options } catch { }
+        }
+        model.persistOptions = true
+        return model
     }
     static func reviewPreview() -> OrnithLESAppModel {
-        let model = Self.live(); model.isPreview = true
+        let model = Self.live(); model.persistOptions = false; model.isPreview = true
         model.status = "Förhandsvisning av layout – ingen modell körs."
         return model
     }
