@@ -20,8 +20,18 @@ TEST_SUITES = (
     "MinirunIOSTests/ForkBrandRenderTests",
     "MinirunIOSTests/REAMChatRenderTests",
     "MinirunIOSTests/OrnithPerformanceRenderTests",
-    "MinirunIOSTests/OrnithLESRenderTests",
 )
+LES_SUITE = "MinirunIOSTests/OrnithLESRenderTests"
+
+
+def selected_suites() -> tuple[str, ...]:
+    # OrnithLESRenderTests is compiled only when canImport(OrnithLES).
+    # The standard CI configuration does not link that optional module.
+    # Keep the LES visual gate mandatory for LES-enabled delivery runs.
+    if os.environ.get("FLASH_LOCAL_ENABLE_LES") == "1":
+        return (*TEST_SUITES, LES_SUITE)
+    return TEST_SUITES
+
 
 
 def find_simulator(name: str = "iPhone 17 Pro Max") -> str:
@@ -71,8 +81,9 @@ def run_test_attempt(udid: str, *, seconds: int, log: Path, result: Path) -> boo
         "-skipPackagePluginValidation", "-skipMacroValidation",
         "CODE_SIGNING_ALLOWED=NO",
     ]
-    cmd += [f"-only-testing:{suite}" for suite in TEST_SUITES]
-    print(f"Running all {len(TEST_SUITES)} visual suites (deadline: {seconds}s)", flush=True)
+    suites = selected_suites()
+    cmd += [f"-only-testing:{suite}" for suite in suites]
+    print(f"Running {len(suites)} configured visual suites (LES enabled: {LES_SUITE in suites}; deadline: {seconds}s)", flush=True)
     started = time.monotonic()
     with log.open("w", encoding="utf-8") as stream:
         proc = subprocess.Popen(
@@ -108,7 +119,7 @@ def run_test_attempt(udid: str, *, seconds: int, log: Path, result: Path) -> boo
         suite.rsplit("/", 1)[-1]: (
             f"Test Suite '{suite.rsplit('/', 1)[-1]}' passed" in content
         )
-        for suite in TEST_SUITES
+        for suite in suites
     }
     okay = (
         code == 0
