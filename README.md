@@ -6,6 +6,12 @@ Current target: the official 21.7 GB Ornith 1.5 35B-A3B Q4_K_M GGUF, a total pro
 
 ## Development status
 
+The isolated branch now implements an authenticated foreground
+[local OpenAI-compatible API and numeric generation controls](docs/ORNITH-LOCAL-API.md),
+including an optional thinking budget. Source-identical host controls exercise
+real loopback TCP and compile the server for iOS. Integrated app checks and
+delivery are being run; this is not yet a phone LAN or adapter-test result.
+
 **Private TestFlight 0.1.0 (123) is available**, app source `4d3f45e3520c67657b6863457c2e88e6ca2ce2d9`.
 The new **Ornith snabbchatt** is an isolated experimental page-cache chat using
 the installed 21.7 GB Q4_K_M GGUF. It requires a fresh in-process numerical
