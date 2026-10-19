@@ -329,19 +329,14 @@ jobs:
             -scheme Minirun-iOS -destination 'generic/platform=iOS Simulator' \
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee ios-build.log | tail -30
 
-      - name: iOS brand review in light and dark
+      - name: iOS brand review in light and dark (bounded and fail-closed)
         if: github.event_name != 'workflow_dispatch' || !inputs.provisioning_only
         run: |
-          SIMULATOR=$(xcrun simctl list devices available --json | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(x["udid"] for v in d["devices"].values() for x in v if x["name"] == "iPhone 17 Pro Max" and x.get("isAvailable")))')
-          xcodebuild test -project Apps/Minirun/Minirun.xcodeproj $XCODEBUILD_FLAGS \
-            -scheme Minirun-iOS -destination "platform=iOS Simulator,id=$SIMULATOR" CODE_SIGNING_ALLOWED=NO \
-            -only-testing:MinirunIOSTests/ForkBrandRenderTests -resultBundlePath ios-brand.xcresult \
-            -only-testing:MinirunIOSTests/REAMChatRenderTests \
-            -only-testing:MinirunIOSTests/OrnithPerformanceRenderTests \
-            -only-testing:MinirunIOSTests/OrnithLESRenderTests \
-            2>&1 | tee ios-brand.log | tail -60
-          grep -E 'ForkBrandRenderTests.*passed' ios-brand.log
-          xcrun xcresulttool export attachments --path ios-brand.xcresult --output-path brand-ios
+          # The October 19 delivery run spent ~90 minutes stalled in this
+          # visual simulator step before job cancellation. All four test
+          # suites still HAVE TO pass. On a simulator hang, terminate the
+          # test process group, collect diagnostic logs and try once more.
+          python3 scripts/run_ios_brand_checks.py --timeout-seconds 1500 --attempts 2
 
       - name: Upload generated project and visual reviews
         if: always()
@@ -357,6 +352,7 @@ jobs:
             brand-ios/
             mac-brand.log
             ios-brand.log
+            ios-brand-attempt-*.log
           if-no-files-found: ignore
           retention-days: 14
 
@@ -415,6 +411,8 @@ jobs:
             mac-brand.log
             ios-brand.log
             ios-build.log
+            ios-brand.log
+            ios-brand-attempt-*.log
             ios-archive.log
             ios-archive-check.json
             ios-signing-probe.json
