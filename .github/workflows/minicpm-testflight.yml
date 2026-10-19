@@ -40,7 +40,7 @@ jobs:
           python3 "$GITHUB_WORKSPACE/integrations/minicpm-context/apply_context_overlay.py" "$PWD"
           git diff --check
       - name: Build, sign, export and upload only to the new MiniCPM app
-            env:
+        env:
           MINICPM_APP_STORE_APP_ID: ${{vars.MINICPM_APP_STORE_APP_ID}}
           APPLE_TEAM_ID: ${{vars.APPLE_TEAM_ID}}
           ASC_KEY_ID: ${{secrets.ASC_KEY_ID}}
