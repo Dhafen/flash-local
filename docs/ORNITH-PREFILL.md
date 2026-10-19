@@ -1,8 +1,15 @@
 # Ornith prompt batching and work profiles
 
-Implemented on `codex/ornith-prompt-controls`, based on the delivered build-125
-checkpoint. The new app build and physical-phone results are not yet confirmed.
-The existing GGUF, ordinary GGUF/REAM chats and released API branch are retained.
+Built and privately delivered as **0.1.0 (126)** on the isolated
+`codex/ornith-prompt-controls` branch, runtime source `6c1084c87b35c749a5152c140c4828e9dde84126`.
+[Complete delivery run 39250964590](https://github.com/Dhafen/flash-local/actions/runs/39250964590) passes integration, archive/signing and
+fresh independent Apple availability. All 64 platform/appearance captures were
+actually reviewed. The 32 selected native/chat/tokenizer Swift controls, 48 new
+full-graph batch variants, 585 app tests, 483 package invocations (9 skips)
+and nine actual API tests pass, alongside the retained reference/Swiftlet/QPack
+gates. Actual-phone gains from larger batches remain unmeasured.
+
+The existing GGUF, ordinary GGUF/REAM chats and build-125 base branch are retained.
 No trained weights are downloaded or evaluated on the development/build hosts.
 
 ## Which batch size changes what?
@@ -52,7 +59,11 @@ Counters record actual skipped intermediate output batches.
 ## Compare on the phone
 
 Open **Ornith → Snabbchatt → Promptinläsning och batch**. A first candidate is
-evaluation **32**, physical **8**. **Kontrollera och ladda om** applies a pending
+evaluation **32**, physical **8**. On iPhone the inline menus currently show
+their values without separate visible labels: the **upper** menu is evaluation,
+the **lower** is physical. Mac displays both labels. Explicit visible iOS labels
+remain a small presentation follow-up; both Picker accessibility labels are in
+the source. **Kontrollera och ladda om** applies a pending
 choice only after admission; chat/API use is blocked while a changed setting
 awaits reload. Stop the API before changing load settings.
 
@@ -88,7 +99,9 @@ The preceding [native/Swift run 39235302412](https://github.com/Dhafen/flash-loc
 at source `720a76346763965e2ecdef5d95d4028e45e1460a` passes the initial batch
 policy, 16 LES Swift functions and isolated Mac/iPhone/Simulator builds. It
 predates the additional scratch allowance, output skipping and UI/profile
-integration; those changes require their own full integration run.
+integration. Those changes pass the complete [build-126 integration run](https://github.com/Dhafen/flash-local/actions/runs/39250964590).
+These are host correctness/build controls; larger-batch trained-model admission
+and sustained prefill/decode timings still require the physical phone.
 
 ## Useful controls for programming and security review
 

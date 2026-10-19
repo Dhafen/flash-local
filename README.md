@@ -6,11 +6,12 @@ Current target: the official 21.7 GB Ornith 1.5 35B-A3B Q4_K_M GGUF, a total pro
 
 ## Development status
 
-The separate `codex/ornith-prompt-controls` branch adds
-[validated prompt batch settings, an ABBA comparison and editable work instructions](docs/ORNITH-PREFILL.md).
-Physical batches 1/4/8/16 and logical chunks through 32 pass 48 generated
-full-graph controls. App integration/delivery and real-phone performance for
-these new settings are still pending; the delivered checkpoint below is retained.
+Private build 126 adds [validated prompt batch settings, an ABBA comparison
+and editable work instructions](docs/ORNITH-PREFILL.md) on the separate
+`codex/ornith-prompt-controls` branch. Physical batches 1/4/8/16 and logical
+chunks through 32 pass 48 generated full-graph controls. App integration and
+private delivery pass; actual-phone gains from larger batches remain unmeasured.
+Default evaluation 4/physical Auto and the existing GGUF are retained.
 
 The isolated branch now implements an authenticated foreground
 [local OpenAI-compatible API and numeric generation controls](docs/ORNITH-LOCAL-API.md),
@@ -19,7 +20,7 @@ real loopback TCP and compile the server for iOS. Integrated app checks,
 private delivery and independent Apple availability pass. Physical-phone LAN,
 adapter/USB reachability and explicit-budget answer quality still need testing.
 
-**Private TestFlight 0.1.0 (125) is available**, app source `fdb7801742a3de0015e3047a055f555db41d9b98`.
+**Private TestFlight 0.1.0 (126) is available**, app source `6c1084c87b35c749a5152c140c4828e9dde84126`.
 The new **Ornith snabbchatt** is an isolated experimental page-cache chat using
 the installed 21.7 GB Q4_K_M GGUF. It requires a fresh in-process numerical
 admission, preserves real top-eight routing, streams reasoning separately,
@@ -54,13 +55,14 @@ The phone report admits corrected batch-four execution; a separate quick-chat
 screenshot shows 4.50 token/s and completed reasoning/answer UI.
 This is not a 10–15 token/s claim or general quality validation.
 
-The [complete delivery run](https://github.com/Dhafen/flash-local/actions/runs/39221402989) passes 26 selected native/chat/tokenizer Swift functions,
-three independent synthetic F32 graphs, 63 routed and 18 callback-free variants,
-three isolated Apple framework slices, the retained Swiftlet/QPack suites,
-583 app tests, 483 package invocations (9 environment skips), nine actual API
-controls and 56 actually reviewed captures. Device archive, signing, local-network
-purpose text and independent private TestFlight availability pass. These host
-controls do not establish physical throughput or phone API reachability.
+The [complete delivery run](https://github.com/Dhafen/flash-local/actions/runs/39250964590) passes 32 selected native/chat/tokenizer Swift functions,
+three independent synthetic F32 graphs, 63 retained routed and 18 callback-free
+variants, 48 additional batch variants and three isolated Apple framework slices.
+The retained Swiftlet/QPack suites, 585 app tests, 483 package invocations
+(9 environment skips), nine actual API controls and 64 actually reviewed captures
+also pass. Device archive, signing, local-network purpose text and independent
+private TestFlight availability pass. These host controls do not establish
+physical throughput or phone API reachability.
 
 Context remains 4,096 tokens for Ornith and 1,024 for the separately retained
 REAM model, with a 5.5 GB process ceiling. General trained-model quality, 8K/32K/65K

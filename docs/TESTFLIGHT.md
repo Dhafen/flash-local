@@ -1,6 +1,45 @@
 # Private internal TestFlight delivery
 
-## Current build 125: local API and generation controls
+## Current build 126: prompt batches and work profiles
+
+Private **0.1.0 (126)** is available to the existing internal group, runtime source
+`6c1084c87b35c749a5152c140c4828e9dde84126`. [Delivery run 39250964590](https://github.com/Dhafen/flash-local/actions/runs/39250964590) passes 32 selected native/chat/tokenizer
+Swift controls, all retained native/reference/Swiftlet/QPack gates, 48 additional
+full-graph batch variants, 585 app tests and 483 package invocations
+(9 environment skips). All nine loopback API tests and 64 actually reviewed
+iOS/macOS light/dark captures pass. The arm64 app is 38,857,634 bytes without
+model weights.
+
+Archive inspection confirms privacy, memory entitlements, local-network purpose
+text and real Apple signing/profile. A fresh independent audit confirms `VALID`,
+`INTERNAL_ONLY`, `IN_BETA_TESTING`, nonexpired, the exact private group and
+unchanged sole-owner membership. Sealed IPA SHA256:
+`5fd26233b0740156c1aa6e86d25c32cd16304edec8ed5e8b6acf1a3ff41dbe0e`.
+
+Update without uninstalling or downloading the model again. Open **Ornith →
+Snabbchatt → Promptinläsning och batch**. Evaluation chunks are 1/4/8/16/32;
+physical batches are Auto/1/4/8/16. Defaults remain 4/Auto. A changed setting
+requires independent original-weight logits, exact expert sets, callback-free
+replay and memory admission before chat/API can use it. A larger batch is not
+automatically faster and cannot be promoted from host-only evidence.
+
+For the first physical comparison, turn off Low Power Mode, select evaluation
+**32**, physical **8**, then **Jämför vald batch med Auto**. Keep the app open.
+The fixed-prompt ABBA test creates four fresh contexts and allows 129 output
+tokens per run to cover 128 timed decode forwards. Save/share the resulting
+`ornith-prefill-…json`, including a failure report if admission stops. The test
+does not change the normal backend or select a winner. [Controls, memory and
+comparison limits](ORNITH-PREFILL.md).
+
+**Systemprompt och arbetsprofil** adds editable programming/security-review
+instructions; profiles change only the instruction text. Existing thinking,
+token, temperature, top-p, seed and foreground local API controls are retained.
+The API uses the system default only when the client omits its own system
+message. Context remains 4096. Structured tool execution, phone network/USB
+reachability, new batch speed and long context remain unverified. The measured
+phone speed checkpoint is still build 123 below.
+
+## Previous build 125: local API and generation controls
 
 Private **0.1.0 (125)** is available to the existing internal group, runtime source
 `fdb7801742a3de0015e3047a055f555db41d9b98`.
