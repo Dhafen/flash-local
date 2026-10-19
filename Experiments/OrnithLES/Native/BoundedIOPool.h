@@ -45,7 +45,7 @@ public:
         if (failure) std::rethrow_exception(failure);
     }
     unsigned readers() const { return readers_; }
-    unsigned thread_launches() const { return readers_ - 1; }
+    unsigned thread_launches() const { return thread_starts_.load(); }
     std::uint64_t completed_waves() const {
         std::lock_guard<std::mutex> lock(mutex_); return completed_waves_;
     }
@@ -66,6 +66,7 @@ private:
         }
     }
     void worker() {
+        thread_starts_.fetch_add(1);
         live_helpers_.fetch_add(1);
         std::uint64_t observed = 0;
         std::unique_lock<std::mutex> lock(mutex_);
@@ -88,6 +89,7 @@ private:
     std::vector<std::thread> helpers_;
     std::function<void(std::size_t)> operation_;
     std::atomic<std::size_t> next_{0};
+    std::atomic<unsigned> thread_starts_{0};
     std::size_t count_ = 0, remaining_ = 0;
     std::uint64_t generation_ = 0, completed_waves_ = 0, completed_jobs_ = 0;
     bool active_ = false, stopping_ = false;
