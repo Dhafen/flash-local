@@ -1,0 +1,64 @@
+name: MiniCPM Context - Private TestFlight
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_private_upload:
+        description: "Confirm the separate com.dhafen.minicpmcontext App Store Connect app exists and upload a private test build"
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  deliver:
+    name: Signed MiniCPM private TestFlight upload
+    if: inputs.confirm_private_upload
+    runs-on: macos-26
+    timeout-minutes: 120
+    env:
+      MINICPM_APP_STORE_APP_ID: ${{vars.MINICPM_APP_STORE_APP_ID}}
+      APPLE_TEAM_ID: ${{vars.APPLE_TEAM_ID}}
+      ASC_KEY_ID: ${{secrets.ASC_KEY_ID}}
+      ASC_ISSUER_ID: ${{secrets.ASC_ISSUER_ID}}
+      ASC_PRIVATE_KEY_B64: ${{secrets.ASC_PRIVATE_KEY_B64}}
+      IOS_DISTRIBUTION_P12_B64: ${{secrets.IOS_DISTRIBUTION_P12_B64}}
+      IOS_DISTRIBUTION_P12_PASSWORD: ${{secrets.IOS_DISTRIBUTION_P12_PASSWORD}}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Select Xcode 26
+        run: |
+          set -euo pipefail
+          XCODE=$(find /Applications -maxdepth 1 -name 'Xcode_26*.app' | sort | tail -1)
+          test -n "$XCODE"
+          sudo xcode-select --switch "$XCODE"
+          xcodebuild -version
+      - name: Checkout original MiniCPM app and apply isolated context selector
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none https://github.com/OpenBMB/MiniCPM-V-Apps.git "$RUNNER_TEMP/minicpm-upstream"
+          cd "$RUNNER_TEMP/minicpm-upstream"
+          git checkout --detach fa9d837e3d38dfde7a9484ec1cc6bc2e5bc9b420
+          git submodule update --init --recursive --depth 1
+          test "$(git rev-parse HEAD)" = fa9d837e3d38dfde7a9484ec1cc6bc2e5bc9b420
+          python3 "$GITHUB_WORKSPACE/integrations/minicpm-context/apply_context_overlay.py" "$PWD"
+          git diff --check
+      - name: Build, sign, export and upload only to the new MiniCPM app
+        run: |
+          set -euo pipefail
+          bash integrations/minicpm-context/private_testflight.sh "$RUNNER_TEMP/minicpm-upstream"
+      - name: Upload non-secret build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: minicpm-private-upload-logs
+          path: |
+            ${{runner.temp}}/minicpm-private-archive.log
+            ${{runner.temp}}/minicpm-private-export.log
+            ${{runner.temp}}/minicpm-private-upload.log
+          if-no-files-found: ignore
+          retention-days: 7
