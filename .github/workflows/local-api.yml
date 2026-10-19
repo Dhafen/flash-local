@@ -23,7 +23,7 @@ jobs:
         run: |
           set -o pipefail
           xcodebuild -list -json > ../local-api-schemes.json
-          python3 -c 'import json; d=json.load(open("../local-api-schemes.json")); s=(d.get("workspace") or d.get("project"))["schemes"]; assert "MinirunKit" in s, s; print("MinirunKit")' > ../local-api-scheme.txt
+          python3 -c 'import json; d=json.load(open("../local-api-schemes.json")); s=(d.get("workspace") or d.get("project"))["schemes"]; assert len(s)==1, s; print(s[0])' > ../local-api-scheme.txt
           xcodebuild test -scheme "$(cat ../local-api-scheme.txt)" -destination 'platform=macOS' \
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee ../local-api-controls.log | tail -70
           grep 'ORNITH_LOCAL_API realTCP=true auth=true json=true sse=true reasoningSeparated=true syntheticOnly=true phoneReachability=false' ../local-api-controls.log

@@ -382,7 +382,8 @@ final class OrnithLESAppModel {
                     }
                 }
             } catch { /* Await the inference owner and teardown below. */ }
-            let result = await task.value
+            var result = await task.value
+            if flag.isCancellationRequested { await worker.closeChat(); result = .failure(CancellationError()) }
             output.finish()
             if let index = chatMessages.firstIndex(where: { $0.id == response }) {
                 chatMessages[index].text = output.answer
@@ -398,6 +399,7 @@ final class OrnithLESAppModel {
                 chatReady = false; chatControl = nil
                 if !flag.isCancellationRequested { error = failure.localizedDescription }
                 status = "Genereringen stoppades. Aktivera snabbchatten för att fortsätta."
+                if flag.isCancellationRequested { await recoverAPIContext() }
             }
         }
     }
@@ -430,6 +432,16 @@ final class OrnithLESAppModel {
         apiID = nil; apiServer?.stop(); apiServer = nil
         isAPIRunning = false; apiAccessKey = ""; apiURLs = []; apiStatus = "Avstängd"
         if operationIsAPI { control?.cancel() }
+    }
+    private func recoverAPIContext() async {
+        guard apiServer != nil, !isShuttingDown else { return }
+        let recovery = LESControl(); control = recovery
+        do {
+            let check = try await worker.prepareChat(modelsRoot: modelsRoot, privateRoot: privateRoot, existing: nil,
+                control: recovery, progress: { _ in }, onCheck: { _ in })
+            guard check.nativeBenchmarkAdmitted, !recovery.isCancellationRequested else { throw CancellationError() }
+            numericalCheck = check; chatControl = recovery; chatReady = true; status = "API redo för nästa anrop."
+        } catch { await worker.closeChat(); status = "Aktivera snabbchatten igen för att återuppta API:t." }
     }
     /// The transport calls this before sending successful headers. All UI and
     /// API requests reserve the same owner; no second model context is loaded.
@@ -504,13 +516,7 @@ final class OrnithLESAppModel {
                 // Recreate only that context after awaiting native teardown;
                 // reuse the same process-local, source-bound numerical check.
                 if flag.isCancellationRequested, apiServer != nil, !isShuttingDown {
-                    let recovery = LESControl(); control = recovery
-                    do {
-                        let check = try await worker.prepareChat(modelsRoot: modelsRoot, privateRoot: privateRoot, existing: nil,
-                            control: recovery, progress: { _ in }, onCheck: { _ in })
-                        guard check.nativeBenchmarkAdmitted, !recovery.isCancellationRequested else { throw CancellationError() }
-                        numericalCheck = check; chatControl = recovery; chatReady = true; status = "API redo för nästa anrop."
-                    } catch { await worker.closeChat(); status = "Aktivera snabbchatten igen för att återuppta API:t." }
+                    await recoverAPIContext()
                 }
             }
         }

@@ -47,7 +47,7 @@ public final class LocalModelAPIServer: @unchecked Sendable {
                 self.onState(.ready(port: port, addresses: Self.localIPv4Addresses(loopbackOnly: loopbackOnly)))
             case .failed:
                 self.onState(.failed("API-servern kunde inte startas. Kontrollera port och behörighet till lokalt nätverk."))
-                self.stopOnQueue()
+                self.stopOnQueue(notify: false)
             default: break
             }
         }
@@ -66,11 +66,11 @@ public final class LocalModelAPIServer: @unchecked Sendable {
         listener.start(queue: queue)
     }
     public func stop() { queue.async { [weak self] in self?.stopOnQueue() } }
-    private func stopOnQueue() {
+    private func stopOnQueue(notify: Bool = true) {
         guard !stopped else { return }; stopped = true
         listener?.cancel(); listener = nil
         let active = Array(sessions.values); sessions.removeAll()
-        active.forEach { $0.finish() }; onState(.stopped)
+        active.forEach { $0.finish() }; if notify { onState(.stopped) }
     }
     deinit { listener?.cancel(); sessions.values.forEach { $0.finish() } }
 
