@@ -2,10 +2,19 @@
 import Foundation
 import XCTest
 import MinirunKit
+import OrnithLES
 @testable import MinirunApp
 
 @MainActor
 final class OrnithLESAppTests: XCTestCase {
+    func testFinishedAPILeaseDoesNotCancelAReusableNativeOwner() {
+        let completed = LESControl(), lease = LESRequestLease(completed)
+        lease.finish(); lease.cancel()
+        XCTAssertFalse(completed.isCancellationRequested)
+        let running = LESControl(), active = LESRequestLease(running)
+        active.cancel(); active.finish(); active.cancel()
+        XCTAssertTrue(running.isCancellationRequested)
+    }
     func testAPICannotListenWithoutAdmittedModelAndPreviewsDoNotOpenSockets() async {
         let model = OrnithLESAppModel.reviewPreview()
         model.startAPI(); XCTAssertFalse(model.isAPIRunning); XCTAssertTrue(model.apiAccessKey.isEmpty)

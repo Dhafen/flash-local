@@ -20,7 +20,7 @@ private enum LESChatPresentationError: Error, LocalizedError {
 
 /// Transport teardown can race a completed owner. A finished request may not
 /// cancel the reusable native context after its last event has been delivered.
-private final class LESRequestLease: @unchecked Sendable {
+final class LESRequestLease: @unchecked Sendable {
     private let lock = NSLock()
     private var finished = false
     private let control: LESControl

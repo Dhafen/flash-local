@@ -22,14 +22,16 @@ jobs:
         working-directory: .work/local-api-controls
         run: |
           set -o pipefail
-          xcodebuild test -scheme LocalAPIControls-Package -destination 'platform=macOS' \
+          xcodebuild -list -json > ../local-api-schemes.json
+          python3 -c 'import json; d=json.load(open("../local-api-schemes.json")); s=(d.get("workspace") or d.get("project"))["schemes"]; assert "MinirunKit" in s, s; print("MinirunKit")' > ../local-api-scheme.txt
+          xcodebuild test -scheme "$(cat ../local-api-scheme.txt)" -destination 'platform=macOS' \
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee ../local-api-controls.log | tail -70
           grep 'ORNITH_LOCAL_API realTCP=true auth=true json=true sse=true reasoningSeparated=true syntheticOnly=true phoneReachability=false' ../local-api-controls.log
       - name: Compile the identical server for iOS
         working-directory: .work/local-api-controls
         run: |
           set -o pipefail
-          xcodebuild build -scheme LocalAPIControls-Package -destination 'generic/platform=iOS Simulator' \
+          xcodebuild build -scheme "$(cat ../local-api-scheme.txt)" -destination 'generic/platform=iOS Simulator' \
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee ../local-api-ios-build.log | tail -30
       - uses: actions/upload-artifact@v4
         if: always()
@@ -38,5 +40,6 @@ jobs:
           path: |
             .work/local-api-controls.log
             .work/local-api-ios-build.log
+            .work/local-api-schemes.json
             .work/local-api-controls/source-manifest.json
           retention-days: 7
