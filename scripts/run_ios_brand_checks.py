@@ -38,8 +38,10 @@ def find_simulator(name: str = "iPhone 17 Pro Max") -> str:
         for dev in runtime
         if dev.get("name") == name and dev.get("isAvailable")
     ]
-    if len(matches) != 1:
-        raise RuntimeError(f"Expected exactly one available {name}; found {len(matches)}")
+    if not matches:
+        raise RuntimeError(f"No available {name} in simctl device list")
+    # A runner can expose the same device name under several iOS runtimes.
+    # Preserve the previous CI's first-available choice rather than rejecting it.
     return matches[0]
 
 
