@@ -289,7 +289,7 @@ struct OrnithGenerationControls: View {
         DisclosureGroup("Generering", isExpanded: $expanded) {
             VStack(alignment: .leading, spacing: 12) {
                 integerRow("Max token totalt", value: $options.maximumNewTokens)
-                Text("Tänkande och svar delar gränsen. 1–2 048 token per svar; snabbchattens kontext är 8 192 token.")
+                Text("Tänkande och svar delar gränsen. 1–4 096 token per svar; snabbchattens kontext är 8 192 token.")
                     .font(.caption).foregroundStyle(.secondary)
                 if options.enableThinking {
                     Toggle("Begränsa tänkandet", isOn: Binding(get: { options.thinkingBudget != nil },
