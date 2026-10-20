@@ -4,13 +4,13 @@ on:
     inputs:
       use_macos15:
         type: boolean
-        default: false
+        default: true
   workflow_dispatch:
     inputs:
       use_macos15:
-        description: 'Use the standard free macos-15 arm64 runner with the same pinned Xcode 26.2'
+        description: 'Use macos-15 arm64 with pinned Xcode 26.2 (uncheck for macos-26)'
         type: boolean
-        default: false
+        default: true
   push:
     branches: [codex/ornith-les-backend]
     paths:
@@ -32,7 +32,7 @@ defaults:
     shell: bash
 jobs:
   native-controls:
-    runs-on: ${{ inputs.use_macos15 && 'macos-15' || 'macos-26' }}
+    runs-on: ${{ (github.event_name != 'workflow_dispatch' || inputs.use_macos15) && 'macos-15' || 'macos-26' }}
     timeout-minutes: 35
     env:
       ORNITH_LES_CPU_CONTROL: '1'
