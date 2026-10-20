@@ -137,7 +137,7 @@ struct OrnithLESChatPage: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Ornith snabbchatt").font(.title2.bold())
-            Text("Experimentell motor · din befintliga GGUF · 4 096 token kontextgräns")
+            Text("Experimentell motor · din befintliga GGUF · \(model.contextCapacityTokens.formatted()) token kontextgräns")
                 .font(.caption).foregroundStyle(.secondary)
             Text(model.status).font(.callout).accessibilityIdentifier("ornith-chat-status")
             if let error = model.error { Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled) }
@@ -154,7 +154,7 @@ struct OrnithLESChatPage: View {
             OrnithPrefillControls(model: model, activate: activate)
             OrnithGenerationControls(options: $model.chatOptions).disabled(!model.canStart || model.isAPIRunning)
             if let progress = model.chatProgress, model.isBusy {
-                Text("Kontext: \(progress.promptTokensTotal) prompt + högst \(model.chatOptions.maximumNewTokens) nya / 4 096 token")
+                Text("Kontext: \(progress.promptTokensTotal) prompt + högst \(model.chatOptions.maximumNewTokens) nya / \(model.contextCapacityTokens.formatted()) token")
                     .font(.caption.monospacedDigit())
                 Text(String(format: "Appminne %.2f GB · läsanrop %.2f GB · %d token", Double(progress.footprintBytes) / 1e9,
                     Double(progress.ioBytesRead) / 1e9, progress.generatedTokens)).font(.caption.monospacedDigit())
@@ -166,7 +166,7 @@ struct OrnithLESChatPage: View {
                     Text(String(format: "%.2f token/s · prompt %.2f s · %d återanvända token", speed,
                         summary.prefillSeconds, summary.reusedPromptTokens)).font(.caption.monospacedDigit())
                 }
-                Text(String(format: "Prompt: %.2f token/s · kontext %d + %d / 4 096", Double(summary.evaluatedPromptTokens) / max(summary.prefillSeconds, 1e-9), summary.promptTokenIDs.count, summary.generatedTokenIDs.count))
+                Text(String(format: "Prompt: %.2f token/s · kontext %d + %d / %d", Double(summary.evaluatedPromptTokens) / max(summary.prefillSeconds, 1e-9), summary.promptTokenIDs.count, summary.generatedTokenIDs.count, model.contextCapacityTokens))
                     .font(.caption.monospacedDigit())
                 Text("\(summary.reasoningTokens) tänktoken · \(summary.forcedThinkingEndTokens) token för budgetstyrt avslut")
                     .font(.caption2).foregroundStyle(.secondary)
@@ -252,7 +252,7 @@ struct OrnithPrefillControls: View {
                     Text(proof.passed ? "Vald batch har klarat den korta logit- och expertkontrollen." : "Batchkontrollen avvek.")
                         .font(.caption).foregroundStyle(proof.passed ? Color.primary : Color.red)
                 }
-                Text("Kontextgräns: 4 096 token för prompt, tänkande och svar. Större kontext kräver egna minnes- och numeriktester.")
+                Text("Snabbchatten använder 8 192 token för prompt, tänkande och svar. Jämförelsens fasta benchmark kör fortfarande 4 096 token. Lång kontext behöver verifieras på enheten.")
                     .font(.caption).foregroundStyle(.secondary)
                 Button("Jämför vald batch med Auto") { model.startPrefillBenchmark() }.buttonStyle(.bordered)
                     .disabled(!model.canBenchmark || model.batchConfiguration == LESPrefillConfiguration())
@@ -289,7 +289,7 @@ struct OrnithGenerationControls: View {
         DisclosureGroup("Generering", isExpanded: $expanded) {
             VStack(alignment: .leading, spacing: 12) {
                 integerRow("Max token totalt", value: $options.maximumNewTokens)
-                Text("Tänkande och svar delar gränsen. 1–2 048 token; kontexten är fortsatt 4 096 token.")
+                Text("Tänkande och svar delar gränsen. 1–2 048 token per svar; snabbchattens kontext är 8 192 token.")
                     .font(.caption).foregroundStyle(.secondary)
                 if options.enableThinking {
                     Toggle("Begränsa tänkandet", isOn: Binding(get: { options.thinkingBudget != nil },
