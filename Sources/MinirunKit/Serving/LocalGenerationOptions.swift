@@ -12,11 +12,11 @@ public struct LocalGenerationOptions: Codable, Equatable, Sendable {
     public init() {}
     public var thinkingEnabled: Bool { enableThinking && thinkingBudget != 0 }
     public func validate() throws {
-        guard (1...2048).contains(maximumNewTokens) else {
-            throw LocalAPIError.invalid("max_tokens", "Välj 1–2048 token totalt för tänkande och svar.")
+        guard (1...4096).contains(maximumNewTokens) else {
+            throw LocalAPIError.invalid("max_tokens", "Välj 1–4096 token totalt för tänkande och svar.")
         }
         if let budget = thinkingBudget {
-            guard (0...2048).contains(budget), budget == 0 || !enableThinking || budget + 8 < maximumNewTokens else {
+            guard (0...4096).contains(budget), budget == 0 || !enableThinking || budget + 8 < maximumNewTokens else {
                 throw LocalAPIError.invalid("thinking_budget", "Tänkbudgeten måste lämna minst 9 token till avslut och svar.")
             }
         }
