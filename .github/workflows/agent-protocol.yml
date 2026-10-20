@@ -1,0 +1,32 @@
+name: Agent protocol metadata controls
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: agent-protocol-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  metadata-only:
+    # A portable original-template oracle avoids the observed arm64 capacity
+    # outage. This job cannot satisfy Metal, Swift, app or release gates.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Scoped client and existing Python controls
+        run: python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
+      - name: Original GGUF vocabulary and both templates without trained weights
+        run: python3 scripts/run_agent_tokenizer_controls.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: agent-protocol-controls
+          path: |
+            .work/agent-tokenizer-controls.log
+            .work/agent-tokenizer-manifest.json
+            .test-fixtures/qwen35-tokenizer-reference.json
+            .test-fixtures/ornith-tokenizer/qwen35-tokenizer-reference.json
+          retention-days: 7

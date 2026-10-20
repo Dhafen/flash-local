@@ -1,6 +1,11 @@
 name: Local API source controls
 on:
   workflow_dispatch:
+    inputs:
+      intel_controls:
+        description: 'Test-only Intel fallback when hosted macOS arm64 jobs cannot acquire a runner'
+        type: boolean
+        default: false
   push:
     branches: [codex/ornith-api-controls]
 concurrency:
@@ -10,7 +15,9 @@ permissions:
   contents: read
 jobs:
   api-controls:
-    runs-on: macos-26
+    # API controls have no MLX/Metal or trained model. Keep native/release CI
+    # unchanged; this explicit fallback addresses recorded arm64 capacity loss.
+    runs-on: ${{ inputs.intel_controls && 'macos-15-intel' || 'macos-26' }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
@@ -27,6 +34,8 @@ jobs:
           xcodebuild test -scheme "$(cat ../local-api-scheme.txt)" -destination 'platform=macOS' \
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee ../local-api-controls.log | tail -70
           grep 'ORNITH_LOCAL_API realTCP=true auth=true json=true sse=true reasoningSeparated=true syntheticOnly=true phoneReachability=false' ../local-api-controls.log
+          grep 'LOCAL_API_TOOL_ROUNDTRIP realTCP=true structuredArguments=true matchedToolResult=true json=true sse=true syntheticProvider=true trainedInference=false phoneReachability=false' ../local-api-controls.log
+          grep 'LOCAL_API_CREDENTIAL realKeychain=true newOwnerRetains=true explicitRotation=true invalidWriteAtomic=true noCredentialLogged=true' ../local-api-controls.log
       - name: Compile the identical server for iOS
         working-directory: .work/local-api-controls
         run: |

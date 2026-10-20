@@ -2,9 +2,18 @@
 
 Development is isolated on `codex/security-ai-server`, based on `95ac8b0`.
 The installed Ornith Q4_K_M, REAM, LES, QPack and conversations are retained.
-No inference mathematics, model quantization, CI, signing or TestFlight
+No inference mathematics, model quantization, main CI, signing or TestFlight
 configuration is changed by this integration. Host controls and physical
 acceptance are separate gates; this document is not a delivery receipt.
+
+Test-only capacity workaround: runs [39465263876](https://github.com/Dhafen/flash-local/actions/runs/39465263876)
+and [39465270366](https://github.com/Dhafen/flash-local/actions/runs/39465270366)
+failed before executing any step. GitHub annotations report that hosted macOS
+arm64 runners were not acquired. The isolated API controls now have an explicit
+Intel fallback with the same Xcode/source/tests; a separate Linux job validates
+the portable original-template oracle and Python client. Neither bypasses
+Apple-silicon LES/QPack, integrated app, visual or archive gates. Only standard
+runners in this public repository are used.
 
 ## Protocol and execution boundary
 
