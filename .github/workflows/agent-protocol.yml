@@ -1,6 +1,8 @@
 name: Agent protocol metadata controls
 on:
   workflow_dispatch:
+  push:
+    branches: [codex/security-ai-server]
 permissions:
   contents: read
 concurrency:
