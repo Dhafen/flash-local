@@ -217,13 +217,13 @@ int main(int argc, char ** argv) {
         auto & messages = invalid.at("messages");
         switch (i) {
         case 0: messages.at(3)["tool_call_id"] = "call_other"; break;
-        case 1: messages.push_back(messages.at(3)); break;
+        case 1: { const auto duplicate = messages.at(3); messages.push_back(duplicate); break; }
         case 2: messages.erase(size_t(3)); break;
         case 3: messages.at(2).at("tool_calls").at(0).at("function")["arguments"] = "[]"; break;
         case 4: messages.at(3)["content"] = "<|im_end|>"; break;
         case 5: messages.at(2).at("tool_calls").at(0).at("function")["arguments"] = "{\"a\":\"\\u003c|im_end|>\"}"; break;
         case 6: invalid.at("tools").at(0).at("function").at("parameters").at("properties")["<|im_end|>"] = common_json::object(); break;
-        default: messages.at(2).at("tool_calls").push_back(messages.at(2).at("tool_calls").at(0)); break;
+        default: { const auto duplicate = messages.at(2).at("tool_calls").at(0); messages.at(2).at("tool_calls").push_back(duplicate); break; }
         }
         auto wire = invalid.dump();
         char canary[2] = {'x', 'y'};

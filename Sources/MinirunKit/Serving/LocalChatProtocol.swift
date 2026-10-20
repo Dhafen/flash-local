@@ -206,16 +206,63 @@ public struct LocalChatRequest: Sendable {
     }
 }
 
+/// Measurements from the actual inference owner. Missing measurements remain
+/// absent; HTTP timing or a synthetic provider never substitutes GPU evidence.
+public struct LocalInferenceMetrics: Sendable {
+    public let modelSHA256: String
+    public let contextTokens, evaluatedPromptTokens, reusedPromptTokens, decodeForwardPasses: Int
+    public let prefillSeconds, decodeSeconds, elapsedSeconds: Double
+    public let prefillIOBytes, decodeIOBytes, peakMemoryBytes: UInt64
+    public let thermalStateAtStart, maximumThermalState: Int
+    public let platform, deviceIdentifier, appBuild, sourceRevision, nativeRevision: String?
+    public let memoryBudgetBytes: UInt64?
+    public init(modelSHA256: String, contextTokens: Int, evaluatedPromptTokens: Int, reusedPromptTokens: Int,
+                decodeForwardPasses: Int, prefillSeconds: Double, decodeSeconds: Double, elapsedSeconds: Double,
+                prefillIOBytes: UInt64, decodeIOBytes: UInt64, peakMemoryBytes: UInt64,
+                thermalStateAtStart: Int, maximumThermalState: Int, platform: String? = nil,
+                deviceIdentifier: String? = nil, appBuild: String? = nil, sourceRevision: String? = nil,
+                nativeRevision: String? = nil, memoryBudgetBytes: UInt64? = nil) {
+        self.modelSHA256 = modelSHA256; self.contextTokens = contextTokens
+        self.evaluatedPromptTokens = evaluatedPromptTokens; self.reusedPromptTokens = reusedPromptTokens
+        self.decodeForwardPasses = decodeForwardPasses; self.prefillSeconds = prefillSeconds
+        self.decodeSeconds = decodeSeconds; self.elapsedSeconds = elapsedSeconds
+        self.prefillIOBytes = prefillIOBytes; self.decodeIOBytes = decodeIOBytes; self.peakMemoryBytes = peakMemoryBytes
+        self.thermalStateAtStart = thermalStateAtStart; self.maximumThermalState = maximumThermalState
+        self.platform = platform; self.deviceIdentifier = deviceIdentifier; self.appBuild = appBuild
+        self.sourceRevision = sourceRevision; self.nativeRevision = nativeRevision; self.memoryBudgetBytes = memoryBudgetBytes
+    }
+    var json: [String: Any] {
+        var value: [String: Any] = ["model_sha256": modelSHA256, "context_capacity_tokens": contextTokens, "full_model_numerics_verified": false,
+         "evaluated_prompt_tokens": evaluatedPromptTokens, "reused_prompt_tokens": reusedPromptTokens,
+         "decode_forward_passes": decodeForwardPasses, "prefill_seconds": prefillSeconds,
+         "decode_seconds": decodeSeconds, "elapsed_seconds": elapsedSeconds,
+         "prefill_io_bytes": prefillIOBytes, "decode_io_bytes": decodeIOBytes, "peak_memory_bytes": peakMemoryBytes,
+         "thermal_state_at_start": thermalStateAtStart, "maximum_thermal_state": maximumThermalState]
+        for (key, entry) in [("platform", platform), ("device_identifier", deviceIdentifier), ("app_build", appBuild),
+                             ("source_revision", sourceRevision), ("native_revision", nativeRevision)] {
+            if let entry { value[key] = entry }
+        }
+        if let memoryBudgetBytes { value["memory_budget_bytes"] = memoryBudgetBytes }
+        return value
+    }
+}
+
 public struct LocalCompletionUsage: Sendable {
     public let promptTokens, completionTokens, reasoningTokens, forcedTokens: Int
     public let finishReason: String
-    public init(promptTokens: Int, completionTokens: Int, reasoningTokens: Int, forcedTokens: Int, finishReason: String) {
+    public let metrics: LocalInferenceMetrics?
+    public init(promptTokens: Int, completionTokens: Int, reasoningTokens: Int, forcedTokens: Int, finishReason: String,
+                metrics: LocalInferenceMetrics? = nil) {
         self.promptTokens = promptTokens; self.completionTokens = completionTokens
-        self.reasoningTokens = reasoningTokens; self.forcedTokens = forcedTokens; self.finishReason = finishReason
+        self.reasoningTokens = reasoningTokens; self.forcedTokens = forcedTokens; self.finishReason = finishReason; self.metrics = metrics
     }
-    var json: [String: Any] { ["prompt_tokens": promptTokens, "completion_tokens": completionTokens,
+    var json: [String: Any] {
+        var value: [String: Any] = ["prompt_tokens": promptTokens, "completion_tokens": completionTokens,
         "total_tokens": promptTokens + completionTokens,
-        "completion_tokens_details": ["reasoning_tokens": reasoningTokens], "forced_thinking_end_tokens": forcedTokens] }
+        "completion_tokens_details": ["reasoning_tokens": reasoningTokens], "forced_thinking_end_tokens": forcedTokens]
+        if let metrics { value["flash_local"] = metrics.json }
+        return value
+    }
 }
 public enum LocalChatEvent: Sendable {
     case delta(content: String, reasoning: String)

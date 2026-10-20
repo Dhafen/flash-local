@@ -35,7 +35,7 @@ public enum OrnithThinkingPreset: String, CaseIterable, Identifiable, Sendable {
     public var id: String { rawValue }
     public var title: String {
         switch self {
-        case .off: "0"
+        case .off: "Off"
         case .small: "Small"
         case .medium: "Medium"
         case .ultra: "Ultra"

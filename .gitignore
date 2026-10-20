@@ -35,3 +35,7 @@ __pycache__/
 /brand-ios/
 /testflight-tools-check.json
 /testflight-delivery.json
+# Explicit local server/agent acceptance outputs from the operator guide.
+/phone-acceptance*.json
+/assessment*.jsonl
+/dry.jsonl

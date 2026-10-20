@@ -294,7 +294,7 @@ struct OrnithGenerationControls: View {
                     }
                 }.pickerStyle(.segmented)
                     .accessibilityIdentifier("ornith-thinking-preset")
-                Text("0: inget tänkande · Small: 256 · Medium: 512 · Ultra: 2 048 tänktoken. Svarstaket sätts automatiskt (1 536–4 096 token). Kontexten är 8 192 token inklusive prompt och svar.")
+                Text("Off: inget tänkande · Small: 256 · Medium: 512 · Ultra: 2 048 tänktoken. Svarstaket sätts automatiskt (1 536–4 096 token). Kontexten är 8 192 token inklusive prompt och svar.")
                     .font(.caption).foregroundStyle(.secondary)
                 HStack {
                     Text("Temperatur")
@@ -352,6 +352,14 @@ struct OrnithAPIPage: View {
                         .disabled(!model.apiAccessKey.isEmpty || !model.canStart)
                 }
                 if model.apiAccessKey.isEmpty {
+                    SecureField("Egen API-nyckel (valfritt)", text: $model.apiKeyDraft)
+                        .textFieldStyle(.roundedBorder).privacySensitive()
+                        .disabled(!model.canStart)
+                        .accessibilityIdentifier("ornith-api-key-input")
+                    Text("Tomt fält använder den sparade nyckeln eller skapar en ny. Egen nyckel: 32–128 tecken utan mellanslag. Sparas i enhetens nyckelring.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Button("Skapa ny API-nyckel", systemImage: "arrow.clockwise") { model.rotateAPIKey() }
+                        .disabled(!model.canStart)
                     Button("Starta lokalt API") { model.startAPI() }.buttonStyle(.borderedProminent)
                         .disabled(!model.canStart || !model.chatReady || model.batchSettingsChanged)
                 } else {
@@ -372,7 +380,7 @@ struct OrnithAPIPage: View {
                         Spacer()
                         Button("Kopiera nyckel", systemImage: "key") { copy(model.apiAccessKey) }
                     }
-                    Text("Nyckeln skapas på nytt när servern startas och sparas inte. Ange den som API key i klienten.")
+                    Text("Nyckeln sparas i enhetens nyckelring och fungerar efter omstart. Ange den som API key i klienten. Stoppa API:t för att byta nyckel.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Toggle("Behåll skärmen vaken", isOn: $model.apiKeepAwake)
@@ -382,9 +390,16 @@ struct OrnithAPIPage: View {
                     .font(.callout)
                 Text("Låt appen vara öppen i förgrunden. Låsning, bakgrund eller minnestryck stoppar servern. Chatten och API:t delar motorn och hanterar ett anrop åt gången.")
                     .font(.caption).foregroundStyle(.secondary)
-                Text("Stöd: /v1/models, /v1/chat/completions och strömmande textsvar. Resonemang skickas separat som reasoning_content. Strukturerade verktygsanrop och Responses API stöds ännu inte.")
+                Text("Stöd: /v1/models, /v1/chat/completions, strömmande svar och validerade function/tool calls. Datorn utför verktygen och skickar tillbaka resultatet. Resonemang skickas separat som reasoning_content.")
                     .font(.caption).foregroundStyle(.secondary)
                 Text("\(model.apiCompletedRequests) slutförda API-anrop").font(.caption.monospacedDigit())
+                if let summary = model.apiLastSummary {
+                    Text(String(format: "%.2f token/s · prompt %.2f s · minne %.2f GB", summary.decodeTokensPerSecond ?? 0,
+                        summary.prefillSeconds, Double(summary.maximumObservedFootprintBytes) / 1e9))
+                        .font(.caption.monospacedDigit())
+                    Text("Kontext \(summary.promptTokenIDs.count) + \(summary.generatedTokenIDs.count) / \(model.contextCapacityTokens) · \(summary.reusedPromptTokens) återanvända token")
+                        .font(.caption.monospacedDigit())
+                }
                 OrnithGenerationControls(options: $model.chatOptions).disabled(!model.canStart || model.isAPIRunning)
                 OrnithPromptControls(model: model)
                 OrnithPrefillControls(model: model, activate: activate)

@@ -1,0 +1,126 @@
+# Flash Local security-agent server
+
+Development is isolated on `codex/security-ai-server`, based on `95ac8b0`.
+The installed Ornith Q4_K_M, REAM, LES, QPack and conversations are retained.
+No inference mathematics, model quantization, CI, signing or TestFlight
+configuration is changed by this integration. Host controls and physical
+acceptance are separate gates; this document is not a delivery receipt.
+
+## Protocol and execution boundary
+
+The foreground server implements authenticated `/v1/models`,
+`/v1/chat/completions`, JSON and SSE. Function definitions, `tool_choice`
+(`auto`, `none`, `required`, named), `parallel_tool_calls`, assistant
+`tool_calls` and matching `role: tool` results are supported. The installed
+Ornith template's XML envelopes become OpenAI function calls with JSON-string
+arguments. History arguments become mappings only for the original Jinja
+renderer. The tokenizer, weights, routing and graph are unchanged.
+
+Arguments must match a bounded JSON Schema subset. Local references, common
+unions, exact JSON types, required fields, enums and size/numeric bounds are
+checked. Unsupported validation keywords fail with 400. This is validation of
+completed output, not grammar-constrained sampling or a guarantee that the
+model always chooses a correct tool. Undeclared, malformed, incomplete or
+token-limited calls fail with 502 and emit no executable call. Tool-enabled
+streams withhold answer/call payloads until validation; reasoning still
+streams separately. Results must resolve each outstanding call ID once.
+Structural tokenizer control strings in message/tool data are rejected.
+
+The phone never executes tools. `scripts/flash_local_agent.py` is an optional
+Kali-compatible standard-library client. Other OpenAI-compatible frameworks
+can supply their own function schemas. `/v1/responses`, image input and
+general constrained `response_format` are not implemented.
+
+The key is configurable and stored in the device-local Keychain. A blank
+configuration field reuses the saved key; rotating it requires stopping the
+server. HTTP is intended for the trusted LAN. iOS foreground/locking,
+IPv4/Wi-Fi/Ethernet and USB forwarding limits remain as documented in
+[the API guide](ORNITH-LOCAL-API.md). The same admitted inference context serves
+chat and API serially. Disconnect cancels the owner before context recovery.
+
+## First phone acceptance test
+
+After a source-matched build passes and becomes available in TestFlight,
+update without uninstalling. Activate Ornith, open **API**, start the server
+and keep the app in the foreground. On Kali, enter the displayed key privately:
+
+```sh
+read -r -s -p 'Local API key: ' FLASH_LOCAL_API_KEY
+export FLASH_LOCAL_API_KEY
+printf '\n'
+python3 scripts/flash_local_verify.py \
+  --base-url http://IPHONE_LAN_IP:8080/v1 --output phone-acceptance.json
+```
+
+This performs authenticated model discovery, a wrong-key rejection and real
+JSON/SSE function-call round trips. The computer adds 50+5 and returns a new
+random receipt after the model calls its function; the model must read that
+receipt from the result. No target is scanned. Missing native measurements
+remain missing. Server-reported hardware is distinguished from independent
+physical verification.
+
+Add `--benchmark` for six real runs: Off/Small/Medium, twice each with the same
+prompt and model. Records include actual token counts, native prefill/decode,
+I/O, peak footprint, thermal state, exact model SHA and app/source identity.
+Runs below 128 output tokens are flagged. These are three configurations of
+one model, not the required comparison of three models. OS-cache coldness is
+not controlled and thermal state is not a temperature in degrees.
+
+## Scoped Kali workflow
+
+Create a private scope file for an authorized lab or engagement. Replace the
+documentation-only address with an explicitly authorized target:
+
+```json
+{"authorized":true,"authorization_id":"your-ROE-reference","ips":["192.0.2.10"],"ports":[80,443],"allowed_tools":["tcp_connect","http_headers"]}
+```
+
+An optional `expires_at` is an ISO-8601 timestamp with a timezone. Validate
+without making any API or target connection:
+
+```sh
+python3 scripts/flash_local_agent.py --scope scope.json --log dry.jsonl --dry-run
+```
+
+Then run with the actual phone address:
+
+```sh
+python3 scripts/flash_local_agent.py --scope scope.json \
+  --base-url http://IPHONE_LAN_IP:8080/v1 --log assessment.jsonl
+```
+
+Each tool needs approval by default. `--approval scope` explicitly admits
+the file's limited read-only tools/targets; `--approval deny` executes none.
+Only bounded TCP connect and HTTP HEAD are implemented. No shell, arbitrary
+command, exploit, credentials, redirects or target discovery is supplied.
+Scope is independently checked after model output and again after approval.
+Steps and duration are bounded, repeated calls are blocked, Ctrl-C stops the
+loop, complete tool groups are compacted together, and a new local JSONL log
+records proposals, observations, usage and outcome without the API key.
+The old text-only prototype remains available separately.
+
+## Candidate models and remaining gates
+
+The first comparison set is the existing **Ornith 35B-A3B Q4_K_M**, a
+**Qwen3.5-4B Q4** candidate and a **Qwen3.5-2B Q4** candidate. Dense candidates
+may avoid expert I/O if their complete working set fits the measured budget;
+that is an engineering hypothesis, not a phone benchmark. Their exact GGUF
+artifacts, template/quantization validation and production runner admission
+must precede inference. General model import and these additional runners
+are not yet implemented. Do not download replacement weights for this branch.
+
+The [4B publisher card](https://huggingface.co/Qwen/Qwen3.5-4B) and
+[2B publisher card](https://huggingface.co/Qwen/Qwen3.5-2B) document tool use;
+the 2B publisher also warns about thinking loops. Evaluate bounded modes and
+completion reliability explicitly. [Ornith's publisher](https://huggingface.co/ornith-ai/Ornith-1.5-35B-A3B)
+documents the XML tool parser. [Liquid's 1.2B card](https://huggingface.co/LiquidAI/LFM2.5-1.2B-Instruct)
+supports agent/tool tasks but advises against programming and knowledge-heavy
+work, so it is not the primary coding candidate. Publisher scores are not
+measurements of these phone quantizations.
+
+Current chat capacity is configured to 8,192 total tokens with dynamic native
+memory admission. Actual 8K reliability, 16K/32K/65K operation, full trained
+numerical validation, cross-model quality/speed, sustained phone LAN sessions
+and real Kali interoperability remain required physical milestones. The
+last supplied controlled phone performance remains the build-123 evidence;
+the server integration itself establishes no new token/s result.

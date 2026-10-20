@@ -6,6 +6,21 @@ Current target: the official 21.7 GB Ornith 1.5 35B-A3B Q4_K_M GGUF, a total pro
 
 ## Development status
 
+The isolated [security-agent server integration](docs/SECURITY-AI-SERVER.md)
+adds validated OpenAI function calls and matched tool-result history using the
+installed Ornith GGUF's original template, configurable device-Keychain API
+credentials, native API measurements and a scoped Kali client. New Swift,
+native, app and iOS checks are pending; no new phone result or TestFlight
+delivery is claimed. Existing inference backends and installed data remain.
+The last independently confirmed private delivery is **0.1.0 (148)**,
+source `a90b052c839d111cf8bb9b29b00d84be4e57deef`,
+[delivery run](https://github.com/Dhafen/flash-local/actions/runs/39401960146).
+Current source configures 8,192 total context tokens; trained 8K reliability
+and additional model runners remain unverified. See the integration guide for
+the real phone test and candidate-model comparison still required.
+
+## Retained build-126 checkpoint
+
 An upgrade regression in build 126 rejects a prepared cache sealed by the
 previous native engine. A repair now rebuilds this derivative from the already
 verified local GGUF, verifies the new files and publishes them with recoverable

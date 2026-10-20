@@ -168,6 +168,11 @@ final class LocalModelAPITests: XCTestCase {
         XCTAssertThrowsError(try large.append(Data(repeating: 65, count: 16385)))
     }
     func testKeyAndNetworkBoundary() throws {
+        for invalid in ["", String(repeating: "a", count: 31), String(repeating: "a", count: 129),
+                        String(repeating: "a", count: 32) + " ", String(repeating: "å", count: 32)] {
+            XCTAssertThrowsError(try LocalAPIKeyStore.validate(invalid))
+        }
+        XCTAssertNoThrow(try LocalAPIKeyStore.validate(String(repeating: "A", count: 32)))
         XCTAssertTrue(LocalAPIWire.authenticated("Bearer " + key, key: key))
         XCTAssertFalse(LocalAPIWire.authenticated("Bearer " + String(key.dropLast()) + "X", key: key))
         XCTAssertFalse(LocalAPIWire.authenticated(nil, key: key))
@@ -180,6 +185,38 @@ final class LocalModelAPITests: XCTestCase {
             XCTAssertFalse(LocalModelAPIServer.isLocalIPv4(ip))
         }
         XCTAssertFalse(LocalModelAPIServer.isLocalIPv4("192.168.1.1", loopbackOnly: true))
+    }
+    func testKeychainCredentialSurvivesNewOwnerAndExplicitRotation() throws {
+        let service = "com.dhafen.flashlocal.tests." + UUID().uuidString
+        let store = LocalAPIKeyStore(service: service)
+        defer { try? store.delete() }
+        XCTAssertNil(try store.load())
+        let first = try store.loadOrCreate()
+        XCTAssertEqual(try LocalAPIKeyStore(service: service).loadOrCreate(), first)
+        let replacement = try LocalModelAPIServer.makeAccessKey()
+        try store.save(replacement)
+        XCTAssertEqual(try store.load(), replacement); XCTAssertNotEqual(first, replacement)
+        XCTAssertThrowsError(try store.save("too short"))
+        XCTAssertEqual(try store.load(), replacement)
+        try store.delete(); XCTAssertNil(try store.load())
+        print("LOCAL_API_CREDENTIAL realKeychain=true newOwnerRetains=true explicitRotation=true invalidWriteAtomic=true noCredentialLogged=true")
+    }
+    func testInferenceMeasurementsAreOptionalAndNeverInventedByTheWireLayer() throws {
+        let usage = LocalCompletionUsage(promptTokens: 20, completionTokens: 128, reasoningTokens: 0, forcedTokens: 0, finishReason: "length")
+        XCTAssertNil(usage.json["flash_local"])
+        let metrics = LocalInferenceMetrics(modelSHA256: String(repeating: "a", count: 64), contextTokens: 8192,
+            evaluatedPromptTokens: 18, reusedPromptTokens: 2, decodeForwardPasses: 128,
+            prefillSeconds: 2, decodeSeconds: 32, elapsedSeconds: 34, prefillIOBytes: 1024,
+            decodeIOBytes: 4096, peakMemoryBytes: 2_000_000_000, thermalStateAtStart: 0, maximumThermalState: 1)
+        let measured = LocalCompletionUsage(promptTokens: 20, completionTokens: 128, reasoningTokens: 0, forcedTokens: 0,
+            finishReason: "length", metrics: metrics)
+        let data = try JSONSerialization.data(withJSONObject: measured.json)
+        let decoded = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let values = try XCTUnwrap(decoded["flash_local"] as? [String: Any])
+        XCTAssertEqual(values["decode_forward_passes"] as? Int, 128)
+        XCTAssertEqual(values["decode_seconds"] as? Double, 32)
+        XCTAssertEqual(values["reused_prompt_tokens"] as? Int, 2)
+        XCTAssertNil(values["gpu_seconds"])
     }
     func testErrorEnvelopeAndStreamingNullFieldsAreValidJSON() throws {
         let data = LocalAPIError(status: 401, message: "Use a local key").encoded()
@@ -362,6 +399,21 @@ final class LocalModelAPITests: XCTestCase {
         let task = session.dataTask(with: request(url.appendingPathComponent("v1/chat/completions"), method: "POST", json: try body(["stream": true]))) { _, _, _ in }
         task.resume(); await fulfillment(of: [began], timeout: 10); task.cancel()
         await fulfillment(of: [cancelled], timeout: 10)
+    }
+    func testAToolEnvelopeAtTheTokenLimitCannotBeReportedAsACompletedAction() async throws {
+        let (server, base) = try await listen { _ in
+            let events = AsyncThrowingStream<LocalChatEvent, Error>.makeStream()
+            events.continuation.yield(.delta(content: "<tool_call>{\"name\":\"local_sum\",\"arguments\":{\"a\":50,\"b\":5}}</tool_call>", reasoning: ""))
+            events.continuation.yield(.complete(.init(promptTokens: 10, completionTokens: 10, reasoningTokens: 0, forcedTokens: 0, finishReason: "length")))
+            events.continuation.finish()
+            return .init(events: events.stream, cancel: {})
+        }
+        defer { server.stop() }
+        let session = URLSession(configuration: .ephemeral); defer { session.invalidateAndCancel() }
+        let (data, response) = try await session.data(for: request(base.appendingPathComponent("v1/chat/completions"), method: "POST", json: body(["tools": [sumTool()]])))
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 502)
+        let decoded = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertNil(decoded["choices"]); XCTAssertNotNil(decoded["error"])
     }
 }
 

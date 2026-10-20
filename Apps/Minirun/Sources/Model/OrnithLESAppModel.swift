@@ -265,6 +265,8 @@ final class OrnithLESAppModel {
     private(set) var apiAccessKey = ""
     private(set) var apiURLs: [String] = []
     private(set) var apiCompletedRequests = 0
+    var apiKeyDraft = ""
+    private(set) var apiLastSummary: OrnithLESChatGeneration.Summary?
     var apiPort = 8080
     var apiKeepAwake = true
     @ObservationIgnored private var apiServer: LocalModelAPIServer?
@@ -540,9 +542,12 @@ final class OrnithLESAppModel {
         guard canStart, chatReady, !batchSettingsChanged, apiServer == nil else { return }
         guard (1024...65535).contains(apiPort) else { error = "Välj en port mellan 1024 och 65535."; return }
         do {
-            let key = try LocalModelAPIServer.makeAccessKey(), id = UUID()
+            let store = LocalAPIKeyStore()
+            if !apiKeyDraft.isEmpty { try store.save(apiKeyDraft) }
+            let key = try store.loadOrCreate(), id = UUID()
             guard systemPrompt.utf8.count <= 32768 else { throw LocalAPIError.invalid("system", "Systemprompt får vara högst 32 KiB.") }
-            apiAccessKey = key; apiID = id; apiSystemPrompt = systemPrompt; apiStatus = "Startar lokalt API…"; error = nil
+            apiAccessKey = key; apiKeyDraft = ""; apiID = id; apiSystemPrompt = systemPrompt
+            apiStatus = "Startar lokalt API…"; error = nil
             apiServer = try LocalModelAPIServer(key: key, port: UInt16(apiPort), defaults: chatOptions, handler: { [weak self] request in
                 guard let self else { throw LocalAPIError(status: 503, message: "Phone service is closed") }
                 return try await self.openAPIRequest(request)
@@ -566,6 +571,13 @@ final class OrnithLESAppModel {
         apiID = nil; apiServer?.stop(); apiServer = nil; apiSystemPrompt = ""
         isAPIRunning = false; apiAccessKey = ""; apiURLs = []; apiStatus = "Avstängd"
         if operationIsAPI { control?.cancel() }
+    }
+    func rotateAPIKey() {
+        guard canStart, apiServer == nil else { return }
+        do {
+            try LocalAPIKeyStore().save(LocalModelAPIServer.makeAccessKey())
+            apiKeyDraft = ""; apiStatus = "Ny nyckel sparad på enheten. Kopiera den när API:t startats."; error = nil
+        } catch { self.error = error.localizedDescription }
     }
     private func recoverAPIContext() async {
         guard apiServer != nil, !isShuttingDown else { return }
@@ -649,9 +661,39 @@ final class OrnithLESAppModel {
             lease.finish()
             switch result {
             case .success(let summary):
+                apiLastSummary = summary
+                do {
+                    let parsed = try LocalToolOutput.parse(text.answer, tools: request.tools, choice: request.toolChoice,
+                        parallel: request.parallelToolCalls)
+                    if !parsed.calls.isEmpty, summary.stopReason != "endOfGeneration" {
+                        throw LocalAPIError(status: 502, message: "Function generation reached its token limit", parameter: "tool_calls")
+                    }
+                } catch {
+                    output.continuation.finish(throwing: error)
+                    self.error = error.localizedDescription; status = "API: verktygsanropet godkändes inte. Motorn är redo för ett nytt anrop."
+                    break
+                }
+                #if targetEnvironment(simulator)
+                let platform = "iOSSimulator"
+                #elseif os(iOS)
+                let platform = "iOSDevice"
+                #else
+                let platform = "macOS"
+                #endif
                 output.continuation.yield(.complete(.init(promptTokens: summary.promptTokenIDs.count,
                     completionTokens: summary.generatedTokenIDs.count, reasoningTokens: summary.reasoningTokens,
-                    forcedTokens: summary.forcedThinkingEndTokens, finishReason: summary.stopReason == "endOfGeneration" ? "stop" : "length")))
+                    forcedTokens: summary.forcedThinkingEndTokens, finishReason: summary.stopReason == "endOfGeneration" ? "stop" : "length",
+                    metrics: .init(modelSHA256: numericalCheck?.modelSHA256 ?? "", contextTokens: contextCapacityTokens,
+                        evaluatedPromptTokens: summary.evaluatedPromptTokens, reusedPromptTokens: summary.reusedPromptTokens,
+                        decodeForwardPasses: summary.decodeForwardPasses, prefillSeconds: summary.prefillSeconds,
+                        decodeSeconds: summary.decodeForwardSeconds, elapsedSeconds: summary.elapsedSeconds,
+                        prefillIOBytes: summary.prefillIOBytes, decodeIOBytes: summary.decodeIOBytes,
+                        peakMemoryBytes: summary.maximumObservedFootprintBytes, thermalStateAtStart: summary.thermalStateAtStart,
+                        maximumThermalState: summary.maximumThermalState, platform: platform,
+                        deviceIdentifier: Sysctl.string("hw.machine"),
+                        appBuild: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String,
+                        sourceRevision: BuildInfo.gitRevision, nativeRevision: LESContext.revision,
+                        memoryBudgetBytes: summary.memoryPlan.processCeilingBytes))))
                 output.continuation.finish(); apiCompletedRequests += 1
                 status = "API: klart · \(summary.generatedTokenIDs.count) token"
             case .failure(let failure):

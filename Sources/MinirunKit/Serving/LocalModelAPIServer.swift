@@ -27,9 +27,7 @@ public final class LocalModelAPIServer: @unchecked Sendable {
     }
     public init(key: String, port: UInt16 = 8080, loopbackOnly: Bool = false, defaults: LocalGenerationOptions = .init(),
                 handler: @escaping Handler, onState: @escaping @Sendable (State) -> Void) throws {
-        guard key.utf8.count >= 32, key.utf8.count <= 128, key.utf8.allSatisfy({ (33...126).contains($0) }) else {
-            throw LocalAPIError(status: 500, message: "Invalid local access key")
-        }
+        try LocalAPIKeyStore.validate(key)
         try defaults.validate()
         self.key = key; self.handler = handler; self.onState = onState; self.loopbackOnly = loopbackOnly; self.defaults = defaults
         let parameters = NWParameters.tcp
@@ -218,6 +216,9 @@ private final class LocalAPISession: @unchecked Sendable {
             guard let usage else { throw LocalAPIError(status: 500, message: "Generation ended without usage") }
             let result = try LocalToolOutput.parse(answer, tools: request.tools, choice: request.toolChoice,
                 parallel: request.parallelToolCalls)
+            guard result.calls.isEmpty || usage.finishReason == "stop" else {
+                throw LocalAPIError(status: 502, message: "Function generation reached its limit before a normal completion", parameter: "tool_calls")
+            }
             let finish = result.calls.isEmpty ? usage.finishReason : "tool_calls"
             await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
                 queue.async { self.generation = nil; continuation.resume() }
