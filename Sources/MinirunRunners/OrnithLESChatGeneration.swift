@@ -43,7 +43,7 @@ public final class OrnithLESChatGeneration {
     private var stateTokens: [Int] = []
     private var stateLogits: [Float] = []
     private var running = false
-    public let contextTokens = 4096
+    public let contextTokens = 8192
 
     static func validatedPrefill(_ check: LESNumericalCheck, modelSHA256: String, nativeRevision: String) throws -> Int {
         guard check.modelSHA256 == modelSHA256, check.nativeRevision == nativeRevision,
@@ -78,7 +78,7 @@ public final class OrnithLESChatGeneration {
         self.prefillConfiguration = prefillConfiguration; self.prefillCheck = prefillCheck
         self.artifact = artifact; self.control = control
         tokenizer = try CanonicalQwen35Tokenizer(artifact: artifact)
-        let plan = try LESBenchmark.plan(artifact, context: 4096, depth: 0, pageCache: true,
+        let plan = try LESBenchmark.plan(artifact, context: 8192, depth: 0, pageCache: true,
             phase: "chat.omniPageCache", physicalBatchTokens: batch.1, onAdmission: onAdmission)
         native = try LESContext(artifact: artifact, prepared: prepared, plan: plan, control: control)
         guard native.vocabularySize == tokenizer.vocabularySize else {
