@@ -98,6 +98,7 @@ public final class OrnithLESChatGeneration {
         return try generate(messages: messages, options: options, onEvent: onEvent)
     }
     public func generate(messages: [Qwen35ChatMessage], options: LocalGenerationOptions,
+                         tools: [LocalToolDefinition] = [],
                          onEvent: (Qwen4ExpTextGeneration.Event) throws -> Void) throws -> Summary {
         try options.validate()
         guard !running else { throw GGUFError.limit("Native inference is already running") }
@@ -108,7 +109,7 @@ public final class OrnithLESChatGeneration {
         try artifact.assertUnchanged()
         if control.shouldAbort() { throw CancellationError() }
         let prompt = try tokenizer.chat(messages, maximumTokens: contextTokens - maximumNewTokens,
-            enableThinking: options.thinkingEnabled).tokenIDs
+            enableThinking: options.thinkingEnabled, tools: tools).tokenIDs
         let thinkingEnd = try tokenizer.tokenize("</think>\n\n", parseSpecial: true, maximumTokens: 8)
         guard !thinkingEnd.isEmpty else { throw GGUFError.invalid("Missing canonical thinking-end tokens") }
         let reused = Self.reusablePrefix(previous: stateTokens, prompt: prompt, hasLogits: !stateLogits.isEmpty)

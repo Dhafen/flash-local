@@ -118,6 +118,28 @@ def main(ornith=False):
                       {"role": "user", "content": "Continue"}],
          "enable_thinking": enabled, "preserve_thinking": True,
          "add_generation_prompt": True} for enabled in (False, True)]
+    # Public fixtures only. OpenAI carries arguments as JSON text; the pinned
+    # Jinja template expects a mapping. The independent C++ oracle converts
+    # that representation explicitly, without calling our product renderer.
+    tool = {"type": "function", "function": {
+        "name": "local_sum", "description": "Add two public integers locally.",
+        "parameters": {"type": "object", "properties": {
+            "a": {"type": "integer"}, "b": {"type": "integer"}},
+            "required": ["a", "b"], "additionalProperties": False}, "strict": True}}
+    first = [{"role": "system", "content": "Use a declared function when needed."},
+             {"role": "user", "content": "Calculate 50 plus 5."}]
+    result = first + [{"role": "assistant", "content": "",
+                      "reasoning_content": "PUBLIC_AGENT_REASONING",
+                      "tool_calls": [{"id": "call_public_sum", "type": "function",
+                                      "function": {"name": "local_sum", "arguments": '{"a":50,"b":5}'}}]},
+                     {"role": "tool", "tool_call_id": "call_public_sum", "content": '{"sum":55}'}]
+    manifest["agentChats"] = [
+        {"messages": messages, "tools": [tool], "enable_thinking": enabled,
+         "preserve_thinking": messages is result, "add_generation_prompt": True}
+        for messages in (first, result) for enabled in (False, True)]
+    for chat in manifest["agentChats"]:
+        chat["wireRequestJSON"] = json.dumps({"model": "ornith-1.5-35b-a3b",
+                                              "messages": chat["messages"], "tools": chat["tools"]})
     (folder / "qwen35-tokenizer-corpus.json").write_text(
         json.dumps(manifest, ensure_ascii=True), encoding="utf-8")
     binary = bytearray(struct.pack("<I", len(cases)))

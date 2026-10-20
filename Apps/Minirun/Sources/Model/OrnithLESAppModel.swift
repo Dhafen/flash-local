@@ -154,12 +154,13 @@ private actor LESAppWorker {
             onAdmission: { self.admissions.append($0) })
     }
     func generateChat(messages: [Qwen35ChatMessage], options: LocalGenerationOptions,
+                      tools: [LocalToolDefinition] = [],
                       events: AsyncThrowingStream<Qwen4ExpTextGeneration.Event, Error>.Continuation)
         -> Result<OrnithLESChatGeneration.Summary, Error> {
         let result = Result {
             guard let chat else { throw LESChatPresentationError.notReady }
             return try autoreleasepool {
-                try chat.generate(messages: messages, options: options) { event in
+                try chat.generate(messages: messages, options: options, tools: tools) { event in
                     if case .dropped = events.yield(event) {
                         throw LESChatPresentationError.streamFull
                     }
@@ -589,15 +590,25 @@ final class OrnithLESAppModel {
         let id = UUID(), lease = LESRequestLease(flag)
         let output = AsyncThrowingStream<LocalChatEvent, Error>.makeStream(bufferingPolicy: .bufferingOldest(64))
         output.continuation.onTermination = { if case .cancelled = $0 { lease.cancel() } }
-        let input = Qwen35ChatMessage.applyingSystemPrompt(apiSystemPrompt, to: request.messages.map {
-            Qwen35ChatMessage(role: Qwen35ChatMessage.Role(rawValue: $0.role)!, content: $0.content, reasoningContent: $0.reasoning)
+        var input = Qwen35ChatMessage.applyingSystemPrompt(apiSystemPrompt, to: request.messages.map {
+            Qwen35ChatMessage(role: Qwen35ChatMessage.Role(rawValue: $0.role)!, content: $0.content, reasoningContent: $0.reasoning,
+                toolCalls: $0.toolCalls.isEmpty ? nil : $0.toolCalls, toolCallID: $0.toolCallID)
         })
+        if !request.toolInstructions.isEmpty {
+            let original = input.first?.role == .system ? input.removeFirst().content : ""
+            input.insert(.init(role: .system, content: original + "\n\n" + request.toolInstructions), at: 0)
+        }
+        let definitions = request.toolChoice.enabled ? request.tools.filter {
+            if case .named(let name) = request.toolChoice { return $0.name == name }
+            return true
+        } : []
         let channel = AsyncThrowingStream<Qwen4ExpTextGeneration.Event, Error>.makeStream(bufferingPolicy: .bufferingOldest(64))
         activeID = id; control = flag; isBusy = true; operationIsAPI = true; error = nil
         status = "API: förbereder lokal generering…"
         let worker = worker
+        let promptMessages = input
         let owner = Task.detached(priority: .userInitiated) {
-            let result = await worker.generateChat(messages: input, options: request.options, events: channel.continuation)
+            let result = await worker.generateChat(messages: promptMessages, options: request.options, tools: definitions, events: channel.continuation)
             lease.finish()
             switch result { case .success: channel.continuation.finish(); case .failure(let error): channel.continuation.finish(throwing: error) }
             return result

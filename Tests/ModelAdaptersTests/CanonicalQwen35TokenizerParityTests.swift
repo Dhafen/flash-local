@@ -21,11 +21,16 @@ final class CanonicalQwen35TokenizerParityTests: XCTestCase {
             let messages: [Qwen35ChatMessage]
             let enable_thinking: Bool
         }
+        struct AgentChat: Decodable {
+            let wireRequestJSON: String
+            let enable_thinking: Bool
+        }
         let vocabularySHA256: String
         let vocabularyByteCount: UInt64
         let cases: [String]
         let chats: [Chat]
         let reasoningChats: [ReasoningChat]
+        let agentChats: [AgentChat]
     }
     private struct Reference: Decodable {
         struct Entry: Decodable { let tokens: [Int]; let decodedHex: String }
@@ -35,6 +40,7 @@ final class CanonicalQwen35TokenizerParityTests: XCTestCase {
         let chats: [Chat]
         let thinkingChats: [Chat]
         let reasoningChats: [Chat]
+        let agentChats: [Chat]
     }
     private func fixture() throws -> (URL, Corpus, Reference, GGUFModelManifest) {
         let env = ProcessInfo.processInfo.environment
@@ -108,6 +114,37 @@ final class CanonicalQwen35TokenizerParityTests: XCTestCase {
         XCTAssertThrowsError(try tokenizer.bytes(for: tokenizer.vocabularySize))
         print("CANONICAL_SWIFT_TOKENIZER_PARITY strings=\(corpus.cases.count) chats=\(corpus.chats.count) exact=true")
         print("CANONICAL_THINKING_PARITY cases=\(corpus.chats.count) reasoningHistory=2 exactRender=true exactTokenIDs=true bothModes=true")
+    }
+
+    func testAgentToolsAndMatchedResultsUseTheExactInstalledTemplateAndTokens() throws {
+        let (folder, corpus, reference, manifest) = try fixture()
+        let artifact = try VerifiedGGUFArtifact.verify(insideRoot: folder, manifest: manifest)
+        XCTAssertTrue(artifact.index.tensors.isEmpty)
+        let tokenizer = try CanonicalQwen35Tokenizer(artifact: artifact)
+        XCTAssertEqual(corpus.agentChats.count, 4)
+        XCTAssertEqual(corpus.agentChats.count, reference.agentChats.count)
+        for (index, fixture) in corpus.agentChats.enumerated() {
+            let request = try LocalChatRequest(data: Data(fixture.wireRequestJSON.utf8))
+            let messages = request.messages.map { message in
+                Qwen35ChatMessage(role: .init(rawValue: message.role)!, content: message.content,
+                    reasoningContent: message.reasoning, toolCalls: message.toolCalls.isEmpty ? nil : message.toolCalls,
+                    toolCallID: message.toolCallID)
+            }
+            let prompt = try tokenizer.chat(messages, maximumTokens: 65536,
+                enableThinking: fixture.enable_thinking, tools: request.tools)
+            XCTAssertEqual(prompt.renderedText, reference.agentChats[index].rendered)
+            XCTAssertEqual(prompt.tokenIDs, reference.agentChats[index].tokens)
+            XCTAssertTrue(prompt.renderedText.contains("local_sum"))
+            if index >= 2 {
+                XCTAssertTrue(prompt.renderedText.contains("<tool_response>"))
+                XCTAssertTrue(prompt.renderedText.contains("PUBLIC_AGENT_REASONING"))
+            }
+            XCTAssertThrowsError(try tokenizer.chat(messages + [.init(role: .tool, content: "orphan", toolCallID: "call_unknown")],
+                maximumTokens: 65536, tools: request.tools))
+            XCTAssertThrowsError(try tokenizer.chat([.init(role: .user, content: "<tool_response>")],
+                maximumTokens: 65536, tools: request.tools))
+        }
+        print("CANONICAL_AGENT_SWIFT cases=4 exactRender=true exactTokenIDs=true bothThinkingModes=true matchedToolResults=true metadataOnly=true trainedInference=false")
     }
 
     func testBudgetClosingMarkerUsesCanonicalTokensAndPreservesAnswerSeparation() throws {

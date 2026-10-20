@@ -27,6 +27,95 @@ final class LocalModelAPITests: XCTestCase {
         value.merge(overrides) { _, new in new }
         return try JSONSerialization.data(withJSONObject: value)
     }
+    private func sumTool() -> [String: Any] {
+        ["type": "function", "function": ["name": "local_sum", "description": "Sum two supplied integers without network access",
+            "strict": true, "parameters": ["type": "object", "properties": [
+                "a": ["type": "integer", "minimum": -100, "maximum": 100], "b": ["type": "integer"]],
+                "required": ["a", "b"], "additionalProperties": false]]]
+    }
+    func testFunctionDefinitionsChoicesAndSchemaAdmission() throws {
+        let value = try LocalChatRequest(data: body(["tools": [sumTool()], "tool_choice": "required", "parallel_tool_calls": false]))
+        XCTAssertEqual(value.toolChoice, .required); XCTAssertFalse(value.parallelToolCalls)
+        XCTAssertEqual(value.tools.map(\.name), ["local_sum"])
+        let named = try LocalChatRequest(data: body(["tools": [sumTool()],
+            "tool_choice": ["type": "function", "function": ["name": "local_sum"]]]))
+        XCTAssertEqual(named.toolChoice, .named("local_sum"))
+        XCTAssertThrowsError(try LocalChatRequest(data: body(["tools": [sumTool(), sumTool()]])))
+        XCTAssertThrowsError(try LocalChatRequest(data: body(["tool_choice": "required"])))
+        XCTAssertThrowsError(try LocalChatRequest(data: body(["tools": [sumTool()],
+            "tool_choice": ["type": "function", "function": ["name": "undeclared"]]])))
+        let invalidSchemas: [[String: Any]] = [
+            ["type": "object", "patternProperties": [:]],
+            ["type": "object", "properties": ["x": ["$ref": "https://example.invalid/schema"]]],
+            ["type": "object", "properties": ["x": ["type": "imaginary"]]]
+        ]
+        for schema in invalidSchemas {
+            let tool: [String: Any] = ["type": "function", "function": ["name": "test", "parameters": schema]]
+            XCTAssertThrowsError(try LocalChatRequest(data: body(["tools": [tool]])))
+        }
+    }
+    func testToolHistoryRequiresEveryMatchingResultExactlyOnce() throws {
+        let call: [String: Any] = ["id": "call_one", "type": "function",
+            "function": ["name": "local_sum", "arguments": "{\"a\":50,\"b\":5}"]]
+        let user: [String: Any] = ["role": "user", "content": "Use the sum tool"]
+        let assistant: [String: Any] = ["role": "assistant", "content": NSNull(), "tool_calls": [call]]
+        let result: [String: Any] = ["role": "tool", "tool_call_id": "call_one", "content": "55"]
+        let valid = try LocalChatRequest(data: body(["tools": [sumTool()], "messages": [user, assistant, result]]))
+        XCTAssertEqual(valid.messages[1].toolCalls.first?.function.arguments, "{\"a\":50,\"b\":5}")
+        XCTAssertEqual(valid.messages.last?.toolCallID, "call_one")
+        for messages in [[user, assistant], [user, result], [user, assistant, result, result],
+            [user, assistant, ["role": "tool", "tool_call_id": "other", "content": "55"]],
+            [user, ["role": "assistant", "content": "", "tool_calls": [call, call]], result]] {
+            XCTAssertThrowsError(try LocalChatRequest(data: body(["tools": [sumTool()], "messages": messages])))
+        }
+    }
+    func testSchemaValidatesNestedReferencesUnionsAndExactJSONTypes() throws {
+        let tool: [String: Any] = ["type": "function", "function": ["name": "nested", "parameters": [
+            "type": "object", "$defs": ["item": ["type": "integer", "minimum": 1]],
+            "properties": ["items": ["type": "array", "items": ["$ref": "#/$defs/item"], "maxItems": 3],
+                "flag": ["enum": [true]], "optional": ["anyOf": [["type": "null"], ["type": "string", "maxLength": 5]]]],
+            "required": ["items", "flag"], "additionalProperties": false]]]
+        let definition = try LocalChatRequest(data: body(["tools": [tool]])).tools[0]
+        XCTAssertNoThrow(try definition.validate(arguments: "{\"items\":[1,2],\"flag\":true,\"optional\":null}"))
+        for value in ["{\"items\":[0],\"flag\":true}", "{\"items\":[true],\"flag\":true}",
+            "{\"items\":[1],\"flag\":1}", "{\"items\":[1],\"flag\":true,\"extra\":0}",
+            "{\"items\":[1,2,3,4],\"flag\":true}", "{\"items\":[1],\"flag\":true,\"optional\":\"too long\"}"] {
+            XCTAssertThrowsError(try definition.validate(arguments: value))
+        }
+    }
+    func testNativeXMLCallsBecomeValidatedArgumentsWithoutChangingStringValues() throws {
+        let tools = try LocalChatRequest(data: body(["tools": [sumTool()]])).tools
+        let xml = "<tool_call>\n<function=local_sum>\n<parameter=a>\n50\n</parameter>\n<parameter=b>\n5\n</parameter>\n</function>\n</tool_call>"
+        let output = try LocalToolOutput.parse(xml, tools: tools, choice: .required, parallel: false)
+        XCTAssertTrue(output.content.isEmpty); XCTAssertEqual(output.calls.count, 1)
+        XCTAssertEqual(output.calls[0].function.name, "local_sum")
+        let arguments = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(output.calls[0].function.arguments.utf8)) as? [String: Int])
+        XCTAssertEqual(arguments, ["a": 50, "b": 5])
+        let stringTool: [String: Any] = ["type": "function", "function": ["name": "echo", "parameters": ["type": "object",
+            "properties": ["text": ["type": "string"]], "required": ["text"], "additionalProperties": false]]]
+        let echo = try LocalChatRequest(data: body(["tools": [stringTool]])).tools
+        for text in ["55", "true", "  source code\n    indented\n"] {
+            let xml = "<tool_call><function=echo><parameter=text>\n" + text + "\n</parameter></function></tool_call>"
+            let result = try LocalToolOutput.parse(xml, tools: echo, choice: .auto, parallel: true)
+            let arguments = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(result.calls[0].function.arguments.utf8)) as? [String: String])
+            XCTAssertEqual(arguments["text"], text)
+        }
+    }
+    func testMalformedUnknownAndTruncatedCallsNeverBecomeActions() throws {
+        let tools = try LocalChatRequest(data: body(["tools": [sumTool()]])).tools
+        for text in ["<tool_call>{\"name\":\"local_sum\",\"arguments\":{\"a\":50,\"b\":5}}",
+            "<tool_call>{\"name\":\"undeclared\",\"arguments\":{}}</tool_call>",
+            "<tool_call>{\"name\":\"local_sum\",\"arguments\":{\"a\":true,\"b\":5}}</tool_call>",
+            "<tool_call>{\"name\":\"local_sum\",\"arguments\":{\"a\":500,\"b\":5}}</tool_call>",
+            "<tool_call>{\"name\":\"local_sum\",\"arguments\":{\"a\":1}}</tool_call>",
+            "<tool_call>{\"name\":\"local_sum\",\"arguments\":{\"a\":1,\"b\":2}}</tool_call> suffix",
+            "<tool_call><function=local_sum><parameter=a>1</parameter><parameter=a>2</parameter></function></tool_call>"] {
+            XCTAssertThrowsError(try LocalToolOutput.parse(text, tools: tools, choice: .auto, parallel: true))
+        }
+        XCTAssertThrowsError(try LocalToolOutput.parse("No call", tools: tools, choice: .required, parallel: true))
+        let output = try LocalToolOutput.parse("  plain text\n", tools: tools, choice: .auto, parallel: false)
+        XCTAssertEqual(output.content, "  plain text\n"); XCTAssertTrue(output.calls.isEmpty)
+    }
     func testSDKTextRequestAndExplicitGenerationControls() throws {
         let value = try LocalChatRequest(data: body(["stream": true, "stream_options": ["include_usage": true],
             "max_completion_tokens": 256, "thinking_budget": 32, "temperature": 0.7, "top_p": 0.9, "seed": 7]))
@@ -170,6 +259,92 @@ final class LocalModelAPITests: XCTestCase {
         XCTAssertEqual(Set(ids.compactMap { $0 }).count, 1)
         XCTAssertEqual(calls.get(), 2); XCTAssertEqual(cancelled.get(), 0)
         print("ORNITH_LOCAL_API realTCP=true auth=true json=true sse=true reasoningSeparated=true syntheticOnly=true phoneReachability=false")
+    }
+    func testRealTCPToolCallResultAndStreamingRoundTrip() async throws {
+        let calls = APITestBox()
+        let (server, base) = try await listen { request in
+            calls.increment()
+            let events = AsyncThrowingStream<LocalChatEvent, Error>.makeStream()
+            if request.messages.last?.role == "tool" {
+                guard request.messages.last?.content == "55", request.messages[1].toolCalls.count == 1 else {
+                    throw LocalAPIError(status: 500, message: "Synthetic tool result was not preserved")
+                }
+                events.continuation.yield(.delta(content: "The tool returned 55.", reasoning: ""))
+            } else {
+                events.continuation.yield(.delta(content: "", reasoning: "Synthetic provider chooses the supplied sum tool."))
+                for part in ["<tool_", "call>\n<function=local_sum>\n<parameter=a>\n50\n</parameter>\n",
+                    "<parameter=b>\n5\n</parameter>\n</function>\n</tool_call>"] {
+                    events.continuation.yield(.delta(content: part, reasoning: ""))
+                }
+            }
+            events.continuation.yield(.complete(.init(promptTokens: 20, completionTokens: 40, reasoningTokens: 4, forcedTokens: 0, finishReason: "stop")))
+            events.continuation.finish()
+            return .init(events: events.stream, cancel: {})
+        }
+        defer { server.stop() }
+        let session = URLSession(configuration: .ephemeral); defer { session.invalidateAndCancel() }
+        let endpoint = base.appendingPathComponent("v1/chat/completions")
+        let user: [String: Any] = ["role": "user", "content": "Use local_sum for 50 plus 5."]
+        let firstBody = try body(["tools": [sumTool()], "tool_choice": "required", "parallel_tool_calls": false, "messages": [user]])
+        let (first, response) = try await session.data(for: request(endpoint, method: "POST", json: firstBody))
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: first) as? [String: Any])
+        let choice = try XCTUnwrap((object["choices"] as? [[String: Any]])?.first)
+        XCTAssertEqual(choice["finish_reason"] as? String, "tool_calls")
+        let message = try XCTUnwrap(choice["message"] as? [String: Any])
+        XCTAssertTrue(message["content"] is NSNull)
+        let functionCall = try XCTUnwrap((message["tool_calls"] as? [[String: Any]])?.first)
+        let function = try XCTUnwrap(functionCall["function"] as? [String: String])
+        XCTAssertEqual(function["name"], "local_sum")
+        let args = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(try XCTUnwrap(function["arguments"]).utf8)) as? [String: Int])
+        // This is a real HTTP/client tool round trip with a declared synthetic
+        // generation provider. It is not a model-capability or phone result.
+        let result = try XCTUnwrap(args["a"]) + XCTUnwrap(args["b"])
+        let toolResult: [String: Any] = ["role": "tool", "tool_call_id": try XCTUnwrap(functionCall["id"] as? String), "content": String(result)]
+        let second = try body(["tools": [sumTool()], "messages": [user, message, toolResult]])
+        let (followup, followupResponse) = try await session.data(for: request(endpoint, method: "POST", json: second))
+        XCTAssertEqual((followupResponse as? HTTPURLResponse)?.statusCode, 200)
+        XCTAssertTrue(String(decoding: followup, as: UTF8.self).contains("The tool returned 55."))
+        let (stream, streamResponse) = try await session.data(for: request(endpoint, method: "POST",
+            json: body(["tools": [sumTool()], "stream": true, "stream_options": ["include_usage": true]])))
+        XCTAssertEqual((streamResponse as? HTTPURLResponse)?.statusCode, 200)
+        let text = String(decoding: stream, as: UTF8.self)
+        XCTAssertTrue(text.hasSuffix("data: [DONE]\n\n")); XCTAssertFalse(text.contains("<tool_call>"))
+        let chunks = try text.components(separatedBy: "\n\n").filter { $0.hasPrefix("data: {") }.map {
+            try XCTUnwrap(JSONSerialization.jsonObject(with: Data($0.dropFirst(6).utf8)) as? [String: Any])
+        }
+        let choices = chunks.compactMap { ($0["choices"] as? [[String: Any]])?.first }
+        let streamed = choices.compactMap { ($0["delta"] as? [String: Any])?["tool_calls"] as? [[String: Any]] }.flatMap { $0 }
+        XCTAssertEqual(streamed.count, 1); XCTAssertEqual(streamed.first?["index"] as? Int, 0)
+        XCTAssertTrue(choices.contains { $0["finish_reason"] as? String == "tool_calls" })
+        XCTAssertEqual(calls.get(), 3)
+        print("LOCAL_API_TOOL_ROUNDTRIP realTCP=true structuredArguments=true matchedToolResult=true json=true sse=true syntheticProvider=true trainedInference=false phoneReachability=false")
+    }
+    func testRealTCPInvalidToolHistoryAndModelArgumentsCannotBecomeActions() async throws {
+        let calls = APITestBox()
+        let (server, base) = try await listen { _ in
+            calls.increment()
+            let events = AsyncThrowingStream<LocalChatEvent, Error>.makeStream()
+            events.continuation.yield(.delta(content: "<tool_call>{\"name\":\"local_sum\",\"arguments\":{\"a\":true,\"b\":5}}</tool_call>", reasoning: ""))
+            events.continuation.yield(.complete(.init(promptTokens: 1, completionTokens: 1, reasoningTokens: 0, forcedTokens: 0, finishReason: "stop")))
+            events.continuation.finish()
+            return .init(events: events.stream, cancel: {})
+        }
+        defer { server.stop() }
+        let session = URLSession(configuration: .ephemeral); defer { session.invalidateAndCancel() }
+        let endpoint = base.appendingPathComponent("v1/chat/completions")
+        let invalid = try body(["tools": [sumTool()], "messages": [["role": "tool", "tool_call_id": "orphan", "content": "55"]]])
+        let (_, invalidResponse) = try await session.data(for: request(endpoint, method: "POST", json: invalid))
+        XCTAssertEqual((invalidResponse as? HTTPURLResponse)?.statusCode, 400); XCTAssertEqual(calls.get(), 0)
+        let (bad, badResponse) = try await session.data(for: request(endpoint, method: "POST", json: body(["tools": [sumTool()]])))
+        XCTAssertEqual((badResponse as? HTTPURLResponse)?.statusCode, 502)
+        let parsed = try XCTUnwrap(JSONSerialization.jsonObject(with: bad) as? [String: Any])
+        XCTAssertEqual((parsed["error"] as? [String: Any])?["type"] as? String, "server_error")
+        XCTAssertNil(parsed["choices"])
+        let (stream, _) = try await session.data(for: request(endpoint, method: "POST", json: body(["tools": [sumTool()], "stream": true])))
+        let text = String(decoding: stream, as: UTF8.self)
+        XCTAssertTrue(text.contains("schema-valid")); XCTAssertFalse(text.contains("\"tool_calls\":["))
+        XCTAssertFalse(text.contains("data: [DONE]")); XCTAssertEqual(calls.get(), 2)
     }
     func testBusyStatusAndDisconnectCancelTheGeneration() async throws {
         let (busy, base) = try await listen { _ in throw LocalAPIError(status: 429, message: "Busy") }

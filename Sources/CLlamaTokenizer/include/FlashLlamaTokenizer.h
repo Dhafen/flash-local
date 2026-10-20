@@ -33,6 +33,11 @@ int32_t flt_render_chat(const flt_vocabulary *, const char * messages_json,
 // The legacy function above remains identical to enable_thinking=false.
 int32_t flt_render_chat_with_thinking(const flt_vocabulary *, const char * messages_json,
                         int32_t bytes, bool enable_thinking, char * output, int32_t capacity);
+// Separate agent contract: {messages:[typed text/tool messages], tools:[function
+// definitions]}. Executes the installed GGUF's original Jinja template. Matching
+// tool IDs, roles, byte limits and reserved-token boundaries are checked here.
+int32_t flt_render_agent_chat(const flt_vocabulary *, const char * request_json,
+                        int32_t bytes, bool enable_thinking, char * output, int32_t capacity);
 #ifdef __cplusplus
 }
 #endif

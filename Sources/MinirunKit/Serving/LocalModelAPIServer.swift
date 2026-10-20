@@ -206,7 +206,9 @@ private final class LocalAPISession: @unchecked Sendable {
                     guard answer.utf8.count + reasoning.utf8.count <= 4 << 20 else { throw LocalAPIError(status: 500, message: "Output limit exceeded") }
                     if request.stream {
                         var delta: [String: Any] = [:]
-                        if !content.isEmpty { delta["content"] = content }
+                        // Tool envelopes are withheld until the model finishes
+                        // and every argument validates. Reasoning still streams.
+                        if !content.isEmpty, !request.toolChoice.enabled { delta["content"] = content }
                         if !thought.isEmpty { delta["reasoning_content"] = thought }
                         if !delta.isEmpty { try await send(LocalAPIWire.chunk(id: id, created: created, delta: delta)) }
                     }
@@ -214,21 +216,34 @@ private final class LocalAPISession: @unchecked Sendable {
                 }
             }
             guard let usage else { throw LocalAPIError(status: 500, message: "Generation ended without usage") }
+            let result = try LocalToolOutput.parse(answer, tools: request.tools, choice: request.toolChoice,
+                parallel: request.parallelToolCalls)
+            let finish = result.calls.isEmpty ? usage.finishReason : "tool_calls"
             await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
                 queue.async { self.generation = nil; continuation.resume() }
             }
             if request.stream {
-                try await send(LocalAPIWire.chunk(id: id, created: created, delta: [:], finish: usage.finishReason))
+                if request.toolChoice.enabled, !result.content.isEmpty {
+                    try await send(LocalAPIWire.chunk(id: id, created: created, delta: ["content": result.content]))
+                }
+                if !result.calls.isEmpty {
+                    let calls = result.calls.enumerated().map { index, call -> [String: Any] in
+                        var value = call.json; value["index"] = index; return value
+                    }
+                    try await send(LocalAPIWire.chunk(id: id, created: created, delta: ["tool_calls": calls]))
+                }
+                try await send(LocalAPIWire.chunk(id: id, created: created, delta: [:], finish: finish))
                 if request.includeUsage {
                     try await send(LocalAPIWire.sse(["id": id, "object": "chat.completion.chunk", "created": created,
                         "model": LocalChatRequest.modelID, "choices": [], "usage": usage.json]))
                 }
                 try await send(Data("data: [DONE]\n\n".utf8))
             } else {
-                var message: [String: Any] = ["role": "assistant", "content": answer]
+                var message: [String: Any] = ["role": "assistant", "content": result.content.isEmpty && !result.calls.isEmpty ? NSNull() : result.content as Any]
+                if !result.calls.isEmpty { message["tool_calls"] = result.calls.map(\.json) }
                 if !reasoning.isEmpty { message["reasoning_content"] = reasoning }
                 try await sendJSON(["id": id, "object": "chat.completion", "created": created, "model": LocalChatRequest.modelID,
-                    "choices": [["index": 0, "message": message, "finish_reason": usage.finishReason]], "usage": usage.json])
+                    "choices": [["index": 0, "message": message, "finish_reason": finish]], "usage": usage.json])
             }
             queue.async { self.generation = nil; self.finish(cancelInference: false) }
         } catch {
