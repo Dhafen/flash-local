@@ -22,6 +22,32 @@ final class LocalModelAPITests: XCTestCase {
         XCTAssertEqual(LocalGenerationOptions().maximumNewTokens, 2048)
         XCTAssertEqual(LocalGenerationOptions().thinkingBudget, 512)
     }
+    func testOpenAIReasoningEffortAndShortTotalLimitsUseBoundedLocalPresets() throws {
+        for (effort, preset) in [("none", OrnithThinkingPreset.off), ("minimal", .small), ("low", .small),
+                                  ("medium", .medium), ("high", .ultra), ("xhigh", .ultra), ("max", .ultra)] {
+            let request = try LocalChatRequest(data: body(["reasoning_effort": effort]))
+            XCTAssertEqual(request.options.enableThinking, preset.options.enableThinking)
+            XCTAssertEqual(request.options.thinkingBudget, preset.options.thinkingBudget)
+            XCTAssertEqual(request.options.maximumNewTokens, preset.options.maximumNewTokens)
+        }
+        for maximum in [1, 8, 9, 32, 128, 256, 512] {
+            let request = try LocalChatRequest(data: body(["max_completion_tokens": maximum]))
+            XCTAssertEqual(request.options.maximumNewTokens, maximum)
+            XCTAssertLessThanOrEqual(request.options.thinkingBudget ?? 0, max(0, maximum - 9))
+            XCTAssertNoThrow(try request.options.validate())
+        }
+        XCTAssertThrowsError(try LocalChatRequest(data: body(["max_tokens": 128, "thinking_budget": 512])))
+        XCTAssertThrowsError(try LocalChatRequest(data: body(["reasoning_effort": "invented"])))
+        let explicit = try LocalChatRequest(data: body(["reasoning_effort": "high", "max_tokens": 256, "enable_thinking": false]))
+        XCTAssertFalse(explicit.options.thinkingEnabled)
+    }
+    func testOptionalNullToolAnnotationsAndFunctionsWithoutArguments() throws {
+        let tool: [String: Any] = ["type": "function", "function": ["name": "list_local_fixtures", "description": NSNull(), "strict": NSNull()]]
+        let request = try LocalChatRequest(data: body(["tools": [tool]]))
+        XCTAssertEqual(request.tools.count, 1); XCTAssertFalse(request.tools[0].strict)
+        XCTAssertNoThrow(try request.tools[0].validate(arguments: "{}"))
+        XCTAssertThrowsError(try request.tools[0].validate(arguments: "{\"unexpected\":true}"))
+    }
     private func body(_ overrides: [String: Any] = [:]) throws -> Data {
         var value: [String: Any] = ["model": LocalChatRequest.modelID, "messages": [["role": "user", "content": "Hej"]]]
         value.merge(overrides) { _, new in new }

@@ -65,6 +65,14 @@ An inactive saved thinking budget does not constrain a non-thinking request.
 | Top-p / `top_p` | 1 | Nucleus sampling, greater than 0 and at most 1; applies above temperature 0 |
 | Slumpfrö / `seed` | 42 | Per-request deterministic random seed, 0–2147483647 |
 
+Standard `reasoning_effort` maps to the local presets: `none` → Off,
+`minimal`/`low` → Small, `medium` → Medium, `high`/`xhigh`/`max` → Ultra.
+These are local token budgets, not equivalent quality claims about OpenAI
+models. Explicit local thinking fields override the mapped defaults. When a
+client supplies only a shorter total limit, the inherited thinking cap is
+reduced to leave at least nine closing/answer tokens. An explicit incompatible
+`thinking_budget` is rejected rather than silently changed.
+
 An explicit reasoning cap feeds the canonical `</think>\n\n` token sequence
 through the original model, then generates its answer. The inserted IDs count
 toward the total/context limits and are disclosed in diagnostics/usage. They

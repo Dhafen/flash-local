@@ -41,7 +41,7 @@ public struct LocalChatRequest: Sendable {
         }
         let allowed: Set<String> = ["model", "messages", "stream", "stream_options", "max_tokens", "max_completion_tokens",
             "temperature", "top_p", "seed", "enable_thinking", "thinking_budget", "chat_template_kwargs", "n",
-            "frequency_penalty", "presence_penalty", "stop", "tools", "tool_choice", "parallel_tool_calls", "response_format"]
+            "frequency_penalty", "presence_penalty", "stop", "tools", "tool_choice", "parallel_tool_calls", "response_format", "reasoning_effort"]
         if let key = object.keys.sorted().first(where: { !allowed.contains($0) }) {
             throw LocalAPIError.invalid(key, "This parameter is not supported by the local text API")
         }
@@ -113,16 +113,35 @@ public struct LocalChatRequest: Sendable {
             }
         }
         var options = defaults
+        if let effort = object["reasoning_effort"], !(effort is NSNull) {
+            let preset: OrnithThinkingPreset
+            switch effort as? String {
+            case "none": preset = .off
+            case "minimal", "low": preset = .small
+            case "medium": preset = .medium
+            case "high", "xhigh", "max": preset = .ultra
+            default: throw LocalAPIError.invalid("reasoning_effort", "Expected none, minimal, low, medium, high, xhigh, or max")
+            }
+            options.enableThinking = preset.options.enableThinking
+            options.thinkingBudget = preset.options.thinkingBudget
+            options.maximumNewTokens = preset.options.maximumNewTokens
+        }
         let oldMaximum = try integer("max_tokens"), newMaximum = try integer("max_completion_tokens")
         if let a = oldMaximum, let b = newMaximum, a != b {
             throw LocalAPIError.invalid("max_tokens", "Conflicting token limits")
         }
-        options.maximumNewTokens = newMaximum ?? oldMaximum ?? defaults.maximumNewTokens
+        options.maximumNewTokens = newMaximum ?? oldMaximum ?? options.maximumNewTokens
         options.temperature = try numeric("temperature") ?? defaults.temperature
         options.topP = try numeric("top_p") ?? defaults.topP
         if let seed = try integer("seed") { options.seed = UInt64(seed) }
-        options.thinkingBudget = object.keys.contains("thinking_budget") ? try integer("thinking_budget") : defaults.thinkingBudget
-        options.enableThinking = try boolean("enable_thinking", fallback: defaults.enableThinking)
+        if object.keys.contains("thinking_budget") {
+            options.thinkingBudget = try integer("thinking_budget")
+        } else if oldMaximum != nil || newMaximum != nil, let inherited = options.thinkingBudget {
+            // A standard short max_tokens request must not fail because the
+            // server's inherited thinking budget is larger than its total.
+            options.thinkingBudget = min(inherited, max(0, options.maximumNewTokens - 9))
+        }
+        options.enableThinking = try boolean("enable_thinking", fallback: options.enableThinking)
         if let value = object["chat_template_kwargs"], !(value is NSNull) {
             guard let kwargs = value as? [String: Any], Set(kwargs.keys).isSubset(of: ["enable_thinking"]) else {
                 throw LocalAPIError.invalid("chat_template_kwargs", "Only enable_thinking is supported")

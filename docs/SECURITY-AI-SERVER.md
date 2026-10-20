@@ -46,6 +46,8 @@ server. HTTP is intended for the trusted LAN. iOS foreground/locking,
 IPv4/Wi-Fi/Ethernet and USB forwarding limits remain as documented in
 [the API guide](ORNITH-LOCAL-API.md). The same admitted inference context serves
 chat and API serially. Disconnect cancels the owner before context recovery.
+OpenAI `reasoning_effort` maps to the four local modes. Inherited thinking
+budgets fit shorter client-supplied totals; explicit incompatible budgets fail.
 
 ## First phone acceptance test
 
@@ -117,6 +119,24 @@ that is an engineering hypothesis, not a phone benchmark. Their exact GGUF
 artifacts, template/quantization validation and production runner admission
 must precede inference. General model import and these additional runners
 are not yet implemented. Do not download replacement weights for this branch.
+
+Metadata inspected on 2026-10-20, without downloading any tensor payload:
+
+| Candidate artifact | Exact publisher file bytes | Inspected revision |
+| --- | ---: | --- |
+| Ornith Q4_K_M (installed) | 21,713,463,040 | `12393612fd4f730ff5aadc23e9b8f9648aa49ceb` |
+| [Unsloth Qwen3.5-4B Q4_K_M](https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/tree/e87f176479d0855a907a41277aca2f8ee7a09523) | 2,740,937,888 | `e87f176479d0855a907a41277aca2f8ee7a09523` |
+| [Unsloth Qwen3.5-2B Q4_K_M](https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/tree/f6d5376be1edb4d416d56da11e5397a961aca8ae) | 1,280,835,840 | `f6d5376be1edb4d416d56da11e5397a961aca8ae` |
+
+Candidate LFS SHA-256 values are respectively
+`00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4`
+and `aaf42c8b7c3cab2bf3d69c355048d4a0ee9973d48f16c731c0520ee914699223`.
+These are repository declarations, not locally verified complete artifacts.
+Original Qwen config revisions inspected: 4B
+`851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a`, 2B
+`15852e8c16360a2fea060d615a32b45270f8a8fc`. They describe dense hybrid
+graphs with 32/24 layers and 8/6 full-attention layers, respectively. They
+cannot enter the existing MoE-only wrapper by changing a name.
 
 The [4B publisher card](https://huggingface.co/Qwen/Qwen3.5-4B) and
 [2B publisher card](https://huggingface.co/Qwen/Qwen3.5-2B) document tool use;

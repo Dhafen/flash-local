@@ -19,17 +19,17 @@ public struct LocalToolDefinition: Equatable, Sendable {
         }
         let description = function["description"] as? String ?? ""
         guard description.utf8.count <= 8192,
-              function["description"] == nil || function["description"] is String else {
+              function["description"] == nil || function["description"] is NSNull || function["description"] is String else {
             throw LocalAPIError.invalid("tools", "Tool descriptions must be bounded text")
         }
         var strict = false
-        if let value = function["strict"] {
+        if let value = function["strict"], !(value is NSNull) {
             guard let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() else {
                 throw LocalAPIError.invalid("tools", "strict must be a boolean")
             }
             strict = number.boolValue
         }
-        let parameters = function["parameters"] as? [String: Any] ?? ["type": "object", "properties": [:]]
+        let parameters = function["parameters"] as? [String: Any] ?? ["type": "object", "properties": [:], "additionalProperties": false]
         guard function["parameters"] == nil || function["parameters"] is [String: Any],
               parameters["type"] as? String == "object" else {
             throw LocalAPIError.invalid("tools", "Function parameters must have type object")
