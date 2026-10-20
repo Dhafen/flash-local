@@ -239,6 +239,7 @@ final class OrnithLESAppModel {
         guard canStart, !isAPIRunning else { return }
         systemPrompt = profile.systemPrompt
     }
+    let contextCapacityTokens = 8192
     var chatOptions = LocalGenerationOptions() {
         didSet {
             if persistOptions {
