@@ -23,6 +23,7 @@ final class CanonicalQwen35TokenizerParityTests: XCTestCase {
         }
         struct AgentChat: Decodable {
             let wireRequestJSON: String
+            let canonicalToolsJSON: String
             let enable_thinking: Bool
         }
         let vocabularySHA256: String
@@ -125,6 +126,11 @@ final class CanonicalQwen35TokenizerParityTests: XCTestCase {
         XCTAssertEqual(corpus.agentChats.count, reference.agentChats.count)
         for (index, fixture) in corpus.agentChats.enumerated() {
             let request = try LocalChatRequest(data: Data(fixture.wireRequestJSON.utf8))
+            // The independent oracle must see the exact ordered tool JSON
+            // emitted by the adapter, rather than the client's original key
+            // order. Keep byte/token comparisons below exact in both modes.
+            let canonicalTools = try JSONSerialization.data(withJSONObject: request.tools.map(\.json), options: [.sortedKeys])
+            XCTAssertEqual(String(decoding: canonicalTools, as: UTF8.self), fixture.canonicalToolsJSON)
             let messages = request.messages.map { message in
                 Qwen35ChatMessage(role: .init(rawValue: message.role)!, content: message.content,
                     reasoningContent: message.reasoning, toolCalls: message.toolCalls.isEmpty ? nil : message.toolCalls,
@@ -145,6 +151,7 @@ final class CanonicalQwen35TokenizerParityTests: XCTestCase {
                 maximumTokens: 65536, tools: request.tools))
         }
         print("CANONICAL_AGENT_SWIFT cases=4 exactRender=true exactTokenIDs=true bothThinkingModes=true matchedToolResults=true metadataOnly=true trainedInference=false")
+        print("CANONICAL_AGENT_TOOL_ORDER clientOrderDistinct=true canonicalBytesMatched=true originalTemplateUnchanged=true")
     }
 
     func testBudgetClosingMarkerUsesCanonicalTokensAndPreservesAnswerSeparation() throws {

@@ -15,6 +15,17 @@ the portable original-template oracle and Python client. Neither bypasses
 Apple-silicon LES/QPack, integrated app, visual or archive gates. Only standard
 runners in this public repository are used.
 
+Delivery run [179](https://github.com/Dhafen/flash-local/actions/runs/39471916861)
+stopped in the Swift agent-template parity test: its oracle rendered tool
+definitions in client insertion order, while the adapter already emits sorted
+JSON keys. Jinja preserves that order, so the rendered bytes/token IDs differed.
+The fixture now supplies the same ordered tools to the independent original
+template and explicitly checks the adapter's serialized bytes. Exact rendered
+text and token-ID assertions remain for all four cases and both thinking modes;
+the client fixture keeps its different key order. Runtime code, model mathematics
+and delivery configuration are unchanged. The repaired full delivery must pass
+before any new TestFlight availability is claimed.
+
 ## Protocol and execution boundary
 
 The foreground server implements authenticated `/v1/models`,
