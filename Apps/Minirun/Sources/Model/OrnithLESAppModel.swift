@@ -293,7 +293,11 @@ final class OrnithLESAppModel {
                 .appendingPathComponent("FlashLocal/OrnithLES"), documents: documents)
         if let data = UserDefaults.standard.data(forKey: Self.optionsPreferenceKey),
            let options = try? JSONDecoder().decode(LocalGenerationOptions.self, from: data) {
-            do { try options.validate(); model.chatOptions = options } catch { }
+            do {
+                try options.validate()
+                let preset = OrnithThinkingPreset.matching(options) ?? (options.enableThinking ? .medium : .off)
+                model.chatOptions = preset.options
+            } catch { }
         }
         if let data = UserDefaults.standard.data(forKey: Self.batchPreferenceKey),
            let batch = try? JSONDecoder().decode(LESPrefillConfiguration.self, from: data),
