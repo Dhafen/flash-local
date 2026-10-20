@@ -7,6 +7,26 @@ import OrnithLES
 
 @MainActor
 final class OrnithLESAppTests: XCTestCase {
+    func testWorkProfilesOnlyChangeEditableSystemInstruction() {
+        let root = FileManager.default.temporaryDirectory
+        let model = OrnithLESAppModel(modelsRoot: root, privateRoot: root, documents: root)
+        let sampling = model.chatOptions, batch = model.batchConfiguration
+        model.applyProfile(.programming)
+        XCTAssertEqual(model.systemPrompt, LocalChatProfile.programming.systemPrompt)
+        XCTAssertEqual(model.chatOptions, sampling); XCTAssertEqual(model.batchConfiguration, batch)
+        model.applyProfile(.securityReview)
+        XCTAssertTrue(model.systemPrompt.contains("supplied evidence"))
+        model.applyProfile(.unchanged); XCTAssertEqual(model.systemPrompt, "")
+        XCTAssertFalse(model.chatReady); XCTAssertTrue(model.chatMessages.isEmpty)
+    }
+    func testPendingBatchSelectionCannotSilentlyUsePreviouslyLoadedGeometry() {
+        let model = OrnithLESAppModel.reviewChatPreview(thinking: false)
+        XCTAssertFalse(model.batchSettingsChanged)
+        model.batchConfiguration.evaluationTokens = 32; model.batchConfiguration.physicalTokens = 8
+        XCTAssertTrue(model.batchSettingsChanged)
+        model.startAPI(); XCTAssertTrue(model.apiAccessKey.isEmpty)
+        model.batchConfiguration = .init(); XCTAssertFalse(model.batchSettingsChanged)
+    }
     func testFinishedAPILeaseDoesNotCancelAReusableNativeOwner() {
         let completed = LESControl(), lease = LESRequestLease(completed)
         lease.finish(); lease.cancel()

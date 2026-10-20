@@ -23,97 +23,19 @@ struct REAMRootView: View {
     #endif
     var body: some View {
         NavigationStack {
-            REAMChatPage(model: model, discard: { confirmation = .discard }, openPerformance: openPerformance, openLES: lesAction)
-                .navigationTitle("Flash Local")
-                .toolbar {
-                    ToolbarItem(placement: .automatic) {
-                        Button { confirmation = .clear } label: { Image(systemName: "trash") }
-                            .accessibilityLabel("Rensa chatt")
-                            .disabled(model.isBusy || model.messages.isEmpty)
-                    }
-                    ToolbarItem(placement: .automatic) {
-                        Menu {
-                            Picker("Modell", selection: Binding(get: { model.selectedModel }, set: { model.selectModel($0) })) {
-                                ForEach(LocalChatModel.allCases) { target in Text(target.title).tag(target) }
-                            }.disabled(!model.canSelectModel)
-                            Button("Ornith QPack (testläge)") {
-                                openPerformance()
-                            }.disabled(!model.canOpenAlternateRunner)
-                            #if canImport(OrnithLES)
-                            Button("Ornith snabbchatt och motortest") { openLES() }
-                                .disabled(!model.canOpenAlternateRunner)
-                            #endif
-                            NavigationLink("Om Flash Local") { AboutView() }
-                            Button("Kontrollera numerik (kort test)") { model.checkNumerics() }
-                                .disabled(!model.canRunNumerics)
-                            NavigationLink("Licenser på enheten") {
-                                ScrollView {
-                                    Text(REAMBundledNotices.text).font(.footnote).textSelection(.enabled).padding()
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                }.navigationTitle("Licenser")
-                            }
-                        } label: { Image(systemName: "info.circle") }
-                        .accessibilityLabel("Information och licenser")
-                    }
-                }
-                .confirmationDialog(confirmation == .clear ? "Rensa den här chatten?" : "Radera den påbörjade hämtningen?",
-                    isPresented: Binding(get: { confirmation != nil }, set: { if !$0 { confirmation = nil } }), titleVisibility: .visible) {
-                    if confirmation == .clear {
-                        Button("Rensa chatten", role: .destructive) { model.clearMessages() }
-                    } else {
-                        Button("Radera och börja om", role: .destructive) { model.discardPartial() }
-                    }
-                } message: {
-                    if confirmation == .discard { Text("Redan hämtade delar tas bort. En färdig modellfil påverkas inte.") }
-                }
-        }
-        .sheet(item: $alternateRunner, onDismiss: {
-            Task {
-                await performanceModel.shutdown()
-                #if canImport(OrnithLES)
-                await lesModel.shutdown()
-                #endif
-                model.resumeAfterAlternateRunner()
-            }
-        }) { runner in
-            switch runner {
-            case .qpack: OrnithPerformanceView(model: performanceModel)
             #if canImport(OrnithLES)
-            case .les: OrnithLESView(model: lesModel, existing: model.verifiedOrnithForAlternateRunner())
+            OrnithLESView(model: lesModel, existing: model.verifiedOrnithForAlternateRunner())
+            #else
+            REAMChatPage(model: model, discard: { confirmation = .discard })
+                .navigationTitle("Flash Local")
             #endif
-            }
         }
-        .tint(MRColor.tierPinned)
         .task { model.prepare() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .background { model.releaseInferenceResources() }
             else if phase == .active { model.refreshStorage() }
         }
-        #if os(iOS)
-        .onChange(of: model.isBusy, initial: true) { _, value in UIApplication.shared.isIdleTimerDisabled = value }
-        .onDisappear { UIApplication.shared.isIdleTimerDisabled = false; model.releaseInferenceResources() }
-        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)) { _ in
-            model.releaseInferenceResources()
-        }
-        #endif
     }
-    private func openPerformance() {
-        guard model.canOpenAlternateRunner else { return }
-        Task { await model.pauseForAlternateRunner(); alternateRunner = .qpack }
-    }
-    private var lesAction: (() -> Void)? {
-        #if canImport(OrnithLES)
-        return { openLES() }
-        #else
-        return nil
-        #endif
-    }
-    #if canImport(OrnithLES)
-    private func openLES() {
-        guard model.canOpenAlternateRunner else { return }
-        Task { await model.pauseForAlternateRunner(); alternateRunner = .les }
-    }
-    #endif
 }
 
 /// Pure page content, separable from navigation/lifecycle for light/dark QA.

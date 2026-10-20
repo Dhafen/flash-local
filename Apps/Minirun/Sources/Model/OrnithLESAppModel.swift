@@ -72,7 +72,7 @@ private struct LESAppReport: Encodable {
     let originalExpertCachePolicy = "Existing TileReader F_NOCACHE=1 advisory; original backend preserved"
     let fullModelNumericsVerified = false
     let promptID = LESBenchmark.promptID
-    let contextCapacityTokens = 4096
+    let contextCapacityTokens = 8192
     let numericalCheck: LESNumericalCheck?
     let measurements: [LESRunExport]
     let memoryAdmissions: [LESMemoryAdmission]
@@ -86,9 +86,10 @@ private actor LESAppWorker {
     private var prepared: URL?
     private var chat: OrnithLESChatGeneration?
     private var chatCheck: LESNumericalCheck?
+    private var prefillCheck: LESPrefillCheck?
     private var admissions: [LESMemoryAdmission] = []
     func memoryAdmissionReport() -> [LESMemoryAdmission] { admissions }
-    func release() { chat?.close(); chat = nil; chatCheck = nil; artifact = nil; prepared = nil }
+    func release() { chat?.close(); chat = nil; chatCheck = nil; prefillCheck = nil; artifact = nil; prepared = nil }
     func resetChat() { chat?.resetConversation() }
     func closeChat() { chat?.close(); chat = nil }
     private func prepareFiles(modelsRoot: URL, privateRoot: URL, existing: VerifiedGGUFArtifact?, control: LESControl,
@@ -105,11 +106,12 @@ private actor LESAppWorker {
         guard let artifact else { throw CancellationError() }
         if prepared == nil {
             progress("Förbereder fasta vikter. Experterna ligger kvar i din GGUF.")
-            prepared = try LESPreparation.prepare(artifact: artifact, privateRoot: privateRoot, control: control,
+            prepared = try LESPreparation.prepare(artifact: artifact, privateRoot: privateRoot, control: control, progress: progress,
                 onAdmission: { self.admissions.append($0) })
         }
     }
     func prepareChat(modelsRoot: URL, privateRoot: URL, existing: VerifiedGGUFArtifact?, control: LESControl,
+                     configuration: LESPrefillConfiguration = .init(),
                      progress: @Sendable (String) -> Void,
                      onCheck: @Sendable (LESNumericalCheck) -> Void) throws -> LESNumericalCheck {
         chat?.close(); chat = nil
@@ -123,9 +125,33 @@ private actor LESAppWorker {
         guard let check = chatCheck else { throw CancellationError() }
         onCheck(check)
         guard check.nativeBenchmarkAdmitted else { return check }
+        try configuration.validate()
+        if configuration != LESPrefillConfiguration() {
+            var effective = configuration
+            effective.physicalTokens = try configuration.physicalTokens(checkedDefault: check.nativePrefillTokens)
+            if prefillCheck?.configuration != effective || prefillCheck?.passed != true {
+                prefillCheck = try LESBenchmark.checkPrefill(artifact: artifact, prepared: prepared,
+                    baseline: check, configuration: effective, control: control, progress: progress,
+                    onAdmission: { self.admissions.append($0) })
+            }
+        }
         chat = try OrnithLESChatGeneration(artifact: artifact, prepared: prepared, check: check,
-            control: control, onAdmission: { self.admissions.append($0) })
+            control: control, prefillConfiguration: configuration, prefillCheck: prefillCheck,
+            onAdmission: { self.admissions.append($0) })
         return check
+    }
+    func prefillAdmission() -> LESPrefillCheck? { prefillCheck }
+    func benchmarkPrefill(modelsRoot: URL, privateRoot: URL, existing: VerifiedGGUFArtifact?,
+                          configuration: LESPrefillConfiguration, control: LESControl,
+                          progress: @Sendable (String) -> Void,
+                          onCheck: @Sendable (LESNumericalCheck) -> Void) throws -> OrnithPrefillBenchmark.Report {
+        let baseline = try prepareChat(modelsRoot: modelsRoot, privateRoot: privateRoot, existing: existing,
+            control: control, configuration: configuration, progress: progress, onCheck: onCheck)
+        chat?.close(); chat = nil
+        guard let artifact, let prepared else { throw CancellationError() }
+        return try OrnithPrefillBenchmark.execute(artifact: artifact, prepared: prepared, baseline: baseline,
+            candidate: configuration, check: prefillCheck, control: control, progress: progress,
+            onAdmission: { self.admissions.append($0) })
     }
     func generateChat(messages: [Qwen35ChatMessage], options: LocalGenerationOptions,
                       events: AsyncThrowingStream<Qwen4ExpTextGeneration.Event, Error>.Continuation)
@@ -188,6 +214,32 @@ final class OrnithLESAppModel {
     private(set) var chatSummary: OrnithLESChatGeneration.Summary?
     private(set) var chatMeasurementURL: URL?
     var chatDraft = ""
+    var batchConfiguration = LESPrefillConfiguration() {
+        didSet {
+            if persistOptions, (try? batchConfiguration.validate()) != nil,
+               let data = try? JSONEncoder().encode(batchConfiguration) {
+                UserDefaults.standard.set(data, forKey: Self.batchPreferenceKey)
+            }
+        }
+    }
+    private(set) var activeBatchConfiguration: LESPrefillConfiguration?
+    private(set) var activePrefillCheck: LESPrefillCheck?
+    private(set) var prefillBenchmark: OrnithPrefillBenchmark.Report?
+    private(set) var prefillBenchmarkFailure: String?
+    private(set) var prefillBenchmarkURL: URL?
+    var batchSettingsChanged: Bool { chatReady && activeBatchConfiguration != batchConfiguration }
+    var systemPrompt = "" {
+        didSet {
+            if persistOptions, systemPrompt.utf8.count <= 32768 {
+                UserDefaults.standard.set(systemPrompt, forKey: Self.systemPreferenceKey)
+            }
+        }
+    }
+    func applyProfile(_ profile: LocalChatProfile) {
+        guard canStart, !isAPIRunning else { return }
+        systemPrompt = profile.systemPrompt
+    }
+    let contextCapacityTokens = 8192
     var chatOptions = LocalGenerationOptions() {
         didSet {
             if persistOptions {
@@ -200,10 +252,12 @@ final class OrnithLESAppModel {
         }
     }
     private static let optionsPreferenceKey = "FlashLocal.Ornith.GenerationOptions.v1"
+    private static let batchPreferenceKey = "FlashLocal.Ornith.PrefillOptions.v1"
+    private static let systemPreferenceKey = "FlashLocal.Ornith.SystemPrompt.v1"
     @ObservationIgnored private var persistOptions = false
     var chatThinkingEnabled: Bool {
         get { chatOptions.enableThinking }
-        set { chatOptions.enableThinking = newValue }
+        set { chatOptions = (newValue ? OrnithThinkingPreset.medium : OrnithThinkingPreset.off).options }
     }
     private(set) var isAPIRunning = false
     private(set) var apiStatus = "Avstängd"
@@ -214,6 +268,7 @@ final class OrnithLESAppModel {
     var apiKeepAwake = true
     @ObservationIgnored private var apiServer: LocalModelAPIServer?
     @ObservationIgnored private var apiID: UUID?
+    @ObservationIgnored private var apiSystemPrompt = ""
     @ObservationIgnored private var operationIsAPI = false
     var userDeclaredAirplaneMode = false
     let modelsRoot: URL
@@ -225,7 +280,7 @@ final class OrnithLESAppModel {
     @ObservationIgnored private var chatControl: LESControl?
     @ObservationIgnored private var activeID: UUID?
     var canStart: Bool { !isBusy && !isShuttingDown && !isPreview }
-    var canSendChat: Bool { canStart && chatReady }
+    var canSendChat: Bool { canStart && chatReady && !batchSettingsChanged }
     var canBenchmark: Bool { canStart && apiServer == nil }
     var shouldKeepAwake: Bool { isBusy || (isAPIRunning && apiKeepAwake) }
     init(modelsRoot: URL, privateRoot: URL, documents: URL) {
@@ -239,18 +294,30 @@ final class OrnithLESAppModel {
                 .appendingPathComponent("FlashLocal/OrnithLES"), documents: documents)
         if let data = UserDefaults.standard.data(forKey: Self.optionsPreferenceKey),
            let options = try? JSONDecoder().decode(LocalGenerationOptions.self, from: data) {
-            do { try options.validate(); model.chatOptions = options } catch { }
+            do {
+                try options.validate()
+                let preset = OrnithThinkingPreset.matching(options) ?? (options.enableThinking ? .medium : .off)
+                model.chatOptions = preset.options
+            } catch { }
+        }
+        if let data = UserDefaults.standard.data(forKey: Self.batchPreferenceKey),
+           let batch = try? JSONDecoder().decode(LESPrefillConfiguration.self, from: data),
+           (try? batch.validate()) != nil { model.batchConfiguration = batch }
+        if let prompt = UserDefaults.standard.string(forKey: Self.systemPreferenceKey), prompt.utf8.count <= 32768 {
+            model.systemPrompt = prompt
         }
         model.persistOptions = true
         return model
     }
     static func reviewPreview() -> OrnithLESAppModel {
         let model = Self.live(); model.persistOptions = false; model.isPreview = true
+        model.chatOptions = .init(); model.batchConfiguration = .init(); model.systemPrompt = ""
         model.status = "Förhandsvisning av layout – ingen modell körs."
         return model
     }
     static func reviewChatPreview(thinking: Bool) -> OrnithLESAppModel {
         let model = Self.reviewPreview()
+        model.activeBatchConfiguration = model.batchConfiguration
         model.chatReady = true; model.isBusy = thinking
         model.status = thinking ? "Tänker lokalt…" : "Förhandsvisning av snabbchatten – ingen modell körs."
         model.chatMessages = [.init(role: .user, text: "Hur testar jag en cache?")]
@@ -261,6 +328,7 @@ final class OrnithLESAppModel {
     }
     static func reviewAPIPreview() -> OrnithLESAppModel {
         let model = Self.reviewPreview()
+        model.activeBatchConfiguration = model.batchConfiguration
         model.apiStatus = "Förhandsvisning · ingen server eller modell körs"
         model.apiURLs = ["http://192.168.1.25:8080/v1"]
         model.apiAccessKey = "example-only-not-a-live-key"
@@ -309,7 +377,10 @@ final class OrnithLESAppModel {
         chatReady = false; chatControl = nil; isShuttingDown = false
     }
     func activateChat(existing: VerifiedGGUFArtifact? = nil) {
-        guard canStart, !chatReady else { return }
+        guard canStart, !isAPIRunning, (!chatReady || batchSettingsChanged) else { return }
+        do { try batchConfiguration.validate() } catch { self.error = error.localizedDescription; return }
+        let requestedBatch = batchConfiguration
+        chatReady = false; activePrefillCheck = nil
         let flag = LESControl(), id = UUID()
         activeID = id; control = flag; chatControl = flag; isBusy = true; error = nil
         status = "Förbereder Ornith snabbchatt…"
@@ -318,7 +389,7 @@ final class OrnithLESAppModel {
             defer { if activeID == id { activeID = nil; control = nil; isBusy = false; operation = nil } }
             do {
                 let check = try await worker.prepareChat(modelsRoot: modelsRoot, privateRoot: privateRoot, existing: existing,
-                    control: flag, progress: { [weak self] value in
+                    control: flag, configuration: requestedBatch, progress: { [weak self] value in
                         Task { @MainActor in guard let self, self.activeID == id else { return }; self.status = value }
                     }, onCheck: { [weak self] value in
                         Task { @MainActor in guard let self, self.activeID == id else { return }; self.numericalCheck = value }
@@ -330,9 +401,12 @@ final class OrnithLESAppModel {
                     throw LESChatPresentationError.numericalCheck
                 }
                 if flag.isCancellationRequested { throw CancellationError() }
+                activeBatchConfiguration = requestedBatch
+                if requestedBatch == LESPrefillConfiguration() { activePrefillCheck = nil }
+                else { activePrefillCheck = await worker.prefillAdmission() }
                 chatReady = true; status = "Snabbchatten är redo · samma Ornith-GGUF · OS-cache."
             } catch {
-                await worker.release(); chatReady = false; chatControl = nil
+                await worker.closeChat(); chatReady = false; chatControl = nil
                 if !flag.isCancellationRequested { self.error = error.localizedDescription }
                 status = "Snabbchatten kunde inte startas."
             }
@@ -342,9 +416,10 @@ final class OrnithLESAppModel {
         guard canSendChat, let flag = chatControl else { return }
         let input = chatDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !input.isEmpty, input.utf8.count <= 262144 else { return }
+        guard systemPrompt.utf8.count <= 32768 else { error = "Systemprompt får vara högst 32 KiB."; return }
         do { try chatOptions.validate() } catch { self.error = error.localizedDescription; return }
         chatDraft = ""; chatMessages.append(.init(role: .user, text: input))
-        let prompt = REAMMessage.generationPrompt(chatMessages)
+        let prompt = Qwen35ChatMessage.applyingSystemPrompt(systemPrompt, to: REAMMessage.generationPrompt(chatMessages))
         chatMessages.append(.init(role: .assistant, text: "", interrupted: true))
         let response = chatMessages.last!.id, id = UUID(), options = chatOptions
         let thinking = options.thinkingEnabled
@@ -403,12 +478,70 @@ final class OrnithLESAppModel {
             }
         }
     }
+    func startPrefillBenchmark(existing: VerifiedGGUFArtifact? = nil) {
+        guard canBenchmark else { return }
+        do { try batchConfiguration.validate() } catch { self.error = error.localizedDescription; return }
+        guard batchConfiguration != LESPrefillConfiguration() else { error = "Välj en annan batch än Auto 4 för jämförelsen."; return }
+        let flag = LESControl(), id = UUID(), selected = batchConfiguration
+        activeID = id; control = flag; isBusy = true; chatReady = false; chatControl = nil
+        error = nil; prefillBenchmark = nil; prefillBenchmarkFailure = nil; prefillBenchmarkURL = nil
+        status = "Förbereder jämförelse av promptbatcher…"
+        operation = Task { [weak self] in
+            guard let self else { return }
+            defer { if activeID == id { activeID = nil; control = nil; isBusy = false; operation = nil } }
+            do {
+                prefillBenchmark = try await worker.benchmarkPrefill(modelsRoot: modelsRoot, privateRoot: privateRoot,
+                    existing: existing, configuration: selected, control: flag, progress: { [weak self] value in
+                        Task { @MainActor in guard let self, self.activeID == id else { return }; self.status = value }
+                    }, onCheck: { [weak self] value in
+                        Task { @MainActor in guard let self, self.activeID == id else { return }; self.numericalCheck = value }
+                    })
+                status = prefillBenchmark?.comparable == true ? "Batchjämförelsen är klar · samma genererade token." :
+                    "Batchtestet är klart men längd, token eller termiskt tillstånd skiljer. Ingen säker vinnare utses."
+            } catch {
+                prefillBenchmarkFailure = error.localizedDescription; self.error = error.localizedDescription
+                status = "Batchtestet stoppades. Auto är kvar som separat val."
+            }
+            activePrefillCheck = await worker.prefillAdmission()
+            memoryAdmissions = await worker.memoryAdmissionReport()
+        }
+    }
+    func savePrefillBenchmark() {
+        guard canStart, prefillBenchmark != nil || prefillBenchmarkFailure != nil else { return }
+        struct Report: Encodable {
+            let schemaVersion = 1
+            let appBuild, sourceRevision, modelSHA256, nativeRevision: String
+            let deviceIdentifier: String?
+            let operatingSystem: String
+            let timestamp: Date
+            let userDeclaredAirplaneMode: Bool
+            let numericalCheck: LESNumericalCheck?
+            let candidateCheck: LESPrefillCheck?
+            let benchmark: OrnithPrefillBenchmark.Report?
+            let admissions: [LESMemoryAdmission]
+            let failure: String?
+        }
+        do {
+            let report = Report(appBuild: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown",
+                sourceRevision: BuildInfo.gitRevision, modelSHA256: GGUFModelManifest.primaryOrnith.sha256,
+                nativeRevision: LESContext.revision, deviceIdentifier: Sysctl.string("hw.machine"),
+                operatingSystem: ProcessInfo.processInfo.operatingSystemVersionString, timestamp: Date(),
+                userDeclaredAirplaneMode: userDeclaredAirplaneMode, numericalCheck: numericalCheck,
+                candidateCheck: activePrefillCheck, benchmark: prefillBenchmark, admissions: memoryAdmissions, failure: prefillBenchmarkFailure)
+            let folder = documents.appendingPathComponent("Diagnostics")
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let url = folder.appendingPathComponent("ornith-prefill-" + UUID().uuidString + ".json")
+            let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]; encoder.dateEncodingStrategy = .iso8601
+            try encoder.encode(report).write(to: url, options: .atomic); prefillBenchmarkURL = url
+        } catch { self.error = error.localizedDescription }
+    }
     func startAPI() {
-        guard canStart, chatReady, apiServer == nil else { return }
+        guard canStart, chatReady, !batchSettingsChanged, apiServer == nil else { return }
         guard (1024...65535).contains(apiPort) else { error = "Välj en port mellan 1024 och 65535."; return }
         do {
             let key = try LocalModelAPIServer.makeAccessKey(), id = UUID()
-            apiAccessKey = key; apiID = id; apiStatus = "Startar lokalt API…"; error = nil
+            guard systemPrompt.utf8.count <= 32768 else { throw LocalAPIError.invalid("system", "Systemprompt får vara högst 32 KiB.") }
+            apiAccessKey = key; apiID = id; apiSystemPrompt = systemPrompt; apiStatus = "Startar lokalt API…"; error = nil
             apiServer = try LocalModelAPIServer(key: key, port: UInt16(apiPort), defaults: chatOptions, handler: { [weak self] request in
                 guard let self else { throw LocalAPIError(status: 503, message: "Phone service is closed") }
                 return try await self.openAPIRequest(request)
@@ -429,7 +562,7 @@ final class OrnithLESAppModel {
         } catch { self.error = error.localizedDescription; stopAPI() }
     }
     func stopAPI() {
-        apiID = nil; apiServer?.stop(); apiServer = nil
+        apiID = nil; apiServer?.stop(); apiServer = nil; apiSystemPrompt = ""
         isAPIRunning = false; apiAccessKey = ""; apiURLs = []; apiStatus = "Avstängd"
         if operationIsAPI { control?.cancel() }
     }
@@ -438,7 +571,7 @@ final class OrnithLESAppModel {
         let recovery = LESControl(); control = recovery
         do {
             let check = try await worker.prepareChat(modelsRoot: modelsRoot, privateRoot: privateRoot, existing: nil,
-                control: recovery, progress: { _ in }, onCheck: { _ in })
+                control: recovery, configuration: activeBatchConfiguration ?? .init(), progress: { _ in }, onCheck: { _ in })
             guard check.nativeBenchmarkAdmitted, !recovery.isCancellationRequested else { throw CancellationError() }
             numericalCheck = check; chatControl = recovery; chatReady = true; status = "API redo för nästa anrop."
         } catch { await worker.closeChat(); status = "Aktivera snabbchatten igen för att återuppta API:t." }
@@ -456,7 +589,9 @@ final class OrnithLESAppModel {
         let id = UUID(), lease = LESRequestLease(flag)
         let output = AsyncThrowingStream<LocalChatEvent, Error>.makeStream(bufferingPolicy: .bufferingOldest(64))
         output.continuation.onTermination = { if case .cancelled = $0 { lease.cancel() } }
-        let input = request.messages.map { Qwen35ChatMessage(role: Qwen35ChatMessage.Role(rawValue: $0.role)!, content: $0.content, reasoningContent: $0.reasoning) }
+        let input = Qwen35ChatMessage.applyingSystemPrompt(apiSystemPrompt, to: request.messages.map {
+            Qwen35ChatMessage(role: Qwen35ChatMessage.Role(rawValue: $0.role)!, content: $0.content, reasoningContent: $0.reasoning)
+        })
         let channel = AsyncThrowingStream<Qwen4ExpTextGeneration.Event, Error>.makeStream(bufferingPolicy: .bufferingOldest(64))
         activeID = id; control = flag; isBusy = true; operationIsAPI = true; error = nil
         status = "API: förbereder lokal generering…"

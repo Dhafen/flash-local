@@ -7,6 +7,16 @@ import MinirunKit
 @testable import MinirunRunners
 
 final class OrnithLESChatTests: XCTestCase {
+    func testBatchBenchmarkRejectsDifferentPartialOrMissingTokenOutputs() {
+        let tokens = Array(0..<129)
+        XCTAssertTrue(OrnithPrefillBenchmark.Report.same128TokenOutputs([tokens, tokens, tokens, tokens]))
+        XCTAssertFalse(OrnithPrefillBenchmark.Report.same128TokenOutputs([tokens, tokens, tokens]))
+        var changed = tokens; changed[128] = 17
+        XCTAssertFalse(OrnithPrefillBenchmark.Report.same128TokenOutputs([tokens, changed, tokens, tokens]))
+        let short = Array(tokens.prefix(127))
+        XCTAssertFalse(OrnithPrefillBenchmark.Report.same128TokenOutputs([short, short, short, short]))
+        print("ORNITH_PREFILL_COMPARISON exactOutputs=true min128Tokens=true partialRejected=true syntheticOnly=true")
+    }
     func testDefaultSamplerIsIdenticalToExistingGreedyAndDoesNotChangeLogits() throws {
         var sampler = LocalTokenSampler(seed: 42)
         let options = LocalGenerationOptions()
@@ -16,8 +26,8 @@ final class OrnithLESChatTests: XCTestCase {
             XCTAssertEqual(try sampler.select(logits, options: options), try Qwen4ExpGreedyToken.select(logits))
             XCTAssertEqual(logits, unchanged)
         }
-        XCTAssertNil(options.thinkingBudget); XCTAssertEqual(options.temperature, 0)
-        print("ORNITH_CHAT_SAMPLING greedyIdentical=true logitsUnchanged=true thinkingBudgetOptIn=true fixtures=128 trainedInference=false")
+        XCTAssertEqual(options.thinkingBudget, 512); XCTAssertEqual(options.maximumNewTokens, 2048); XCTAssertEqual(options.temperature, 0)
+        print("ORNITH_CHAT_SAMPLING greedyIdentical=true logitsUnchanged=true thinkingBudgetDefault512=true fixtures=128 trainedInference=false")
     }
     func testAdmittedChatUsesOnlyValidatedBatchAndBindsModelAndRuntime() throws {
         let serial: [String: Any] = ["positions": 4, "maximumAbsoluteError": 0.001, "relativeL2Error": 0.0001,
@@ -43,6 +53,35 @@ final class OrnithLESChatTests: XCTestCase {
             let check = try JSONDecoder().decode(LESNumericalCheck.self, from: JSONSerialization.data(withJSONObject: raw))
             XCTAssertTrue(check.nativeBenchmarkAdmitted)
             XCTAssertEqual(try OrnithLESChatGeneration.validatedPrefill(check, modelSHA256: "model", nativeRevision: "native"), batch)
+            let selected = try OrnithLESChatGeneration.validatedBatch(.init(), proof: nil, baseline: check,
+                modelSHA256: "model", nativeRevision: "native")
+            XCTAssertEqual(selected.0, batch); XCTAssertEqual(selected.1, 4)
+            var tuning = LESPrefillConfiguration(); tuning.evaluationTokens = 32; tuning.physicalTokens = 8
+            XCTAssertThrowsError(try OrnithLESChatGeneration.validatedBatch(tuning, proof: nil, baseline: check,
+                modelSHA256: "model", nativeRevision: "native"))
+            var tunedObserved = serial, tunedFree = plain
+            tunedObserved["configuredPhysicalBatchTokens"] = 8; tunedObserved["maximumPhysicalBatchTokens"] = 8
+            tunedFree["configuredPhysicalBatchTokens"] = 8; tunedFree["maximumPhysicalBatchTokens"] = 8
+            var tuned: [String: Any] = ["modelSHA256": "model", "nativeRevision": "native",
+                "referenceRevision": Qwen4ExpCPUReference.sourceRevision,
+                "configuration": ["evaluationTokens": 32, "physicalTokens": 8],
+                "contextTokens": 4096, "promptTokens": 22, "forwardCount": 25,
+                "referenceMetrics": proof["referenceMetrics"]!, "observed": tunedObserved, "callbackFree": tunedFree]
+            func decodeProof() throws -> LESPrefillCheck {
+                try JSONDecoder().decode(LESPrefillCheck.self, from: JSONSerialization.data(withJSONObject: tuned))
+            }
+            let admitted = try OrnithLESChatGeneration.validatedBatch(tuning, proof: decodeProof(), baseline: check,
+                modelSHA256: "model", nativeRevision: "native")
+            XCTAssertEqual(admitted.0, 32); XCTAssertEqual(admitted.1, 8)
+            tuned["modelSHA256"] = "changed"
+            XCTAssertThrowsError(try OrnithLESChatGeneration.validatedBatch(tuning, proof: decodeProof(), baseline: check,
+                modelSHA256: "model", nativeRevision: "native"))
+            tuned["modelSHA256"] = "model"; tuned["nativeRevision"] = "changed"
+            XCTAssertThrowsError(try OrnithLESChatGeneration.validatedBatch(tuning, proof: decodeProof(), baseline: check,
+                modelSHA256: "model", nativeRevision: "native"))
+            tuned["nativeRevision"] = "native"; tuning.evaluationTokens = 16
+            XCTAssertThrowsError(try OrnithLESChatGeneration.validatedBatch(tuning, proof: decodeProof(), baseline: check,
+                modelSHA256: "model", nativeRevision: "native"))
             XCTAssertThrowsError(try OrnithLESChatGeneration.validatedPrefill(check, modelSHA256: "changed", nativeRevision: "native"))
             XCTAssertThrowsError(try OrnithLESChatGeneration.validatedPrefill(check, modelSHA256: "model", nativeRevision: "changed"))
         }

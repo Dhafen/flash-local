@@ -12,6 +12,7 @@ public struct LESMemoryPlan: Codable, Sendable, Equatable {
     public let kvBytes: UInt64
     public let ssmBytes: UInt64
     public let runtimeReserveBytes: UInt64
+    public let batchScratchReserveBytes: UInt64?
     public let prefillSlots: Int
     public let cacheSlotsPerLayer: Int
     public let lookaheadDepth: Int
@@ -23,10 +24,11 @@ public struct LESMemoryPlan: Codable, Sendable, Equatable {
 
     public init(index: GGUFIndex, contextTokens: Int, footprint: ProcessFootprint,
                 lookaheadDepth: Int = 4, pageCacheOnly: Bool = false,
-                preferredExpertBytes: UInt64 = 2_000_000_000) throws {
+                preferredExpertBytes: UInt64 = 2_000_000_000, physicalBatchTokens: Int = 4) throws {
         let config = try Qwen35MoEConfig(index: index)
         guard (32...65536).contains(contextTokens), contextTokens <= config.contextLimit,
-              (0...16).contains(lookaheadDepth), config.expertsPerToken <= 8 else {
+              (0...16).contains(lookaheadDepth), config.expertsPerToken <= 8,
+              [1, 4, 8, 16].contains(physicalBatchTokens) else {
             throw GGUFError.unsupported("LES context or scheduling geometry")
         }
         let ceiling: UInt64 = 5_500_000_000
@@ -38,7 +40,10 @@ public struct LESMemoryPlan: Codable, Sendable, Equatable {
         baselineAvailableBytes = footprint.availableBytes
         self.contextTokens = contextTokens
         requestedLookaheadDepth = pageCacheOnly ? 0 : min(lookaheadDepth, config.experts)
-        prefillSlots = 32
+        // A microbatch may choose eight different experts for every token.
+        // Budget the complete union before increasing graph dimensions.
+        let stagingSlots = physicalBatchTokens * 8
+        prefillSlots = stagingSlots
         var groups: [String: (bytes: UInt64, layers: UInt64)] = [:]
         var dense = UInt64(index.headerByteCount + 65536)
         for tensor in index.tensors.values {
@@ -60,9 +65,16 @@ public struct LESMemoryPlan: Codable, Sendable, Equatable {
         ssmBytes = UInt64(config.recurrentLayers * config.recurrentHeads *
             config.recurrentStateSize * config.recurrentStateSize * 4) + (4 << 20)
         // Includes the native runtime's 1 GiB reservation plus a stop margin.
-        runtimeReserveBytes = (1 << 30) + (128 << 20)
+        // Conservative allowance for larger transient recurrent-state,
+        // attention-score and vocabulary tensors, including allocator slack.
+        // It is an admission bound, not a measured peak or throughput claim.
+        let elementsPerToken = config.recurrentHeads * config.recurrentStateSize * config.recurrentStateSize +
+            config.attentionHeads * contextTokens + config.vocabularySize + config.hiddenSize * 16
+        let extraScratch = UInt64(max(0, physicalBatchTokens - 4)) * max(32 << 20, UInt64(elementsPerToken) * 4 * 8)
+        batchScratchReserveBytes = extraScratch
+        runtimeReserveBytes = (1 << 30) + (128 << 20) + extraScratch
         let fixed = baselineFootprintBytes + denseBytes + kvBytes + ssmBytes + runtimeReserveBytes
-        let staging = groups.values.reduce(UInt64(0)) { $0 + $1.bytes * 32 }
+        let staging = groups.values.reduce(UInt64(0)) { $0 + $1.bytes * UInt64(stagingSlots) }
         let perSlot = groups.values.reduce(UInt64(0)) { $0 + $1.bytes * $1.layers }
         prefillAllocationBytes = staging; expertBytesPerSlot = perSlot
         let detail = "baseline=\(footprint.footprintBytes) available=\(footprint.availableBytes.map { String($0) } ?? "unknown") ceiling=\(processCeilingBytes) dense=\(denseBytes) KV=\(kvBytes) SSM=\(ssmBytes) reserve=\(runtimeReserveBytes) staging=\(staging) bytesPerSlot=\(perSlot)"

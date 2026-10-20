@@ -574,3 +574,26 @@ This delivery does not replace the measured [build-123 phone baseline](ORNITH-PH
 prove API/USB phone reachability or explicit-cap quality, establish sustained
 workloads, or extend validated context. The persistent expert-I/O scheduling
 candidate is separate, disabled by default and not part of this IPA.
+
+## Build 126 prompt controls delivery
+
+Runtime source `6c1084c87b35c749a5152c140c4828e9dde84126` is privately available as 0.1.0 (126).
+[Full delivery run 39250964590](https://github.com/Dhafen/flash-local/actions/runs/39250964590) passes 32 selected native/chat/tokenizer
+Swift functions, 48 additional physical/logical batch variants with zero
+synthetic logit error, all retained native/reference/Swiftlet/QPack gates,
+585 app tests, 483 package invocations (9 skips), nine actual API tests
+and 64 reviewed platform/appearance captures. Device archive, signing, memory,
+privacy and fresh independent private availability pass.
+
+[Prompt batching and editable work instructions](ORNITH-PREFILL.md) are isolated
+on the child branch. Nondefault batches require original-weight full logits,
+exact expert sets, callback-free replay, actual dimensions and bounded memory.
+The ABBA phone comparison retains complete token IDs and separate phase metrics,
+requires at least 128 timed decode forwards and never auto-promotes a setting.
+Default evaluation 4/physical Auto, the installed GGUF, top-eight routing and
+the independently retained ordinary GGUF/REAM engines are preserved.
+
+This delivery establishes no larger-batch iPhone speed, general trained-model
+quality, API/USB phone reachability or long-context result. The accepted measured
+checkpoint remains [build 123](ORNITH-PHONE-123.md). The separate persistent-I/O
+candidate remains unshipped and disabled.

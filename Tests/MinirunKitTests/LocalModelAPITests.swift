@@ -4,6 +4,24 @@ import XCTest
 
 final class LocalModelAPITests: XCTestCase {
     private let key = String(repeating: "test-key-", count: 8)
+    func testFixedReasoningPresets() throws {
+        let expected: [(OrnithThinkingPreset, Int, Int, Bool)] = [
+            (.off, 0, 2048, false),
+            (.small, 256, 1536, true),
+            (.medium, 512, 2048, true),
+            (.ultra, 2048, 4096, true)
+        ]
+        for (preset, budget, maximum, enabled) in expected {
+            let options = preset.options
+            XCTAssertEqual(options.thinkingBudget, budget)
+            XCTAssertEqual(options.maximumNewTokens, maximum)
+            XCTAssertEqual(options.enableThinking, enabled)
+            XCTAssertEqual(OrnithThinkingPreset.matching(options), preset)
+            XCTAssertNoThrow(try options.validate())
+        }
+        XCTAssertEqual(LocalGenerationOptions().maximumNewTokens, 2048)
+        XCTAssertEqual(LocalGenerationOptions().thinkingBudget, 512)
+    }
     private func body(_ overrides: [String: Any] = [:]) throws -> Data {
         var value: [String: Any] = ["model": LocalChatRequest.modelID, "messages": [["role": "user", "content": "Hej"]]]
         value.merge(overrides) { _, new in new }
@@ -29,7 +47,7 @@ final class LocalModelAPITests: XCTestCase {
     }
     func testUnsupportedToolsAndInvalidParametersFailBeforeInference() throws {
         let invalid: [[String: Any]] = [["temperature": true], ["temperature": -1], ["top_p": 0], ["max_tokens": 0],
-            ["max_tokens": 2049], ["max_tokens": 1.5], ["thinking_budget": 512], ["n": 2],
+            ["max_tokens": 4097], ["max_tokens": 1.5], ["thinking_budget": 4097], ["n": 2],
             ["max_tokens": 64, "max_completion_tokens": 65], ["stop": ["END"]], ["seed": -1],
             ["tools": [["type": "function"]]], ["response_format": ["type": "json_object"]],
             ["messages": [["role": "user", "content": "one"], ["role": "user", "content": "two"]]],

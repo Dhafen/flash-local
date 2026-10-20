@@ -99,11 +99,11 @@ struct layer_trace {
     }
 };
 static output evaluate(int fd, const char * dir, bool metal, int depth, int steps, int cache = 8, int prefill = 0,
-                       bool trace_layers = false, bool trace_routing = true) {
+                       bool trace_layers = false, bool trace_routing = true, int physical = 4, int evaluation = 4) {
     if (trace_layers && prefill) throw std::runtime_error("Layer controls use single-token forwards");
     layer_trace trace;
     flo_options options{};
-    options.context_tokens = steps > 5 ? 256 : 32; options.prefill_slots = prefill > 0 ? 32 : 16;
+    options.context_tokens = steps > 5 ? 256 : 32; options.prefill_slots = prefill > 0 ? physical * 8 : 16;
     options.cache_slots_per_layer = cache;
     options.lookahead_depth = depth; options.io_threads = 2; options.cpu_threads = 2;
     options.metal = metal; options.trace_routing = trace_routing; options.memory_ceiling_bytes = 5500000000ULL;
@@ -115,8 +115,8 @@ static output evaluate(int fd, const char * dir, bool metal, int depth, int step
     try {
         const int32_t tokens[] = {1, 2, 3, 15, 4};
         for (int first = 0; first < steps;) {
-            const int count = first < prefill ? std::min(4, prefill - first) : 1;
-            int32_t chunk[4]{};
+            const int count = first < prefill ? std::min(evaluation, prefill - first) : 1;
+            int32_t chunk[32]{};
             for (int i = 0; i < count; ++i) chunk[i] = tokens[(first + i) % 5];
             std::vector<float> row(flo_vocabulary_size(context));
             trace.reset();
@@ -130,10 +130,12 @@ static output evaluate(int fd, const char * dir, bool metal, int depth, int step
         if (!trace_routing && !trace_layers && (out.metrics.routing_decisions || out.metrics.canonical_routing_digest || out.metrics.canonical_expert_set_digest ||
                 out.metrics.probe_samples)) throw std::runtime_error("Callback-free execution unexpectedly observed tensors");
         flo_reset(context);
-        const int first_count = prefill > 0 ? std::min(4, prefill) : 1;
+        const int first_count = prefill > 0 ? std::min(evaluation, prefill) : 1;
+        int32_t initial[32]{};
+        for (int i = 0; i < first_count; ++i) initial[i] = tokens[i % 5];
         std::vector<float> replay(out.logits[0].size());
         trace.reset();
-        if (flo_decode(context, tokens, first_count, replay.data(), (int)replay.size()) || replay != out.logits[0])
+        if (flo_decode(context, initial, first_count, replay.data(), (int)replay.size()) || replay != out.logits[0])
             throw std::runtime_error("Reset did not restore the complete recurrent/KV state");
         if (trace_layers && trace.points != trace.expected) throw std::runtime_error("Reset lost native semantic layer trace");
     } catch (...) { flo_close(context); throw; }
@@ -251,6 +253,22 @@ int main(int argc, char ** argv) {
             callback_free_error = std::max(callback_free_error, compare(cpu, plain, false));
         }
         if (callback_free_error > 1e-6) throw std::runtime_error("Callback-free timing path changed model logits");
+        // Actually execute each physical dimension; a five-token fixture alone
+        // cannot prove that a configured sixteen-token graph was exercised.
+        const int tuning_steps = steps == 5 ? 35 : steps;
+        const auto tuning_reference = steps == 5 ? evaluate(fd, nullptr, false, 0, tuning_steps) : cpu;
+        double tuning_error = 0; int tuning_variants = 0;
+        for (int physical : {1, 4, 8, 16}) for (int evaluation : {physical, 32}) for (bool observed : {true, false}) {
+            const auto tuned = evaluate(fd, dir.c_str(), false, 0, tuning_steps, 0, 33, false, observed, physical, evaluation);
+            if (tuned.metrics.configured_physical_batch_tokens != uint64_t(physical) ||
+                tuned.metrics.maximum_physical_batch_tokens != uint64_t(physical))
+                throw std::runtime_error("Requested physical batch was not actually executed");
+            if (evaluation > physical && tuned.metrics.skipped_intermediate_output_batches == 0)
+                throw std::runtime_error("Intermediate output selection was not actually exercised");
+            tuning_error = std::max(tuning_error, compare(tuning_reference, tuned, observed));
+            ++tuning_variants;
+        }
+        if (tuning_error > 1e-6) throw std::runtime_error("Larger physical/evaluation batch changed model logits");
         json report{{"syntheticOnly", true}, {"physicalPhone", false}, {"revision", flo_revision()},
             {"residentCPUReference", true}, {"cpuStreamingMaximumAbsoluteError", error},
             {"metalExecutionVerified", false}, {"actualRoutingIdentical", true},
@@ -262,6 +280,9 @@ int main(int argc, char ** argv) {
             {"completeLayerCheckpointTrace", true}, {"layerCheckpointMaximumAbsoluteError", layer_error},
             {"callbackFreeVariants", 6}, {"callbackFreeMaximumAbsoluteError", callback_free_error},
             {"batchPrefixLengths", prefixes}, {"batchedPrefillMaximumAbsoluteError", batch_error},
+            {"prefillTuningVariants", tuning_variants}, {"prefillTuningMaximumAbsoluteError", tuning_error},
+            {"physicalBatchDimensionsActuallyExecuted", {1, 4, 8, 16}},
+            {"intermediateOutputSelectionVerified", true},
             {"resetBitwiseIdentical", true}, {"sameGreedy", true}, {"modelRequantized", false},
             {"gpuTimestampsAvailable", false},
             {"expertPayloadCopied", false}, {"positions", steps}, {"cpuLogits", cpu.logits}};
@@ -274,6 +295,9 @@ int main(int argc, char ** argv) {
                   << layer_error << " syntheticOnly=true\n";
         std::cout << "ORNITH_CALLBACK_FREE variants=6 serialAndBatch=true fullVocabulary=true reset=true noObservers=true maxAbs="
                   << callback_free_error << " syntheticOnly=true\n";
+        std::cout << "ORNITH_PREFILL_TUNING variants=" << tuning_variants << " physical=1,4,8,16 evaluationThrough32=true"
+                  << " actualDimensions=true fullVocabulary=true canonicalRouting=true callbackFree=true unneededHeadsSkipped=true maxAbs="
+                  << tuning_error << " syntheticOnly=true physicalPhone=false\n";
         return 0;
     } catch (const std::exception & e) { std::cerr << e.what() << '\n'; return 1; }
 }

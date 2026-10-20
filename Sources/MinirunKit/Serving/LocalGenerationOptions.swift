@@ -3,20 +3,20 @@ import Foundation
 /// Generation controls shared by the local UI and the authenticated LAN API.
 /// Routing, weights and native graph mathematics are unaffected.
 public struct LocalGenerationOptions: Codable, Equatable, Sendable {
-    public var maximumNewTokens: Int = 512
+    public var maximumNewTokens: Int = 2048
     public var enableThinking: Bool = true
-    public var thinkingBudget: Int? = nil
+    public var thinkingBudget: Int? = 512
     public var temperature: Double = 0
     public var topP: Double = 1
     public var seed: UInt64 = 42
     public init() {}
     public var thinkingEnabled: Bool { enableThinking && thinkingBudget != 0 }
     public func validate() throws {
-        guard (1...2048).contains(maximumNewTokens) else {
-            throw LocalAPIError.invalid("max_tokens", "Välj 1–2048 token totalt för tänkande och svar.")
+        guard (1...4096).contains(maximumNewTokens) else {
+            throw LocalAPIError.invalid("max_tokens", "Välj 1–4096 token totalt för tänkande och svar.")
         }
         if let budget = thinkingBudget {
-            guard (0...2048).contains(budget), budget == 0 || !enableThinking || budget + 8 < maximumNewTokens else {
+            guard (0...4096).contains(budget), budget == 0 || !enableThinking || budget + 8 < maximumNewTokens else {
                 throw LocalAPIError.invalid("thinking_budget", "Tänkbudgeten måste lämna minst 9 token till avslut och svar.")
             }
         }
@@ -24,6 +24,44 @@ public struct LocalGenerationOptions: Codable, Equatable, Sendable {
             throw LocalAPIError.invalid("temperature", "Temperatur måste vara 0–2 och top_p större än 0 och högst 1.")
         }
         guard seed <= UInt64(Int32.max) else { throw LocalAPIError.invalid("seed", "Slumpfrö måste vara 0–2147483647.") }
+    }
+}
+
+
+/// Fixed, bounded reasoning presets. The output cap includes thinking and answer;
+/// context remains 8192 tokens and the prompt budget is context minus output.
+public enum OrnithThinkingPreset: String, CaseIterable, Identifiable, Sendable {
+    case off, small, medium, ultra
+    public var id: String { rawValue }
+    public var title: String {
+        switch self {
+        case .off: "0"
+        case .small: "Small"
+        case .medium: "Medium"
+        case .ultra: "Ultra"
+        }
+    }
+    public var options: LocalGenerationOptions {
+        var value = LocalGenerationOptions()
+        switch self {
+        case .off:
+            value.enableThinking = false; value.thinkingBudget = 0; value.maximumNewTokens = 2048
+        case .small:
+            value.enableThinking = true; value.thinkingBudget = 256; value.maximumNewTokens = 1536
+        case .medium:
+            value.enableThinking = true; value.thinkingBudget = 512; value.maximumNewTokens = 2048
+        case .ultra:
+            value.enableThinking = true; value.thinkingBudget = 2048; value.maximumNewTokens = 4096
+        }
+        return value
+    }
+    public static func matching(_ value: LocalGenerationOptions) -> Self? {
+        allCases.first { preset in
+            let expected = preset.options
+            return value.enableThinking == expected.enableThinking
+                && value.thinkingBudget == expected.thinkingBudget
+                && value.maximumNewTokens == expected.maximumNewTokens
+        }
     }
 }
 

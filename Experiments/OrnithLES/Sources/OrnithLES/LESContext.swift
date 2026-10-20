@@ -34,6 +34,8 @@ public struct LESMetrics: Codable, Sendable, Equatable {
     public let canonicalExpertSetDigest: UInt64?
     public let demandCacheHits, demandCacheMisses: UInt64
     public let metalTimestampedCommandBuffers: UInt64
+    public let configuredPhysicalBatchTokens, maximumPhysicalBatchTokens: Int?
+    public let skippedIntermediateOutputBatches: UInt64?
     init(_ value: flo_metrics) {
         ioBytes = value.io_bytes; ioCalls = value.io_calls; expertReads = value.misses
         selectedExpertUnion = value.selected_experts; predictions = value.predicted
@@ -45,6 +47,9 @@ public struct LESMetrics: Codable, Sendable, Equatable {
         canonicalExpertSetDigest = value.canonical_expert_set_digest
         demandCacheHits = value.demand_hits; demandCacheMisses = value.demand_misses
         metalTimestampedCommandBuffers = value.timestamped_command_buffers
+        configuredPhysicalBatchTokens = Int(value.configured_physical_batch_tokens)
+        maximumPhysicalBatchTokens = Int(value.maximum_physical_batch_tokens)
+        skippedIntermediateOutputBatches = value.skipped_intermediate_output_batches
     }
 }
 
@@ -144,61 +149,4 @@ public final class LESContext {
     public var projectionProbe: LESProjectionProbe? { LESProjectionProbe(flo_snapshot(handle)) }
     public static var revision: String { String(cString: flo_revision()) }
     static func failure() -> Error { GGUFError.invalid(String(cString: flo_last_error())) }
-}
-
-public enum LESPreparation {
-    private struct Seal: Codable {
-        let sourceSHA256: String
-        let sourceBytes: UInt64
-        let denseSHA256: String
-        let manifestSHA256: String
-        let runtimeRevision: String
-    }
-    private static func digest(_ url: URL, control: LESControl) throws -> String {
-        return try FileDigestComputer.digest(ofFileAt: url, algorithm: .sha256,
-            cancellationRequested: { control.shouldAbort() }).hex
-    }
-    public static func prepare(artifact: VerifiedGGUFArtifact, privateRoot: URL, control: LESControl,
-                               onAdmission: (LESMemoryAdmission) -> Void = { _ in }) throws -> URL {
-        try artifact.assertUnchanged()
-        let fm = FileManager.default
-        try fm.createDirectory(at: privateRoot, withIntermediateDirectories: true)
-        var excluded = URLResourceValues(); excluded.isExcludedFromBackup = true
-        var root = privateRoot; try root.setResourceValues(excluded)
-        let final = root.appendingPathComponent("gguf-" + artifact.manifest.sha256)
-        if fm.fileExists(atPath: final.path) {
-            let seal = try JSONDecoder().decode(Seal.self, from: Data(contentsOf: final.appendingPathComponent("seal.json")))
-            guard seal.sourceSHA256 == artifact.manifest.sha256, seal.sourceBytes == artifact.manifest.fileByteCount,
-                  seal.runtimeRevision == LESContext.revision,
-                  try digest(final.appendingPathComponent("dense.gguf"), control: control) == seal.denseSHA256,
-                  try digest(final.appendingPathComponent("manifest-template.json"), control: control) == seal.manifestSHA256 else {
-                throw GGUFError.invalid("LES prepared files failed integrity verification")
-            }
-            try artifact.assertUnchanged(); return final
-        }
-        let plan = try LESBenchmark.plan(artifact, context: 32, depth: 4,
-            phase: "preparation", onAdmission: onAdmission)
-        let available = try root.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
-            .volumeAvailableCapacityForImportantUsage
-        guard let available, available > 0, UInt64(available) > plan.denseBytes + (64 << 20) else {
-            throw GGUFError.limit("LES preparation needs space for dense weights; the original GGUF is retained")
-        }
-        let stage = root.appendingPathComponent("stage-" + UUID().uuidString, isDirectory: true)
-        try fm.createDirectory(at: stage, withIntermediateDirectories: false)
-        var completed = false
-        defer { if !completed { try? fm.removeItem(at: stage) } }
-        let fd = try artifact.duplicateForReading(); defer { Darwin.close(fd) }
-        let status = flo_prepare(fd, stage.path, { user in
-            guard let user else { return true }
-            return Unmanaged<LESControl>.fromOpaque(user).takeUnretainedValue().shouldAbort()
-        }, Unmanaged.passUnretained(control).toOpaque())
-        guard status == 0 else { throw LESContext.failure() }
-        let seal = Seal(sourceSHA256: artifact.manifest.sha256, sourceBytes: artifact.manifest.fileByteCount,
-            denseSHA256: try digest(stage.appendingPathComponent("dense.gguf"), control: control),
-            manifestSHA256: try digest(stage.appendingPathComponent("manifest-template.json"), control: control),
-            runtimeRevision: LESContext.revision)
-        try artifact.assertUnchanged()
-        try JSONEncoder().encode(seal).write(to: stage.appendingPathComponent("seal.json"), options: .atomic)
-        try fm.moveItem(at: stage, to: final); completed = true; return final
-    }
 }

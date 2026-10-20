@@ -1,7 +1,16 @@
 name: Ornith LES isolated validation
 on:
   workflow_call:
+    inputs:
+      use_macos15:
+        type: boolean
+        default: true
   workflow_dispatch:
+    inputs:
+      use_macos15:
+        description: 'Use macos-15 arm64 with pinned Xcode 26.2 (uncheck for macos-26)'
+        type: boolean
+        default: true
   push:
     branches: [codex/ornith-les-backend]
     paths:
@@ -23,7 +32,7 @@ defaults:
     shell: bash
 jobs:
   native-controls:
-    runs-on: macos-26
+    runs-on: ${{ (github.event_name != 'workflow_dispatch' || inputs.use_macos15) && 'macos-15' || 'macos-26' }}
     timeout-minutes: 35
     env:
       ORNITH_LES_CPU_CONTROL: '1'
@@ -92,6 +101,7 @@ jobs:
           grep 'ORNITH_EXPERT_SETS exactPositionLayer=true rankPermutationDistinguished=true changedExpertDetected=true duplicateRejected=true atomic=true' .work/les-top8-controls.log
           grep 'ORNITH_BATCH_CONTROL prefixCases=11 steps=128 .*canonicalRouting=true reset=true syntheticOnly=true' .work/les-top8-controls.log
           for log in .work/les-controls.log .work/les-mixed-controls.log .work/les-top8-controls.log; do
+            grep 'ORNITH_PREFILL_TUNING variants=16 physical=1,4,8,16 evaluationThrough32=true actualDimensions=true fullVocabulary=true canonicalRouting=true callbackFree=true ' "$log"
             grep 'ORNITH_LAYER_CONTROL mainLayers=4 complete=true rawDeltaNetDistinct=true finalLayerMatched=true ' "$log"
             grep 'ORNITH_CALLBACK_FREE variants=6 serialAndBatch=true fullVocabulary=true reset=true noObservers=true ' "$log"
           done
@@ -143,8 +153,17 @@ jobs:
           grep 'ORNITH_ARITHMETIC_GATE independentReference=true originalDiscrepancyPreserved=true fullRoutingRequired=true callbackFreeRequired=true batchFallback=true syntheticOnly=true' .work/les-swift-tests.log
           grep 'ORNITH_EXPERT_SET_GATE completeSetsRequired=true rankPermutationOnly=true predictionRankedTraceUnchanged=true strictLogits=true missingProofRejected=true batchFallback=true syntheticOnly=true' .work/les-swift-tests.log
           grep 'ORNITH_CHAT_POLICY inProcessGate=true matchingModelAndRuntime=true exactPrefixOnly=true ordinaryEngineUnchanged=true syntheticOnly=true' .work/les-swift-tests.log
-          grep 'ORNITH_CHAT_SAMPLING greedyIdentical=true logitsUnchanged=true thinkingBudgetOptIn=true fixtures=128 trainedInference=false' .work/les-swift-tests.log
+          grep 'ORNITH_PREFILL_POLICY actualBatchRequired=true exactExperts=true independentLogits=true callbackFree=true boundedMemory=true syntheticOnly=true' .work/les-swift-tests.log
+          grep 'ORNITH_PREFILL_COMPARISON exactOutputs=true min128Tokens=true partialRejected=true syntheticOnly=true' .work/les-swift-tests.log
+          grep 'ORNITH_SYSTEM_DEFAULT canonicalRoles=true emptyUnchanged=true explicitClientWins=true modelLoaded=false' .work/les-swift-tests.log
+          test "$(grep -c 'ORNITH_PREFILL_MEMORY physical=' .work/les-swift-tests.log)" = 3
+          grep 'ORNITH_CHAT_SAMPLING greedyIdentical=true logitsUnchanged=true thinkingBudgetDefault512=true fixtures=128 trainedInference=false' .work/les-swift-tests.log
           grep 'ORNITH_THINKING_BUDGET canonicalClosingTokens=true reasoningSeparated=true modelWeightsLoaded=false phoneInference=false' .work/les-swift-tests.log
+          grep 'ORNITH_CACHE_UPGRADE oldRuntimeRebuilt=true exactDenseBytes=true exactLogits=true originalUnchanged=true syntheticOnly=true' .work/les-swift-tests.log
+          grep 'ORNITH_CACHE_DAMAGE cases=5 rebuilt=true hashesRetained=true originalUnchanged=true syntheticOnly=true' .work/les-swift-tests.log
+          grep 'ORNITH_CACHE_INTERRUPTION validatedStageRecovered=true publishedCacheReused=true staleTransactionsCleaned=true originalUnchanged=true syntheticOnly=true' .work/les-swift-tests.log
+          grep 'ORNITH_CACHE_CANCEL oldCacheRetained=true sourceUnchanged=true directorySymlinkRejected=true outsideUntouched=true syntheticOnly=true' .work/les-swift-tests.log
+          grep 'ORNITH_CACHE_SOURCE changedOriginalRejected=true preparedFilesUntouched=true syntheticOnly=true' .work/les-swift-tests.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -158,6 +158,8 @@ struct flo_context {
     llama_context * context = nullptr;
     flo_abort abort = nullptr; void * user = nullptr;
     int vocabulary = 0, batch = 0, position = 0, capacity = 0;
+    int maximum_physical_batch = 0;
+    uint64_t skipped_intermediate_outputs = 0;
     bool poisoned = false, routing_failed = false;
     flo_checkpoint checkpoint = nullptr;
     void * checkpoint_user = nullptr;
@@ -230,6 +232,7 @@ flo_context * flo_open(int source, const char * directory, flo_options o, flo_ab
             }
             uint64_t admitted = fs::file_size(fs::path(directory) / "dense.gguf") + (1ULL << 30)
                 + (uint64_t)o.context_tokens * 20480 + 64 * 1024 * 1024;
+            admitted += uint64_t(std::max(0, std::min(16, o.prefill_slots / 8) - 4)) * (32ULL << 20);
             for (const auto & group : groups)
                 admitted += group.first.second * (o.prefill_slots + (o.cache_slots_per_layer > 0 ? group.second *
                     (o.cache_slots_per_layer + o.lookahead_depth) : 0));
@@ -315,7 +318,15 @@ int flo_decode(flo_context * c, const int32_t * tokens, int32_t count, float * o
         for (int first = 0; first < count; first += c->batch) {
             check_abort(c->abort, c->user); const int n = std::min(c->batch, count - first);
             auto batch = llama_batch_get_one(const_cast<int32_t *>(tokens + first), n);
+            // All recurrent/KV work and real expert choices are still evaluated.
+            // Only the final microbatch's logits escape this API. The pinned
+            // Qwen graph selects output rows after all transformer layers.
+            int8_t no_output[32]{};
+            const bool intermediate = first + n < count;
+            if (intermediate) batch.logits = no_output;
             require(llama_decode(c->context, batch) == 0, "LES forward failed");
+            if (intermediate) ++c->skipped_intermediate_outputs;
+            c->maximum_physical_batch = std::max(c->maximum_physical_batch, n);
             // ggml's evaluation callback can stop a split without returning an
             // error status. Never export logits from an invalid trace.
             require(!c->routing_failed, "LES routing observation failed"); c->position += n;
@@ -337,6 +348,9 @@ flo_metrics flo_snapshot(const flo_context * c) {
         out.routing_digest = c->routing.sequential; out.routing_decisions = c->routing.decisions;
         out.canonical_routing_digest = c->routing.canonical;
         out.canonical_expert_set_digest = c->routing.expert_sets;
+        out.configured_physical_batch_tokens = c->batch;
+        out.maximum_physical_batch_tokens = c->maximum_physical_batch;
+        out.skipped_intermediate_output_batches = c->skipped_intermediate_outputs;
         const auto & p = c->projection_probe;
         out.probe_samples = p.samples; out.probe_columns = p.columns;
         out.probe_weight_type = p.weight_type; out.probe_cpu_input_type = p.cpu_input_type;
@@ -358,4 +372,4 @@ flo_metrics flo_snapshot(const flo_context * c) {
     return out;
 }
 const char * flo_last_error() { return last_error.c_str(); }
-const char * flo_revision() { return "96bbf61710d44421ea54e63f5194f9b17c20d877+flash-local-tensor-major-v1"; }
+const char * flo_revision() { return "96bbf61710d44421ea54e63f5194f9b17c20d877+flash-local-batch-observation-v2"; }

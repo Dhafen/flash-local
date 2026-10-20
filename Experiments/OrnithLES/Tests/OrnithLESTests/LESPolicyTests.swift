@@ -7,6 +7,230 @@ import MinirunKit
 @testable import OrnithLES
 
 final class LESPolicyTests: XCTestCase {
+    private func withPreparationFixture(_ body: (URL, VerifiedGGUFArtifact, Data) throws -> Void) throws {
+        let fixtures = try XCTUnwrap(ProcessInfo.processInfo.environment["ORNITH_LES_FIXTURE_ROOT"])
+        let data = try Data(contentsOf: URL(fileURLWithPath: fixtures).appendingPathComponent("synthetic-ornith.gguf"))
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("ornith-cache-test-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try data.write(to: root.appendingPathComponent("synthetic.gguf"))
+        let manifest = try GGUFModelManifest(fileName: "synthetic.gguf", fileByteCount: UInt64(data.count),
+            sha256: FileDigestComputer.sha256(of: data))
+        let artifact = try VerifiedGGUFArtifact.verify(insideRoot: root, manifest: manifest)
+        try body(root, artifact, data)
+    }
+    private func oldRuntimeSeal(_ prepared: URL) throws {
+        let url = prepared.appendingPathComponent("seal.json")
+        var seal = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        seal["runtimeRevision"] = "previous-installed-engine-revision"
+        try JSONSerialization.data(withJSONObject: seal).write(to: url, options: .atomic)
+    }
+    func testOldRuntimePreparationRebuildsFromOriginalAndKeepsExactLogits() throws {
+        try withPreparationFixture { root, artifact, original in
+            let cache = root.appendingPathComponent("prepared")
+            let prepared = try LESPreparation.prepare(artifact: artifact, privateRoot: cache, control: LESControl())
+            let dense = try Data(contentsOf: prepared.appendingPathComponent("dense.gguf"))
+            func logits() throws -> [[Float]] {
+                let control = LESControl()
+                let plan = try LESMemoryPlan(index: artifact.index, contextTokens: 32,
+                    footprint: XCTUnwrap(ProcessFootprint.current()))
+                let context = try LESContext(artifact: artifact, prepared: prepared, plan: plan,
+                    control: control, syntheticCPUControl: true)
+                defer { context.close() }
+                return try [1, 2].map { try context.logits(tokens: [$0]) }
+            }
+            let expected = try logits()
+            try oldRuntimeSeal(prepared)
+            var admissions = 0
+            let repaired = try LESPreparation.prepare(artifact: artifact, privateRoot: cache, control: LESControl(),
+                onAdmission: { _ in admissions += 1 })
+            XCTAssertEqual(repaired, prepared); XCTAssertEqual(admissions, 1, "Regenerate; do not merely re-sign an old seal")
+            XCTAssertEqual(try Data(contentsOf: repaired.appendingPathComponent("dense.gguf")), dense)
+            XCTAssertEqual(try logits(), expected)
+            XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent("synthetic.gguf")), original)
+            try artifact.assertUnchanged()
+            print("ORNITH_CACHE_UPGRADE oldRuntimeRebuilt=true exactDenseBytes=true exactLogits=true originalUnchanged=true syntheticOnly=true")
+        }
+    }
+    func testPreparationRepairsDamagedMissingAndMalformedDerivedFiles() throws {
+        try withPreparationFixture { root, artifact, original in
+            let cache = root.appendingPathComponent("prepared")
+            let prepared = try LESPreparation.prepare(artifact: artifact, privateRoot: cache, control: LESControl())
+            let denseURL = prepared.appendingPathComponent("dense.gguf")
+            let manifestURL = prepared.appendingPathComponent("manifest-template.json")
+            let sealURL = prepared.appendingPathComponent("seal.json")
+            let dense = try Data(contentsOf: denseURL), manifest = try Data(contentsOf: manifestURL)
+            for scenario in 0..<5 {
+                switch scenario {
+                case 0:
+                    var damaged = dense; damaged[damaged.count - 1] ^= 1
+                    try damaged.write(to: denseURL)
+                case 1: try FileManager.default.removeItem(at: manifestURL)
+                case 2: try FileManager.default.removeItem(at: sealURL)
+                case 3: try Data("interrupted seal write".utf8).write(to: sealURL)
+                default:
+                    var seal = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: sealURL)) as? [String: Any])
+                    seal["sourceBytes"] = 0
+                    try JSONSerialization.data(withJSONObject: seal).write(to: sealURL)
+                }
+                var admissions = 0
+                _ = try LESPreparation.prepare(artifact: artifact, privateRoot: cache, control: LESControl(),
+                    onAdmission: { _ in admissions += 1 })
+                XCTAssertEqual(admissions, 1)
+                XCTAssertEqual(try Data(contentsOf: denseURL), dense)
+                XCTAssertEqual(try Data(contentsOf: manifestURL), manifest)
+                XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent("synthetic.gguf")), original)
+            }
+            print("ORNITH_CACHE_DAMAGE cases=5 rebuilt=true hashesRetained=true originalUnchanged=true syntheticOnly=true")
+        }
+    }
+    func testPreparationRecoversInterruptedPublicationAndReusesCurrentFiles() throws {
+        try withPreparationFixture { root, artifact, original in
+            let fm = FileManager.default, cache = root.appendingPathComponent("prepared")
+            let prepared = try LESPreparation.prepare(artifact: artifact, privateRoot: cache, control: LESControl())
+            let stage = prepared.deletingLastPathComponent().appendingPathComponent("stage-" + artifact.manifest.sha256)
+            let previous = prepared.deletingLastPathComponent().appendingPathComponent("previous-" + artifact.manifest.sha256)
+            let dense = try Data(contentsOf: prepared.appendingPathComponent("dense.gguf"))
+            try fm.copyItem(at: prepared, to: stage)
+            try oldRuntimeSeal(prepared)
+            try fm.moveItem(at: prepared, to: previous)
+            var admissions = 0
+            XCTAssertEqual(try LESPreparation.prepare(artifact: artifact, privateRoot: cache, control: LESControl(),
+                onAdmission: { _ in admissions += 1 }), prepared)
+            XCTAssertEqual(admissions, 0, "A complete, current sealed transaction can be recovered")
+            XCTAssertFalse(fm.fileExists(atPath: stage.path)); XCTAssertFalse(fm.fileExists(atPath: previous.path))
+            XCTAssertEqual(try Data(contentsOf: prepared.appendingPathComponent("dense.gguf")), dense)
+            let seal = try Data(contentsOf: prepared.appendingPathComponent("seal.json"))
+            for leftover in [stage, previous] {
+                try fm.createDirectory(at: leftover, withIntermediateDirectories: false)
+                try Data("incomplete derived file".utf8).write(to: leftover.appendingPathComponent("dense.gguf"))
+            }
+            _ = try LESPreparation.prepare(artifact: artifact, privateRoot: cache, control: LESControl(),
+                onAdmission: { _ in admissions += 1 })
+            XCTAssertEqual(admissions, 0)
+            XCTAssertEqual(try Data(contentsOf: prepared.appendingPathComponent("seal.json")), seal)
+            XCTAssertFalse(fm.fileExists(atPath: stage.path)); XCTAssertFalse(fm.fileExists(atPath: previous.path))
+            XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent("synthetic.gguf")), original)
+            print("ORNITH_CACHE_INTERRUPTION validatedStageRecovered=true publishedCacheReused=true staleTransactionsCleaned=true originalUnchanged=true syntheticOnly=true")
+        }
+    }
+    func testPreparationCancellationAndDirectorySymlinksCannotDiscardOtherFiles() throws {
+        try withPreparationFixture { root, artifact, original in
+            let fm = FileManager.default, cache = root.appendingPathComponent("prepared")
+            let prepared = try LESPreparation.prepare(artifact: artifact, privateRoot: cache, control: LESControl())
+            try oldRuntimeSeal(prepared)
+            let seal = try Data(contentsOf: prepared.appendingPathComponent("seal.json"))
+            let dense = try Data(contentsOf: prepared.appendingPathComponent("dense.gguf"))
+            let cancelled = LESControl()
+            XCTAssertThrowsError(try LESPreparation.prepare(artifact: artifact, privateRoot: cache, control: cancelled,
+                onAdmission: { _ in cancelled.cancel() }))
+            XCTAssertEqual(try Data(contentsOf: prepared.appendingPathComponent("seal.json")), seal)
+            XCTAssertEqual(try Data(contentsOf: prepared.appendingPathComponent("dense.gguf")), dense)
+            let outside = root.appendingPathComponent("other-files")
+            try fm.createDirectory(at: outside, withIntermediateDirectories: false)
+            let sentinel = Data("retained unrelated file".utf8)
+            try sentinel.write(to: outside.appendingPathComponent("keep.txt"))
+            try fm.removeItem(at: prepared)
+            try fm.createSymbolicLink(at: prepared, withDestinationURL: outside)
+            XCTAssertThrowsError(try LESPreparation.prepare(artifact: artifact, privateRoot: cache, control: LESControl()))
+            XCTAssertEqual(try Data(contentsOf: outside.appendingPathComponent("keep.txt")), sentinel)
+            XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent("synthetic.gguf")), original)
+            print("ORNITH_CACHE_CANCEL oldCacheRetained=true sourceUnchanged=true directorySymlinkRejected=true outsideUntouched=true syntheticOnly=true")
+        }
+    }
+    func testPreparationRejectsChangedOriginalBeforeTouchingPreparedFiles() throws {
+        try withPreparationFixture { root, artifact, original in
+            let cache = root.appendingPathComponent("prepared")
+            let prepared = try LESPreparation.prepare(artifact: artifact, privateRoot: cache, control: LESControl())
+            try oldRuntimeSeal(prepared)
+            let seal = try Data(contentsOf: prepared.appendingPathComponent("seal.json"))
+            let dense = try Data(contentsOf: prepared.appendingPathComponent("dense.gguf"))
+            var changed = original; changed.append(1)
+            try changed.write(to: root.appendingPathComponent("synthetic.gguf"))
+            XCTAssertThrowsError(try LESPreparation.prepare(artifact: artifact, privateRoot: cache, control: LESControl()))
+            XCTAssertEqual(try Data(contentsOf: prepared.appendingPathComponent("seal.json")), seal)
+            XCTAssertEqual(try Data(contentsOf: prepared.appendingPathComponent("dense.gguf")), dense)
+            XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent("synthetic.gguf")), changed)
+            print("ORNITH_CACHE_SOURCE changedOriginalRejected=true preparedFilesUntouched=true syntheticOnly=true")
+        }
+    }
+    func testPrefillConfigurationSeparatesLogicalAndPhysicalLimits() throws {
+        var options = LESPrefillConfiguration()
+        XCTAssertEqual(options.evaluationTokens, 4); XCTAssertEqual(options.physicalTokens, 0)
+        XCTAssertEqual(try options.physicalTokens(checkedDefault: 4), 4)
+        XCTAssertEqual(try options.physicalTokens(checkedDefault: 1), 1)
+        options.evaluationTokens = 32; options.physicalTokens = 16
+        try options.validate(); XCTAssertEqual(try options.physicalTokens(checkedDefault: 4), 16)
+        options.evaluationTokens = 8; XCTAssertThrowsError(try options.validate())
+        options.physicalTokens = 3; XCTAssertThrowsError(try options.validate())
+        options.evaluationTokens = 4096; options.physicalTokens = 0; XCTAssertThrowsError(try options.validate())
+    }
+    func testLargerPhysicalBatchesBudgetTheCompleteExpertUnion() throws {
+        let idx = try index()
+        let original = try LESMemoryPlan(index: idx, contextTokens: 32, footprint: footprint, pageCacheOnly: true)
+        for physical in [1, 4, 8, 16] {
+            let plan = try LESMemoryPlan(index: idx, contextTokens: 32, footprint: footprint,
+                pageCacheOnly: true, physicalBatchTokens: physical)
+            XCTAssertEqual(plan.prefillSlots, physical * 8)
+            XCTAssertEqual(plan.prefillAllocationBytes * 4, original.prefillAllocationBytes * UInt64(physical))
+            XCTAssertEqual(plan.expertAllocationBytes, plan.prefillAllocationBytes)
+            XCTAssertLessThanOrEqual(plan.admittedProcessBytes, plan.processCeilingBytes)
+            if physical > 4 { XCTAssertGreaterThan(plan.runtimeReserveBytes, original.runtimeReserveBytes) }
+        }
+        XCTAssertThrowsError(try LESMemoryPlan(index: idx, contextTokens: 32, footprint: footprint, physicalBatchTokens: 32))
+    }
+    func testPublishedHeaderReservesLargeBatchScratchBeforeUsingIOSHeadroom() throws {
+        let root = try XCTUnwrap(ProcessInfo.processInfo.environment["ORNITH_LES_FIXTURE_ROOT"])
+        let data = try Data(contentsOf: URL(fileURLWithPath: root).appendingPathComponent("ornith.header"))
+        let idx = try GGUFIndex.parse(header: data, fileByteCount: 21_713_463_040)
+        let baseline: UInt64 = 350_000_000
+        func plan(_ physical: Int, available: UInt64? = nil) throws -> LESMemoryPlan {
+            try LESMemoryPlan(index: idx, contextTokens: 4096,
+                footprint: .init(footprintBytes: baseline, peakFootprintBytes: baseline, availableBytes: available),
+                pageCacheOnly: true, physicalBatchTokens: physical)
+        }
+        let small = try plan(4), large = try plan(16)
+        XCTAssertEqual(large.prefillAllocationBytes, small.prefillAllocationBytes * 4)
+        XCTAssertGreaterThan(try XCTUnwrap(large.batchScratchReserveBytes), 0)
+        let middle = small.admittedProcessBytes + (large.admittedProcessBytes - small.admittedProcessBytes) / 2
+        XCTAssertNoThrow(try plan(4, available: middle - baseline))
+        XCTAssertThrowsError(try plan(16, available: middle - baseline))
+        for physical in [4, 8, 16] {
+            let value = try plan(physical)
+            print("ORNITH_PREFILL_MEMORY physical=\(physical) staging=\(value.prefillAllocationBytes) extraScratch=\(value.batchScratchReserveBytes ?? 0) admitted=\(value.admittedProcessBytes) metadataOnly=true phonePeak=false")
+        }
+    }
+    func testPrefillProofRequiresActualBatchOriginalExpertSetsAndUnobservedLogits() throws {
+        let traced: [String: Any] = ["positions": 4, "maximumAbsoluteError": 0.001, "relativeL2Error": 0.0001,
+            "sameGreedy": true, "routingObserved": true, "routingDecisions": 8000, "canonicalExpertSetDigest": 41,
+            "configuredPhysicalBatchTokens": 8, "maximumPhysicalBatchTokens": 8]
+        let free: [String: Any] = ["positions": 4, "maximumAbsoluteError": 0.001, "relativeL2Error": 0.0001,
+            "sameGreedy": true, "routingObserved": false,
+            "configuredPhysicalBatchTokens": 8, "maximumPhysicalBatchTokens": 8]
+        let raw: [String: Any] = ["modelSHA256": "model", "nativeRevision": "native",
+            "referenceRevision": Qwen4ExpCPUReference.sourceRevision,
+            "configuration": ["evaluationTokens": 32, "physicalTokens": 8],
+            "contextTokens": 4096, "promptTokens": 22, "forwardCount": 25,
+            "referenceMetrics": ["denseCalls": 10000, "expertCalls": 3000, "rows": 100000,
+                "maximumScratchBytes": 786432, "routingDecisions": 8000, "canonicalRoutingDigest": 23,
+                "canonicalExpertSetDigest": 41],
+            "observed": traced, "callbackFree": free]
+        func proof(_ value: [String: Any]) throws -> LESPrefillCheck {
+            try JSONDecoder().decode(LESPrefillCheck.self, from: JSONSerialization.data(withJSONObject: value))
+        }
+        XCTAssertTrue(try proof(raw).passed)
+        for key in ["maximumPhysicalBatchTokens", "configuredPhysicalBatchTokens", "canonicalExpertSetDigest", "routingDecisions"] {
+            var changed = raw, observed = traced; observed.removeValue(forKey: key); changed["observed"] = observed
+            XCTAssertFalse(try proof(changed).passed)
+        }
+        var changed = raw, observed = traced; observed["maximumAbsoluteError"] = 0.02; changed["observed"] = observed
+        XCTAssertFalse(try proof(changed).passed)
+        changed = raw; var callback = free; callback["routingObserved"] = true; changed["callbackFree"] = callback
+        XCTAssertFalse(try proof(changed).passed)
+        changed = raw; callback = free; callback["maximumPhysicalBatchTokens"] = 4; changed["callbackFree"] = callback
+        XCTAssertFalse(try proof(changed).passed)
+        print("ORNITH_PREFILL_POLICY actualBatchRequired=true exactExperts=true independentLogits=true callbackFree=true boundedMemory=true syntheticOnly=true")
+    }
     private func index() throws -> GGUFIndex {
         let root = try XCTUnwrap(ProcessInfo.processInfo.environment["ORNITH_LES_FIXTURE_ROOT"])
         let data = try Data(contentsOf: URL(fileURLWithPath: root).appendingPathComponent("synthetic-ornith.gguf"))

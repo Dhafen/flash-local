@@ -22,6 +22,8 @@ public struct LESLogitComparison: Codable, Sendable, Equatable {
     public var activeLookaheadDepth: Int? = nil
     public var routingObserved: Bool? = nil
     public var canonicalExpertSetDigest: UInt64? = nil
+    public var configuredPhysicalBatchTokens: Int? = nil
+    public var maximumPhysicalBatchTokens: Int? = nil
     public var callbackFree: Bool {
         routingObserved == false && routingDigest == nil && routingDecisions == nil &&
             canonicalRoutingDigest == nil && canonicalExpertSetDigest == nil && layerCheckpoints == nil && projectionProbe == nil
@@ -135,6 +137,7 @@ public enum LESBenchmark {
     }
     public static func plan(_ artifact: VerifiedGGUFArtifact, context: Int, depth: Int,
                              pageCache: Bool = false, phase: String,
+                             physicalBatchTokens: Int = 4,
                              onAdmission: (LESMemoryAdmission) -> Void) throws -> LESMemoryPlan {
         let samples = reclaimIdleBuffers()
         let nativeMemory = LESContext.runtimeMemory
@@ -144,7 +147,7 @@ public enum LESBenchmark {
             }
             guard let footprint = samples.1 else { throw GGUFError.limit("LES memory sample unavailable") }
             let result = try LESMemoryPlan(index: artifact.index, contextTokens: context, footprint: footprint,
-                lookaheadDepth: depth, pageCacheOnly: pageCache)
+                lookaheadDepth: depth, pageCacheOnly: pageCache, physicalBatchTokens: physicalBatchTokens)
             onAdmission(.init(phase: phase, beforeReclaim: samples.0, afterReclaim: samples.1, plan: result, failure: nil,
                 nativeMemory: nativeMemory))
             return result
@@ -185,11 +188,13 @@ public enum LESBenchmark {
     private static func compare(_ replay: Replay, artifact: VerifiedGGUFArtifact, prepared: URL,
                                 depth: Int, prefillBatch: Int = 1, traceLayers: Bool = false,
                                 phase: String = "numerics", traceRouting: Bool = true,
-                                pageCache: Bool = false, control: LESControl,
+                                pageCache: Bool = false, physicalBatchTokens: Int = 4,
+                                contextTokens: Int = 128, control: LESControl,
                                 onAdmission: (LESMemoryAdmission) -> Void,
                                 recordLogits: (([Float]) -> Void)? = nil) throws -> LESLogitComparison {
-        let memory = try plan(artifact, context: 128, depth: depth, pageCache: pageCache,
-            phase: "\(phase).prediction\(depth).prefill\(prefillBatch)", onAdmission: onAdmission)
+        let memory = try plan(artifact, context: contextTokens, depth: depth, pageCache: pageCache,
+            phase: "\(phase).prediction\(depth).prefill\(prefillBatch)", physicalBatchTokens: physicalBatchTokens,
+            onAdmission: onAdmission)
         let collector = traceLayers && prefillBatch == 1 ? GGUFCheckpointCollector() : nil
         let context = try LESContext(artifact: artifact, prepared: prepared, plan: memory, control: control,
             traceRouting: traceRouting, checkpoints: collector)
@@ -227,7 +232,9 @@ public enum LESBenchmark {
             layerCheckpoints: collector == nil ? nil : checkpoints.result,
             projectionProbe: context.projectionProbe,
             activeLookaheadDepth: memory.lookaheadDepth, routingObserved: traceRouting || collector != nil,
-            canonicalExpertSetDigest: traceRouting || collector != nil ? context.metrics.canonicalExpertSetDigest : nil)
+            canonicalExpertSetDigest: traceRouting || collector != nil ? context.metrics.canonicalExpertSetDigest : nil,
+            configuredPhysicalBatchTokens: context.metrics.configuredPhysicalBatchTokens,
+            maximumPhysicalBatchTokens: context.metrics.maximumPhysicalBatchTokens)
     }
     private static func rebase(_ routing: LESLogitComparison, logits: [[Float]],
                                reference: Replay) throws -> LESLogitComparison {
@@ -309,6 +316,38 @@ public enum LESBenchmark {
         }
         return result
     }
+    public static func checkPrefill(artifact: VerifiedGGUFArtifact, prepared: URL,
+                                   baseline: LESNumericalCheck, configuration: LESPrefillConfiguration,
+                                   control: LESControl, progress: @Sendable (String) -> Void = { _ in },
+                                   onAdmission: (LESMemoryAdmission) -> Void = { _ in }) throws -> LESPrefillCheck {
+        try configuration.validate()
+        guard baseline.nativeBenchmarkAdmitted, baseline.modelSHA256 == artifact.manifest.sha256,
+              baseline.nativeRevision == LESContext.revision, configuration.physicalTokens > 0 else {
+            throw GGUFError.invalid("Batchkontrollen kräver godkänd grundmotor och en uttrycklig fysisk batch.")
+        }
+        let tokenizer = try CanonicalQwen35Tokenizer(artifact: artifact)
+        let prompt = try tokenizer.chat([.init(role: .user, content: "Vad är 50 + 5?")], maximumTokens: 64).tokenIDs
+        guard prompt.count >= max(16, configuration.physicalTokens) else { throw GGUFError.invalid("Batch control prompt is too short") }
+        progress("Kontrollerar batch \(configuration.evaluationTokens)/\(configuration.physicalTokens) mot originalvikterna…")
+        let replay = try autoreleasepool {
+            try reference(artifact: artifact, prompt: prompt, control: control, arithmetic: .dequantizedWeights)
+        }
+        guard let metrics = replay.dequantizedMetrics else { throw GGUFError.invalid("Batch reference coverage missing") }
+        func run(observed: Bool) throws -> LESLogitComparison {
+            try autoreleasepool {
+                try compare(replay, artifact: artifact, prepared: prepared, depth: 0,
+                    prefillBatch: configuration.evaluationTokens, phase: "prefill-tuning", traceRouting: observed,
+                    pageCache: true, physicalBatchTokens: configuration.physicalTokens, contextTokens: 4096,
+                    control: control, onAdmission: onAdmission)
+            }
+        }
+        let observed = try run(observed: true), free = try run(observed: false)
+        return .init(modelSHA256: artifact.manifest.sha256, nativeRevision: LESContext.revision,
+            referenceRevision: Qwen4ExpCPUReference.sourceRevision, configuration: configuration,
+            contextTokens: 4096, promptTokens: prompt.count, forwardCount: prompt.count + 3,
+            referenceMetrics: metrics, observed: observed, callbackFree: free)
+    }
+
     public static func check(artifact: VerifiedGGUFArtifact, prepared: URL, control: LESControl,
                              progress: @Sendable (String) -> Void = { _ in },
                              onAdmission: (LESMemoryAdmission) -> Void = { _ in }) throws -> LESNumericalCheck {

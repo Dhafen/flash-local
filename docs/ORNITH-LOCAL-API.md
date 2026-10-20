@@ -1,9 +1,10 @@
 # Local Ornith API and generation controls
 
-Built and privately delivered as TestFlight **0.1.0 (125)**, runtime source
-`fdb7801742a3de0015e3047a055f555db41d9b98`. Integrated host, archive/signing
-and independent Apple availability checks pass. Physical-phone network/USB
-reachability and explicit-budget answer quality remain unverified.
+Built and privately delivered as TestFlight **0.1.0 (126)**, runtime source
+`6c1084c87b35c749a5152c140c4828e9dde84126`. Integrated host, archive/signing and independent Apple
+availability checks pass, retaining the build-125 foreground text API.
+Physical-phone network/USB reachability and explicit-budget answer quality
+remain unverified.
 The installed Q4_K_M remains unchanged. One admitted native context serves
 quick chat and API requests serially. No model or request goes to OpenAI.
 
@@ -28,6 +29,20 @@ prevents idle locking while the server runs. Closing the page, backgrounding,
 locking or memory pressure stops the listener and cancels active inference.
 This is a foreground service, not an iOS background daemon. The protocol uses
 HTTP on a trusted local network, without TLS or browser CORS access.
+
+## Prompt and load settings
+
+**Snabbchatt → Systemprompt och arbetsprofil** stores one editable default
+instruction, with programming/security-review starter profiles. The API snapshots
+it at server start, applies it only when the client has no system message, and
+counts the resulting tokens within the same context. An explicit client system
+message takes precedence. Profiles change no model math or sampling settings.
+
+**Promptinläsning och batch** exposes separately admitted logical/physical prompt
+batches. Stop the API before changing these settings and use **Kontrollera och
+ladda om** before serving again. Larger batches affect prompt processing and
+memory, not direct parallel decoding of one response. [Phone comparison and
+memory limits](ORNITH-PREFILL.md). Default evaluation 4/physical Auto remains.
 
 ## Generation controls
 

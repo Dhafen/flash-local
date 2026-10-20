@@ -137,7 +137,7 @@ struct OrnithLESChatPage: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Ornith snabbchatt").font(.title2.bold())
-            Text("Experimentell motor · din befintliga GGUF · 4 096 token kontextgräns")
+            Text("Experimentell motor · din befintliga GGUF · \(model.contextCapacityTokens.formatted()) token kontextgräns")
                 .font(.caption).foregroundStyle(.secondary)
             Text(model.status).font(.callout).accessibilityIdentifier("ornith-chat-status")
             if let error = model.error { Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled) }
@@ -148,18 +148,24 @@ struct OrnithLESChatPage: View {
                 Text("Första starten kontrollerar numeriken mot originalvikterna. Ingen modell hämtas.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            Toggle("Tänkande", isOn: $model.chatThinkingEnabled).disabled(!model.canStart)
-                .accessibilityIdentifier("ornith-chat-thinking")
+            OrnithPromptControls(model: model)
+            OrnithPrefillControls(model: model, activate: activate)
             OrnithGenerationControls(options: $model.chatOptions).disabled(!model.canStart || model.isAPIRunning)
             if let progress = model.chatProgress, model.isBusy {
+                Text("Kontext: \(progress.promptTokensTotal) prompt + högst \(model.chatOptions.maximumNewTokens) nya / \(model.contextCapacityTokens.formatted()) token")
+                    .font(.caption.monospacedDigit())
                 Text(String(format: "Appminne %.2f GB · läsanrop %.2f GB · %d token", Double(progress.footprintBytes) / 1e9,
                     Double(progress.ioBytesRead) / 1e9, progress.generatedTokens)).font(.caption.monospacedDigit())
             }
             if let summary = model.chatSummary {
+                Text("Evaluation \(summary.evaluationBatchTokens) · fysisk gräns \(summary.physicalBatchTokens) · uppmätt högst \(summary.metricsAfter.maximumPhysicalBatchTokens ?? 0) token per fysisk batch")
+                    .font(.caption.monospacedDigit())
                 if let speed = summary.decodeTokensPerSecond {
                     Text(String(format: "%.2f token/s · prompt %.2f s · %d återanvända token", speed,
                         summary.prefillSeconds, summary.reusedPromptTokens)).font(.caption.monospacedDigit())
                 }
+                Text(String(format: "Prompt: %.2f token/s · kontext %d + %d / %d", Double(summary.evaluatedPromptTokens) / max(summary.prefillSeconds, 1e-9), summary.promptTokenIDs.count, summary.generatedTokenIDs.count, model.contextCapacityTokens))
+                    .font(.caption.monospacedDigit())
                 Text("\(summary.reasoningTokens) tänktoken · \(summary.forcedThinkingEndTokens) token för budgetstyrt avslut")
                     .font(.caption2).foregroundStyle(.secondary)
                 Button("Spara mätning i Filer", systemImage: "chart.bar.doc.horizontal") { model.saveChatMeasurement() }
@@ -179,6 +185,98 @@ struct OrnithLESChatPage: View {
     }
 }
 
+struct OrnithPromptControls: View {
+    @Bindable var model: OrnithLESAppModel
+    @State private var expanded: Bool
+    init(model: OrnithLESAppModel, expanded: Bool = false) { self.model = model; self._expanded = State(initialValue: expanded) }
+    var body: some View {
+        DisclosureGroup("Systemprompt och arbetsprofil", isExpanded: $expanded) {
+            VStack(alignment: .leading, spacing: 12) {
+                Menu("Välj startprofil") {
+                    ForEach(LocalChatProfile.allCases) { profile in Button(profile.title) { model.applyProfile(profile) } }
+                }
+                TextEditor(text: $model.systemPrompt).frame(minHeight: 130).font(.callout)
+                    .accessibilityLabel("Redigerbar systemprompt")
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(.secondary.opacity(0.3)))
+                Text("Profilen fyller i en redigerbar instruktion. Den ändrar inga vikter eller genereringsvärden. Högst 32 KiB; texten räknas in i kontexten.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text("Ändringar gäller nästa chattfråga och kan kräva att prompten läses om. API:t tar en kopia vid start; klientens egen systemroll har företräde.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }.padding(.top, 8)
+        }.disabled(!model.canStart || model.isAPIRunning)
+    }
+}
+
+struct OrnithPrefillControls: View {
+    @Bindable var model: OrnithLESAppModel
+    var activate: () -> Void = {}
+    @State private var expanded: Bool
+    init(model: OrnithLESAppModel, activate: @escaping () -> Void = {}, expanded: Bool = false) {
+        self.model = model; self.activate = activate; self._expanded = State(initialValue: expanded)
+    }
+    var body: some View {
+        DisclosureGroup("Promptinläsning och batch", isExpanded: $expanded) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Evaluation batch")
+                    Spacer()
+                    Picker("Evaluation batch", selection: Binding(get: { model.batchConfiguration.evaluationTokens }, set: { value in
+                        var selected = model.batchConfiguration; selected.evaluationTokens = value
+                        if selected.physicalTokens > value { selected.physicalTokens = 0 }
+                        model.batchConfiguration = selected
+                    })) { ForEach([1, 4, 8, 16, 32], id: \.self) { Text("\($0) token").tag($0) } }.labelsHidden()
+                }
+                HStack {
+                    Text("Fysisk batch")
+                    Spacer()
+                    Picker("Fysisk batch", selection: Binding(get: { model.batchConfiguration.physicalTokens }, set: { value in
+                        var selected = model.batchConfiguration; selected.physicalTokens = value
+                        selected.evaluationTokens = max(selected.evaluationTokens, value); model.batchConfiguration = selected
+                    })) {
+                        Text("Auto · kontrollerad 1/4").tag(0)
+                        ForEach([1, 4, 8, 16], id: \.self) { Text("\($0) token").tag($0) }
+                    }.labelsHidden()
+                }
+                Text("Evaluation styr prompttoken per anrop. Fysisk batch styr samtidig beräkning. Större batch använder mer RAM och är inte alltid snabbare; modellens top-8 ändras inte.")
+                    .font(.caption).foregroundStyle(.secondary)
+                if model.batchSettingsChanged {
+                    Text("Nytt batchval väntar. Ladda om motorn innan chatten eller API:t används.").font(.caption)
+                    Button("Kontrollera och ladda om") { activate() }.buttonStyle(.borderedProminent)
+                } else if !model.chatReady {
+                    Text("Valet kontrolleras mot originalvikterna vid aktivering. Avvikelse stoppar den valda batchen; Auto behåller den tidigare kontrollen.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                if model.chatReady, let proof = model.activePrefillCheck {
+                    Text(proof.passed ? "Vald batch har klarat den korta logit- och expertkontrollen." : "Batchkontrollen avvek.")
+                        .font(.caption).foregroundStyle(proof.passed ? Color.primary : Color.red)
+                }
+                Text("Snabbchatten använder 8 192 token för prompt, tänkande och svar. Jämförelsens fasta benchmark kör fortfarande 4 096 token. Lång kontext behöver verifieras på enheten.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Button("Jämför vald batch med Auto") { model.startPrefillBenchmark() }.buttonStyle(.bordered)
+                    .disabled(!model.canBenchmark || model.batchConfiguration == LESPrefillConfiguration())
+                Text("Fyra körningar: Auto, vald, vald, Auto. Samma fasta prompt, minst 128 token per prov. Egna profiler och samplerinställningar används inte. Håll appen öppen; OS-cachen är okontrollerad.")
+                    .font(.caption).foregroundStyle(.secondary)
+                if let report = model.prefillBenchmark {
+                    ForEach(Array(report.runs.enumerated()), id: \.offset) { index, run in
+                        Text(String(format: "%d · %@ · prompt %.2f token/s · svar %.2f token/s · %.2f GB", index + 1,
+                            run.mode, Double(run.generation.evaluatedPromptTokens) / max(run.generation.prefillSeconds, 1e-9),
+                            run.generation.decodeTokensPerSecond ?? 0, Double(run.generation.maximumObservedFootprintBytes) / 1e9))
+                            .font(.caption.monospacedDigit())
+                    }
+                    Text(report.comparable ? "Samma token och jämförbart termiskt tillstånd. Upprepa för hållbar prestanda." : "Ingen säker vinnare: token, längd, strömsparläge eller termiskt tillstånd skiljer.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                if model.prefillBenchmark != nil || model.prefillBenchmarkFailure != nil {
+                    Button("Spara batchmätning i Filer", systemImage: "chart.bar.doc.horizontal") { model.savePrefillBenchmark() }
+                    Text("Rapporten innehåller token-ID:n och mätvärden; den sparas lokalt när du trycker.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                if let url = model.prefillBenchmarkURL { ShareLink("Dela batchrapport", item: url) }
+            }.padding(.top, 8)
+        }.disabled(!model.canStart || model.isAPIRunning)
+    }
+}
+
 struct OrnithGenerationControls: View {
     @Binding var options: LocalGenerationOptions
     @State private var expanded = false
@@ -188,18 +286,16 @@ struct OrnithGenerationControls: View {
     var body: some View {
         DisclosureGroup("Generering", isExpanded: $expanded) {
             VStack(alignment: .leading, spacing: 12) {
-                integerRow("Max token totalt", value: $options.maximumNewTokens)
-                Text("Tänkande och svar delar gränsen. 1–2 048 token; kontexten är fortsatt 4 096 token.")
-                    .font(.caption).foregroundStyle(.secondary)
-                if options.enableThinking {
-                    Toggle("Begränsa tänkandet", isOn: Binding(get: { options.thinkingBudget != nil },
-                        set: { options.thinkingBudget = $0 ? min(256, max(0, options.maximumNewTokens - 16)) : nil }))
-                    if options.thinkingBudget != nil {
-                        integerRow("Tänkbudget (token)", value: Binding(get: { options.thinkingBudget ?? 256 }, set: { options.thinkingBudget = $0 }))
-                        Text("0 stänger av tänkandet. Vid gränsen avslutas resonemanget med modellens slutmarkör och svaret fortsätter. Lämna utrymme i totalgränsen. En kort budget kan försämra svaret.")
-                            .font(.caption).foregroundStyle(.secondary)
+                Picker("Tänkande", selection: Binding(
+                    get: { OrnithThinkingPreset.matching(options) ?? .medium },
+                    set: { options = $0.options })) {
+                    ForEach(OrnithThinkingPreset.allCases) { preset in
+                        Text(preset.title).tag(preset)
                     }
-                }
+                }.pickerStyle(.segmented)
+                    .accessibilityIdentifier("ornith-thinking-preset")
+                Text("0: inget tänkande · Small: 256 · Medium: 512 · Ultra: 2 048 tänktoken. Svarstaket sätts automatiskt (1 536–4 096 token). Kontexten är 8 192 token inklusive prompt och svar.")
+                    .font(.caption).foregroundStyle(.secondary)
                 HStack {
                     Text("Temperatur")
                     Spacer()
@@ -245,7 +341,7 @@ struct OrnithAPIPage: View {
                     .font(.subheadline).foregroundStyle(.secondary)
                 Text(model.apiStatus).accessibilityIdentifier("ornith-api-status")
                 if let error = model.error { Text(error).foregroundStyle(.red).font(.caption) }
-                if !model.chatReady && !model.isAPIRunning {
+                if (!model.chatReady || model.batchSettingsChanged) && !model.isAPIRunning {
                     Text("Förbered samma verifierade motor som används i snabbchatten.").font(.callout)
                     Button("Förbered modellen") { activate() }.buttonStyle(.borderedProminent).disabled(!model.canStart)
                 }
@@ -257,7 +353,7 @@ struct OrnithAPIPage: View {
                 }
                 if model.apiAccessKey.isEmpty {
                     Button("Starta lokalt API") { model.startAPI() }.buttonStyle(.borderedProminent)
-                        .disabled(!model.canStart || !model.chatReady)
+                        .disabled(!model.canStart || !model.chatReady || model.batchSettingsChanged)
                 } else {
                     Button("Stoppa API", role: .destructive) { model.stopAPI() }.buttonStyle(.bordered)
                 }
@@ -282,7 +378,7 @@ struct OrnithAPIPage: View {
                 Toggle("Behåll skärmen vaken", isOn: $model.apiKeepAwake)
                 Text("Modellnamn").font(.caption).foregroundStyle(.secondary)
                 Text(LocalChatRequest.modelID).font(.callout.monospaced()).textSelection(.enabled)
-                Text("Samma Wi-Fi eller Ethernet via USB-C-adapter. HTTP används på det betrodda lokala nätverket. Vanlig USB-kabel kräver att datorn har en nätverksanslutning till telefonen.")
+                Text("Samma Wi-Fi eller Ethernet via USB-C-adapter. HTTP används på det betrodda lokala nätverket. Vanlig USB-kabel kräver separat portvidarebefordran eller nätverksdrivrutin på datorn; den vägen är ännu inte verifierad.")
                     .font(.callout)
                 Text("Låt appen vara öppen i förgrunden. Låsning, bakgrund eller minnestryck stoppar servern. Chatten och API:t delar motorn och hanterar ett anrop åt gången.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -290,6 +386,8 @@ struct OrnithAPIPage: View {
                     .font(.caption).foregroundStyle(.secondary)
                 Text("\(model.apiCompletedRequests) slutförda API-anrop").font(.caption.monospacedDigit())
                 OrnithGenerationControls(options: $model.chatOptions).disabled(!model.canStart || model.isAPIRunning)
+                OrnithPromptControls(model: model)
+                OrnithPrefillControls(model: model, activate: activate)
             }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
         }.background(MRColor.abyss).tint(MRColor.tierPinned)
     }

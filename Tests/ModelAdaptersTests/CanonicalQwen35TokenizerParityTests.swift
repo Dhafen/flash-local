@@ -4,6 +4,17 @@ import XCTest
 @testable import ModelAdapters
 
 final class CanonicalQwen35TokenizerParityTests: XCTestCase {
+    func testDefaultSystemPromptPreservesEmptyHistoryAndExplicitClientInstruction() {
+        let user = [Qwen35ChatMessage(role: .user, content: "Testa denna funktion.")]
+        XCTAssertEqual(Qwen35ChatMessage.applyingSystemPrompt("", to: user), user)
+        XCTAssertEqual(Qwen35ChatMessage.applyingSystemPrompt(" \n ", to: user), user)
+        let withDefault = Qwen35ChatMessage.applyingSystemPrompt("Default instructions", to: user)
+        XCTAssertEqual(withDefault.map(\.role), [.system, .user])
+        XCTAssertEqual(withDefault.first?.content, "Default instructions")
+        let explicit = [Qwen35ChatMessage(role: .system, content: "Client instructions")] + user
+        XCTAssertEqual(Qwen35ChatMessage.applyingSystemPrompt("Default instructions", to: explicit), explicit)
+        print("ORNITH_SYSTEM_DEFAULT canonicalRoles=true emptyUnchanged=true explicitClientWins=true modelLoaded=false")
+    }
     private struct Corpus: Decodable {
         struct Chat: Decodable { let messages: [Qwen35ChatMessage] }
         struct ReasoningChat: Decodable {
