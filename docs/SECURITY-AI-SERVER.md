@@ -60,7 +60,7 @@ read -r -s -p 'Local API key: ' FLASH_LOCAL_API_KEY
 export FLASH_LOCAL_API_KEY
 printf '\n'
 python3 scripts/flash_local_verify.py \
-  --base-url http://IPHONE_LAN_IP:8080/v1 --output phone-acceptance.json
+  --base-url http://IPHONE_LAN_IP:8080/v1 --output phone-acceptance.json --cancellation
 ```
 
 This performs authenticated model discovery, a wrong-key rejection and real
@@ -68,7 +68,9 @@ JSON/SSE function-call round trips. The computer adds 50+5 and returns a new
 random receipt after the model calls its function; the model must read that
 receipt from the result. No target is scanned. Missing native measurements
 remain missing. Server-reported hardware is distinguished from independent
-physical verification.
+physical verification. `--cancellation` closes a reserved live stream and
+checks that a subsequent inference request is accepted after bounded recovery;
+it does not claim independent observation of GPU teardown.
 
 Add `--benchmark` for six real runs: Off/Small/Medium, twice each with the same
 prompt and model. Records include actual token counts, native prefill/decode,
@@ -83,7 +85,7 @@ Create a private scope file for an authorized lab or engagement. Replace the
 documentation-only address with an explicitly authorized target:
 
 ```json
-{"authorized":true,"authorization_id":"your-ROE-reference","ips":["192.0.2.10"],"ports":[80,443],"allowed_tools":["tcp_connect","http_headers"]}
+{"authorized":true,"authorization_id":"your-ROE-reference","ips":["192.0.2.10"],"ports":[80,443],"allowed_tools":["tcp_connect","http_headers"],"allowed_http_paths":["/"]}
 ```
 
 An optional `expires_at` is an ISO-8601 timestamp with a timezone. Validate
@@ -105,6 +107,8 @@ the file's limited read-only tools/targets; `--approval deny` executes none.
 Only bounded TCP connect and HTTP HEAD are implemented. No shell, arbitrary
 command, exploit, credentials, redirects or target discovery is supplied.
 Scope is independently checked after model output and again after approval.
+HTTP HEAD is restricted to the exact `allowed_http_paths` list (root only
+when omitted), including the query string; paths are not discovered or expanded.
 Steps and duration are bounded, repeated calls are blocked, Ctrl-C stops the
 loop, complete tool groups are compacted together, and a new local JSONL log
 records proposals, observations, usage and outcome without the API key.

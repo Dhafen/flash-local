@@ -136,10 +136,6 @@ public struct LocalChatRequest: Sendable {
         if let seed = try integer("seed") { options.seed = UInt64(seed) }
         if object.keys.contains("thinking_budget") {
             options.thinkingBudget = try integer("thinking_budget")
-        } else if oldMaximum != nil || newMaximum != nil, let inherited = options.thinkingBudget {
-            // A standard short max_tokens request must not fail because the
-            // server's inherited thinking budget is larger than its total.
-            options.thinkingBudget = min(inherited, max(0, options.maximumNewTokens - 9))
         }
         options.enableThinking = try boolean("enable_thinking", fallback: options.enableThinking)
         if let value = object["chat_template_kwargs"], !(value is NSNull) {
@@ -147,6 +143,12 @@ public struct LocalChatRequest: Sendable {
                 throw LocalAPIError.invalid("chat_template_kwargs", "Only enable_thinking is supported")
             }
             options.enableThinking = try boolean("enable_thinking", from: kwargs, fallback: options.enableThinking)
+        }
+        if !object.keys.contains("thinking_budget"), oldMaximum != nil || newMaximum != nil,
+           options.enableThinking, let inherited = options.thinkingBudget {
+            // Apply only after both thinking overrides. An inactive saved cap
+            // stays intact; a short thinking request fits its inherited cap.
+            options.thinkingBudget = min(inherited, max(0, options.maximumNewTokens - 9))
         }
         try options.validate()
         self.options = options

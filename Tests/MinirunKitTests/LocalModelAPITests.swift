@@ -40,6 +40,10 @@ final class LocalModelAPITests: XCTestCase {
         XCTAssertThrowsError(try LocalChatRequest(data: body(["reasoning_effort": "invented"])))
         let explicit = try LocalChatRequest(data: body(["reasoning_effort": "high", "max_tokens": 256, "enable_thinking": false]))
         XCTAssertFalse(explicit.options.thinkingEnabled)
+        XCTAssertEqual(explicit.options.thinkingBudget, OrnithThinkingPreset.ultra.options.thinkingBudget)
+        let disabledByTemplate = try LocalChatRequest(data: body(["max_tokens": 8, "chat_template_kwargs": ["enable_thinking": false]]))
+        XCTAssertFalse(disabledByTemplate.options.thinkingEnabled)
+        XCTAssertEqual(disabledByTemplate.options.thinkingBudget, LocalGenerationOptions().thinkingBudget)
     }
     func testOptionalNullToolAnnotationsAndFunctionsWithoutArguments() throws {
         let tool: [String: Any] = ["type": "function", "function": ["name": "list_local_fixtures", "description": NSNull(), "strict": NSNull()]]

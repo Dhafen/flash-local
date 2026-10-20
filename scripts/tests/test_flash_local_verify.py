@@ -3,10 +3,11 @@ import json
 from pathlib import Path
 import sys
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
+import urllib.error
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from flash_local_verify import benchmark, stream_completion, tool_round_trip
+from flash_local_verify import benchmark, cancel_and_reconnect, stream_completion, tool_round_trip
 
 
 class VerificationHarnessTests(unittest.TestCase):
@@ -73,6 +74,23 @@ class VerificationHarnessTests(unittest.TestCase):
             self.assertTrue(row["same_model_comparison"])
             self.assertFalse(row["os_cache_coldness_controlled"])
             self.assertNotIn("decode_tokens_per_second", row)
+
+    def test_cancel_closes_stream_and_retries_only_busy_recovery(self):
+        client = Mock()
+        response = io.BytesIO(b'data: {"id":"fixture","choices":[{"delta":{"role":"assistant"},"finish_reason":null}]}\n\n')
+        client.request.return_value = response
+        client.json.side_effect = [urllib.error.HTTPError("http://127.0.0.1/v1", 429, "Busy", {}, None),
+            {"choices": [{"message": {"content": "RECONNECTED"}}], "usage": {"synthetic_fixture": True}}]
+        with patch("flash_local_verify.time.sleep"):
+            result = cancel_and_reconnect(client, "fixture")
+        self.assertTrue(response.closed)
+        self.assertTrue(result["expected_response_observed"])
+        self.assertFalse(result["native_teardown_independently_verified"])
+        self.assertEqual(client.json.call_count, 2)
+        client.request.return_value = io.BytesIO(b'data: {"choices":[{"delta":{"role":"assistant"}}]}\n\n')
+        client.json.side_effect = urllib.error.HTTPError("http://127.0.0.1/v1", 401, "Invalid", {}, None)
+        with self.assertRaises(urllib.error.HTTPError):
+            cancel_and_reconnect(client, "fixture")
 
 
 if __name__ == "__main__":

@@ -55,6 +55,19 @@ class AgentTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             agent.NoRedirect().redirect_request(None)
 
+    def test_http_rules_of_engagement_allow_only_exact_listed_paths(self):
+        with tempfile.TemporaryDirectory() as folder:
+            scope = agent.load_scope(self.scope(folder, allowed_tools=["http_headers"], allowed_http_paths=["/health"]))
+            definition = agent.tool_definitions(scope)[0]
+            self.assertEqual(definition["function"]["parameters"]["properties"]["path"]["enum"], ["/health"])
+            for path in ["/", "/admin", "/health/../admin", "http://192.0.2.1/", "/health?other=1"]:
+                call = {"id": "call_test", "type": "function", "function": {"name": "http_headers", "arguments": json.dumps(
+                    {"ip": "127.0.0.1", "port": 443, "path": path, "tls": True})}}
+                with self.subTest(path=path), self.assertRaises(ValueError):
+                    agent.validate_call(call, scope)
+            call["function"]["arguments"] = json.dumps({"ip": "127.0.0.1", "port": 443, "path": "/health", "tls": True})
+            self.assertEqual(agent.validate_call(call, scope)[1]["path"], "/health")
+
     def test_dry_run_and_denied_action_never_execute_network_tools(self):
         with tempfile.TemporaryDirectory() as folder, patch.object(agent, "execute_tool", side_effect=AssertionError("network")):
             scope = self.scope(folder)

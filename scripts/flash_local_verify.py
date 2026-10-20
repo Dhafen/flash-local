@@ -136,7 +136,40 @@ def benchmark(client, model):
     return runs
 
 
-def verify(client, model, include_benchmark=False):
+def cancel_and_reconnect(client, model, recovery_seconds=90):
+    payload = {"model": model, "messages": [{"role": "user", "content": "Write a detailed 2000-word explanation of HTTP request parsing. Continue until every section is complete."}],
+               "temperature": 0, "enable_thinking": False, "max_tokens": 2048, "stream": True}
+    # The server's first role event follows inference-owner reservation. Close
+    # before any normal finish; do not report client closure as GPU teardown.
+    with client.request("/chat/completions", payload) as response:
+        line = response.readline(1 << 20)
+        if not line.startswith(b"data: ") or b"[DONE]" in line:
+            raise ValueError("No live completion stream was reserved for cancellation")
+        event = strict_json(line[6:])
+        if "error" in event or not event.get("choices"):
+            raise ValueError("Cancellation stream did not reserve a completion")
+    started = time.monotonic()
+    while time.monotonic() - started < recovery_seconds:
+        try:
+            result = client.json("/chat/completions", {"model": model,
+                "messages": [{"role": "user", "content": "Reply with exactly RECONNECTED."}],
+                "temperature": 0, "enable_thinking": False, "max_tokens": 64})
+        except urllib.error.HTTPError as error:
+            status = error.code
+            error.close()
+            if status not in {429, 503}:
+                raise
+            time.sleep(min(2, max(0, recovery_seconds - (time.monotonic() - started))))
+            continue
+        answer = result["choices"][0]["message"].get("content") or ""
+        return {"stream_closed_before_finish": True, "new_request_accepted": True,
+                "expected_response_observed": "RECONNECTED" in answer,
+                "recovery_seconds": time.monotonic() - started, "followup_usage": result.get("usage"),
+                "native_teardown_independently_verified": False}
+    raise ValueError("The live server did not accept a request after cancellation within the recovery deadline")
+
+
+def verify(client, model, include_benchmark=False, include_cancellation=False):
     report = {"schema_version": 1, "model": model, "client": "Python stdlib / Kali-compatible",
               "physical_device_proven_by_client": False, "network_inference_location_independently_verified": False,
               "cross_model_benchmark_complete": False, "checks": {}}
@@ -156,6 +189,9 @@ def verify(client, model, include_benchmark=False):
         raise ValueError("Server accepted an invalid access key")
     report["tool_round_trips"] = [tool_round_trip(client, model), tool_round_trip(client, model, streaming=True)]
     report["checks"]["tool_calls_and_results"] = all(run["tool_result_receipt_observed"] for run in report["tool_round_trips"])
+    if include_cancellation:
+        report["cancellation"] = cancel_and_reconnect(client, model)
+        report["checks"]["reconnect_after_cancel"] = report["cancellation"]["expected_response_observed"]
     if include_benchmark:
         report["benchmark_runs"] = benchmark(client, model)
     # Device identity is a server measurement, clearly distinguished from
@@ -171,6 +207,7 @@ def main():
     parser.add_argument("--model", default=MODEL)
     parser.add_argument("--output", required=True, help="New private report file, never overwritten")
     parser.add_argument("--benchmark", action="store_true", help="Six real runs; allow several minutes and keep the phone in the foreground")
+    parser.add_argument("--cancellation", action="store_true", help="Close a live completion stream and test subsequent inference recovery")
     args = parser.parse_args()
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -178,12 +215,13 @@ def main():
     with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
         try:
             client = LocalClient(args.base_url, os.environ.get("FLASH_LOCAL_API_KEY", ""), timeout=1800)
-            report = verify(client, args.model, args.benchmark)
+            report = verify(client, args.model, args.benchmark, args.cancellation)
         except (ValueError, OSError, KeyError, TypeError, urllib.error.URLError) as error:
             report = {"status": "failed", "error_type": type(error).__name__, "verification_complete": False}
         json.dump(report, handle, indent=2, allow_nan=False)
         handle.write("\n")
-    success = bool(report.get("checks", {}).get("tool_calls_and_results"))
+    checks = report.get("checks", {})
+    success = bool(checks.get("tool_calls_and_results")) and all(checks.values())
     print(json.dumps({"checks_passed": success, "report": str(output), "phone_testing_required": True}))
     return 0 if success else 1
 

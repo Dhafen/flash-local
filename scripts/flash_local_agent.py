@@ -75,7 +75,13 @@ def load_scope(path):
     tools = scope.get("allowed_tools", ["tcp_connect"])
     if not isinstance(tools, list) or not tools or not set(tools) <= {"tcp_connect", "http_headers"}:
         raise ValueError("Only explicitly listed tcp_connect/http_headers tools are supported")
+    paths = scope.get("allowed_http_paths", ["/"])
+    if (not isinstance(paths, list) or not 1 <= len(paths) <= 16 or any(not isinstance(path, str) or
+            not path.startswith("/") or path.startswith("//") or len(path.encode()) > 1024 or
+            any(ord(c) < 33 or ord(c) > 126 for c in path) for path in paths)):
+        raise ValueError("Specify 1–16 exact origin-relative ASCII HTTP paths")
     return {"ips": sorted(set(normalized)), "ports": sorted(set(ports)), "allowed_tools": sorted(set(tools)),
+            "allowed_http_paths": sorted(set(paths)),
             "expires_at": expiry, "authorization_id": str(scope.get("authorization_id", "operator-supplied"))[:256]}
 
 
@@ -85,7 +91,7 @@ def tool_definitions(scope):
         properties = {"ip": {"type": "string", "enum": scope["ips"]},
                       "port": {"type": "integer", "enum": scope["ports"]}}
         if name == "http_headers":
-            properties.update({"path": {"type": "string", "maxLength": 1024}, "tls": {"type": "boolean"}})
+            properties.update({"path": {"type": "string", "maxLength": 1024, "enum": scope["allowed_http_paths"]}, "tls": {"type": "boolean"}})
         tools.append({"type": "function", "function": {
             "name": name, "description": "One scoped TCP connect." if name == "tcp_connect" else
             "One scoped HTTP HEAD request to an explicit IP. No redirects, cookies or credentials.",
@@ -116,6 +122,8 @@ def validate_call(call, scope):
         if (type(arguments["tls"]) is not bool or not isinstance(path, str) or not path.startswith("/") or
                 path.startswith("//") or len(path.encode()) > 1024 or any(ord(c) < 33 or ord(c) > 126 for c in path)):
             raise ValueError("Expected a bounded origin-relative ASCII path and boolean tls")
+        if path not in scope["allowed_http_paths"]:
+            raise ValueError("HTTP path is outside the explicit rules of engagement")
     if scope["expires_at"] and datetime.fromisoformat(scope["expires_at"].replace("Z", "+00:00")) <= datetime.now(timezone.utc):
         raise ValueError("Authorization expired before execution")
     return name, arguments
