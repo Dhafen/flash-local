@@ -256,7 +256,7 @@ final class OrnithLESAppModel {
     @ObservationIgnored private var persistOptions = false
     var chatThinkingEnabled: Bool {
         get { chatOptions.enableThinking }
-        set { chatOptions.enableThinking = newValue }
+        set { chatOptions = (newValue ? OrnithThinkingPreset.medium : OrnithThinkingPreset.off).options }
     }
     private(set) var isAPIRunning = false
     private(set) var apiStatus = "Avstängd"
