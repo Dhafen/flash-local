@@ -148,8 +148,6 @@ struct OrnithLESChatPage: View {
                 Text("Första starten kontrollerar numeriken mot originalvikterna. Ingen modell hämtas.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            Toggle("Tänkande", isOn: $model.chatThinkingEnabled).disabled(!model.canStart || model.isAPIRunning)
-                .accessibilityIdentifier("ornith-chat-thinking")
             OrnithPromptControls(model: model)
             OrnithPrefillControls(model: model, activate: activate)
             OrnithGenerationControls(options: $model.chatOptions).disabled(!model.canStart || model.isAPIRunning)
