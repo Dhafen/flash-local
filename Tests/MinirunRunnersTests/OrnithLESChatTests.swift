@@ -26,8 +26,8 @@ final class OrnithLESChatTests: XCTestCase {
             XCTAssertEqual(try sampler.select(logits, options: options), try Qwen4ExpGreedyToken.select(logits))
             XCTAssertEqual(logits, unchanged)
         }
-        XCTAssertNil(options.thinkingBudget); XCTAssertEqual(options.temperature, 0)
-        print("ORNITH_CHAT_SAMPLING greedyIdentical=true logitsUnchanged=true thinkingBudgetOptIn=true fixtures=128 trainedInference=false")
+        XCTAssertEqual(options.thinkingBudget, 512); XCTAssertEqual(options.maximumNewTokens, 2048); XCTAssertEqual(options.temperature, 0)
+        print("ORNITH_CHAT_SAMPLING greedyIdentical=true logitsUnchanged=true thinkingBudgetDefault512=true fixtures=128 trainedInference=false")
     }
     func testAdmittedChatUsesOnlyValidatedBatchAndBindsModelAndRuntime() throws {
         let serial: [String: Any] = ["positions": 4, "maximumAbsoluteError": 0.001, "relativeL2Error": 0.0001,
