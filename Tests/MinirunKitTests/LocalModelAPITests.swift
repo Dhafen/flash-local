@@ -47,7 +47,7 @@ final class LocalModelAPITests: XCTestCase {
     }
     func testUnsupportedToolsAndInvalidParametersFailBeforeInference() throws {
         let invalid: [[String: Any]] = [["temperature": true], ["temperature": -1], ["top_p": 0], ["max_tokens": 0],
-            ["max_tokens": 4097], ["max_tokens": 1.5], ["thinking_budget": 512], ["n": 2],
+            ["max_tokens": 4097], ["max_tokens": 1.5], ["thinking_budget": 4097], ["n": 2],
             ["max_tokens": 64, "max_completion_tokens": 65], ["stop": ["END"]], ["seed": -1],
             ["tools": [["type": "function"]]], ["response_format": ["type": "json_object"]],
             ["messages": [["role": "user", "content": "one"], ["role": "user", "content": "two"]]],
