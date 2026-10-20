@@ -72,7 +72,7 @@ private struct LESAppReport: Encodable {
     let originalExpertCachePolicy = "Existing TileReader F_NOCACHE=1 advisory; original backend preserved"
     let fullModelNumericsVerified = false
     let promptID = LESBenchmark.promptID
-    let contextCapacityTokens = 4096
+    let contextCapacityTokens = 8192
     let numericalCheck: LESNumericalCheck?
     let measurements: [LESRunExport]
     let memoryAdmissions: [LESMemoryAdmission]
