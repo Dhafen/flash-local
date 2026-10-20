@@ -288,18 +288,16 @@ struct OrnithGenerationControls: View {
     var body: some View {
         DisclosureGroup("Generering", isExpanded: $expanded) {
             VStack(alignment: .leading, spacing: 12) {
-                integerRow("Max token totalt", value: $options.maximumNewTokens)
-                Text("Tänkande och svar delar gränsen. 1–4 096 token per svar; snabbchattens kontext är 8 192 token.")
-                    .font(.caption).foregroundStyle(.secondary)
-                if options.enableThinking {
-                    Toggle("Begränsa tänkandet", isOn: Binding(get: { options.thinkingBudget != nil },
-                        set: { options.thinkingBudget = $0 ? min(256, max(0, options.maximumNewTokens - 16)) : nil }))
-                    if options.thinkingBudget != nil {
-                        integerRow("Tänkbudget (token)", value: Binding(get: { options.thinkingBudget ?? 256 }, set: { options.thinkingBudget = $0 }))
-                        Text("0 stänger av tänkandet. Vid gränsen avslutas resonemanget med modellens slutmarkör och svaret fortsätter. Lämna utrymme i totalgränsen. En kort budget kan försämra svaret.")
-                            .font(.caption).foregroundStyle(.secondary)
+                Picker("Tänkande", selection: Binding(
+                    get: { OrnithThinkingPreset.matching(options) ?? .medium },
+                    set: { options = $0.options })) {
+                    ForEach(OrnithThinkingPreset.allCases) { preset in
+                        Text(preset.title).tag(preset)
                     }
-                }
+                }.pickerStyle(.segmented)
+                    .accessibilityIdentifier("ornith-thinking-preset")
+                Text("0: inget tänkande · Small: 256 · Medium: 512 · Ultra: 2 048 tänktoken. Svarstaket sätts automatiskt (1 536–4 096 token). Kontexten är 8 192 token inklusive prompt och svar.")
+                    .font(.caption).foregroundStyle(.secondary)
                 HStack {
                     Text("Temperatur")
                     Spacer()
