@@ -87,7 +87,7 @@ def run_opencode(client, live, project=None):
     directory = str(Path(project).resolve(strict=True)) if project else None
     if directory and not Path(directory).is_dir():
         raise ValueError('Project must be a directory')
-    return subprocess.run([executable, '--model', 'flashlocal/' + live['model']],
+    return subprocess.run([executable, '--pure', '--model', 'flashlocal/' + live['model']],
                           cwd=directory, env=env, check=False).returncode
 
 
