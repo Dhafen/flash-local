@@ -11,6 +11,22 @@ import AppKit
 
 @MainActor
 final class OrnithLESAppTests: XCTestCase {
+    func testActiveOwnerBootstrapsModelStorageWithoutCreatingUnverifiedDerivedFiles() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("les-first-start-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let models = root.appendingPathComponent("Models"), privateRoot = root.appendingPathComponent("private")
+        let app = OrnithLESAppModel(modelsRoot: models, privateRoot: privateRoot, documents: root)
+        app.activateChat()
+        for _ in 0..<100 {
+            if !app.isBusy { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertFalse(app.isBusy)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: models.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: privateRoot.path))
+        XCTAssertFalse(app.chatReady); XCTAssertTrue(app.chatMessages.isEmpty)
+        await app.shutdown()
+    }
     #if os(macOS)
     func testLESRootDoesNotPrepareTheInvisibleLegacyModelOwner() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("inactive-legacy-" + UUID().uuidString)

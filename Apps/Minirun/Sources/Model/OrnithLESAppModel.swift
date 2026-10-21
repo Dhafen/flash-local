@@ -141,6 +141,9 @@ private actor LESAppWorker {
     private func prepareFiles(modelsRoot: URL, privateRoot: URL, existing: VerifiedGGUFArtifact?, control: LESControl,
                               progress: @Sendable (String) -> Void) throws {
         if artifact == nil {
+            // The active owner also bootstraps the Files model directory; it
+            // no longer depends on an invisible legacy root preparing storage.
+            try LocalModelStorage.prepare(root: modelsRoot)
             if let existing, existing.manifest.sha256 == GGUFModelManifest.primaryOrnith.sha256 {
                 try existing.assertUnchanged(); artifact = existing
             } else {
