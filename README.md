@@ -11,16 +11,19 @@ adds validated OpenAI function calls and matched tool-result history using the
 installed Ornith GGUF's original template, configurable device-Keychain API
 credentials, native API measurements and a scoped Kali client. Native LES,
 QPack, app/package tests, iOS builds, signing and private delivery pass.
-The latest independently confirmed private delivery is **0.1.0 (180)**,
-source `e8d25318510262568b3b81fbc8100e36751ee383`,
-[delivery run](https://github.com/Dhafen/flash-local/actions/runs/39481746775).
+The latest independently confirmed private delivery is **0.1.0 (185)**,
+app source `ebd97a99665d6b6c5affd7324754c94ff7a5e990`,
+[delivery run](https://github.com/Dhafen/flash-local/actions/runs/39574507501).
 Actual phone tool-call round trips and LAN interoperability remain unverified.
-Existing inference backends and installed data remain. A subsequent display
-fix reuses the existing Markdown renderer in quick-chat answers; its build and
-visual review are pending.
-Current source configures 8,192 total context tokens; trained 8K reliability
-and additional model runners remain unverified. See the integration guide for
-the real phone test and candidate-model comparison still required.
+Existing inference backends and installed data remain. Assistant answers now
+render Markdown. All 64 host/Simulator captures were reviewed in light/dark.
+8,192 total context tokens remain the default; memory-admitted 16K/32K/65K
+profiles are experimental, with no trained long-context success claim.
+[Agent start scripts and acceptance tests](docs/PHONE-AGENT-LAUNCHER.md) support
+OpenCode, Codex, Hermes and PentAGI configurations. OpenCode/Codex transport and
+real tool execution pass against explicitly synthetic upstreams. Hermes requires
+at least 64,000 context tokens; PentAGI needs an existing Docker installation
+and a physical integration test. Additional model runners remain follow-up work.
 
 ## Retained build-126 checkpoint
 

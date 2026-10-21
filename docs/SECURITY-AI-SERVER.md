@@ -26,7 +26,27 @@ the client fixture keeps its different key order. Runtime code, model mathematic
 and delivery configuration are unchanged. The repaired [delivery 180](https://github.com/Dhafen/flash-local/actions/runs/39481746775)
 passes all full-app gates and independent Apple availability verification.
 
-## Delivered checkpoint: 0.1.0 (180)
+## Delivered checkpoint: 0.1.0 (185)
+
+[Build 185](https://github.com/Dhafen/flash-local/actions/runs/39574507501),
+app source `ebd97a99665d6b6c5affd7324754c94ff7a5e990`, passes LES/QPack,
+585 app, 488 package (nine environment skips), 321 streaming and 18 reference
+controls, including 23 actual TCP/Keychain API functions and 38 native Swift
+controls. All 64 actual host/Simulator captures were reviewed in both
+appearances. Narrow macOS control previews elide some explanatory copy;
+iPhone controls/help are visible. Archive, signature and source-bound upload
+pass. Independent Apple verification confirms `VALID`, `INTERNAL_ONLY`,
+`IN_BETA_TESTING`, nonexpired, with the unchanged private group and sole owner.
+IPA SHA256: `dfe16c0a2a3eef8ffe452379120461bd05bea2eb9d1ee7f473f0780c5825bda5`.
+
+Client tools at `fe0a106` pass 125 Python controls. Installed OpenCode 1.19.3
+and Codex 0.160.0 complete text and actual owned file/echo-tool round trips
+against explicitly synthetic upstream replies. No trained model was run on
+the computer. These are not real phone LAN/tool-quality or long-context scores.
+16K/32K/65K remain experimental; 8K is the default. No new phone performance,
+full-model numerics or three-model benchmark is claimed.
+
+### Historical baseline: 0.1.0 (180)
 
 Source `e8d25318510262568b3b81fbc8100e36751ee383` passes 585 app controls,
 487 package controls (nine environment skips), 321 streaming controls,
@@ -44,20 +64,20 @@ The user reports installing the update. A short phone screenshot reports
 5.54 decode token/s, 6.50 prompt token/s and 145 reused prompt tokens; it does
 not establish sustained throughput or actual use of the full 8K context.
 
-The next display-only correction reuses the existing assistant Markdown
+The delivered display correction reuses the existing assistant Markdown
 renderer in the shared GGUF/LES message row. Bold text, lists and code blocks
 render while the raw model response and API payload stay intact. User messages
-remain literal. Its updated preview contains only public synthetic sample text;
-new app/iOS and visual checks are pending. Model-generated spelling or factual
+remain literal. Its reviewed preview contains only public synthetic sample text.
+Model-generated spelling or factual
 errors are separate from Markdown formatting and are not silently rewritten.
 
 ## Protocol and execution boundary
 
-The next context/client work is documented in
+The context/client implementation is documented in
 [Phone agent launcher](PHONE-AGENT-LAUNCHER.md): live session capacities,
 experimental context profiles, acceptance harness and launch configurations
-for OpenCode, Codex, Hermes and PentAGI. Its new Swift/iOS checks and real-phone
-acceptance remain separate from the verified build-180 checkpoint above.
+for OpenCode, Codex, Hermes and PentAGI. Its Swift/iOS checks pass; physical
+phone acceptance remains separate from the verified delivery checkpoint above.
 
 The foreground server implements authenticated `/v1/models`,
 `/v1/chat/completions`, JSON and SSE. Function definitions, `tool_choice`

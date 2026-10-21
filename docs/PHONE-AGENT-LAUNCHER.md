@@ -1,5 +1,9 @@
 # Connect agent clients to the iPhone
 
+App support is delivered in private TestFlight **0.1.0 (185)**. Update without
+uninstalling or downloading the GGUF again. Real phone client/quality/context
+acceptance is still required; transport controls are not model benchmarks.
+
 Python 3.11+ is required. The phone performs all model inference; the computer
 runs the selected client and its tools. No weights are downloaded to the
 computer. Start Flash Local's API on trusted Wi-Fi and keep the app foreground.
