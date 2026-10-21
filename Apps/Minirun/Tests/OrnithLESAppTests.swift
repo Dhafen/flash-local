@@ -7,6 +7,22 @@ import OrnithLES
 
 @MainActor
 final class OrnithLESAppTests: XCTestCase {
+    func testSamplingSurvivesReasoningToggleAndClosingReopeningTheModel() throws {
+        let suite = "OrnithSampling-" + UUID().uuidString
+        let preferences = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { preferences.removePersistentDomain(forName: suite) }
+        var model: OrnithLESAppModel? = .live(preferences: preferences)
+        model?.chatOptions.temperature = 0.7; model?.chatOptions.topP = 0.93; model?.chatOptions.seed = 1234
+        model?.chatThinkingEnabled = false
+        XCTAssertEqual(model?.chatOptions.temperature, 0.7)
+        model = nil
+        let reopened = OrnithLESAppModel.live(preferences: preferences)
+        XCTAssertEqual(reopened.chatOptions.temperature, 0.7)
+        XCTAssertEqual(reopened.chatOptions.topP, 0.93); XCTAssertEqual(reopened.chatOptions.seed, 1234)
+        XCTAssertFalse(reopened.chatThinkingEnabled)
+        reopened.chatThinkingEnabled = true
+        XCTAssertEqual(reopened.chatOptions.temperature, 0.7)
+    }
     func testWorkProfilesOnlyChangeEditableSystemInstruction() {
         let root = FileManager.default.temporaryDirectory
         let model = OrnithLESAppModel(modelsRoot: root, privateRoot: root, documents: root)

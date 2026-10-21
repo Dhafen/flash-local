@@ -294,7 +294,7 @@ struct OrnithGenerationControls: View {
             VStack(alignment: .leading, spacing: 12) {
                 Picker("Tänkande", selection: Binding(
                     get: { OrnithThinkingPreset.matching(options) ?? .medium },
-                    set: { options = $0.options })) {
+                    set: { options = $0.applying(to: options) })) {
                     ForEach(OrnithThinkingPreset.allCases) { preset in
                         Text(preset.title).tag(preset)
                     }
@@ -305,15 +305,13 @@ struct OrnithGenerationControls: View {
                 HStack {
                     Text("Temperatur")
                     Spacer()
-                    TextField("Temperatur", value: $options.temperature, format: .number.precision(.fractionLength(0...2)))
-                        .multilineTextAlignment(.trailing).frame(width: 85).textFieldStyle(.roundedBorder)
+                    OrnithDecimalField(title: "Temperatur", value: $options.temperature, minimum: 0, maximum: 2)
                 }
                 Text("0 ger deterministiska svar. Högre värden ger mer variation, upp till 2.")
                     .font(.caption).foregroundStyle(.secondary)
                 HStack {
                     Text("Top-p"); Spacer()
-                    TextField("Top-p", value: $options.topP, format: .number.precision(.fractionLength(0...2)))
-                        .multilineTextAlignment(.trailing).frame(width: 85).textFieldStyle(.roundedBorder)
+                    OrnithDecimalField(title: "Top-p", value: $options.topP, minimum: 0, maximum: 1, excludingMinimum: true)
                 }
                 HStack {
                     Text("Slumpfrö"); Spacer()
@@ -321,6 +319,8 @@ struct OrnithGenerationControls: View {
                         .multilineTextAlignment(.trailing).frame(width: 110).textFieldStyle(.roundedBorder)
                 }
                 Text("Top-p och slumpfrö används när temperaturen är större än 0. API:t använder dessa standardvärden vid start; anrop kan ange egna värden.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text("Giltiga värden sparas direkt, även när du byter tänkläge eller stänger appen. Både komma och punkt fungerar.")
                     .font(.caption).foregroundStyle(.secondary)
             }.padding(.top, 8)
         }.accessibilityIdentifier("ornith-generation-controls")
@@ -335,6 +335,44 @@ struct OrnithGenerationControls: View {
     }
 }
 
+/// Keep an incomplete keyboard draft (e.g. `0,`) separate from the persisted
+/// numeric value. The formatted-value TextField used to fight decimal edits.
+private struct OrnithDecimalField: View {
+    let title: String
+    @Binding var value: Double
+    let minimum: Double
+    let maximum: Double
+    var excludingMinimum = false
+    @Environment(\.locale) private var locale
+    @State private var draft = ""
+    @FocusState private var focused: Bool
+    private var parsed: Double? {
+        LocalSamplingInput.decimal(draft, minimum: minimum, maximum: maximum, excludingMinimum: excludingMinimum)
+    }
+    private var formatted: String { value.formatted(.number.grouping(.never).precision(.fractionLength(0...8)).locale(locale)) }
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 4) {
+            TextField(title, text: $draft)
+                .focused($focused).onSubmit { focused = false }
+                .multilineTextAlignment(.trailing).frame(width: 100).textFieldStyle(.roundedBorder)
+                .accessibilityLabel(title)
+                .accessibilityIdentifier(title == "Temperatur" ? "ornith-temperature" : "ornith-top-p")
+                #if os(iOS)
+                .keyboardType(.decimalPad)
+                .toolbar { if focused { ToolbarItemGroup(placement: .keyboard) { Spacer(); Button("Klar") { focused = false } } } }
+                #endif
+            if focused && parsed == nil {
+                Text("Ange \(excludingMinimum ? ">" : "")\(minimum.formatted())–\(maximum.formatted())")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+        .onAppear { draft = formatted }
+        .onChange(of: draft) { _, _ in if focused, let parsed, parsed != value { value = parsed } }
+        .onChange(of: value) { _, _ in if !focused { draft = formatted } }
+        .onChange(of: focused) { _, active in if !active { draft = formatted } }
+    }
+}
+
 struct OrnithAPIPage: View {
     @Bindable var model: OrnithLESAppModel
     var activate: () -> Void = {}
@@ -346,6 +384,11 @@ struct OrnithAPIPage: View {
                 Text("OpenAI-kompatibelt API · lokal inferens på iPhone")
                     .font(.subheadline).foregroundStyle(.secondary)
                 Text(model.apiStatus).accessibilityIdentifier("ornith-api-status")
+                if model.isBusy && !model.isAPIRunning {
+                    Text(model.status).font(.callout)
+                    ProgressView().accessibilityLabel("Förbereder modellen")
+                    Button("Stoppa förberedelsen") { model.stop() }
+                }
                 if let error = model.error { Text(error).foregroundStyle(.red).font(.caption) }
                 if (!model.chatReady || model.batchSettingsChanged) && !model.isAPIRunning {
                     Text("Förbered samma verifierade motor som används i snabbchatten.").font(.callout)
@@ -370,6 +413,13 @@ struct OrnithAPIPage: View {
                         .disabled(!model.canStart || !model.chatReady || model.batchSettingsChanged)
                 } else {
                     Button("Stoppa API", role: .destructive) { model.stopAPI() }.buttonStyle(.bordered)
+                }
+                if model.isAPIRunning, !model.apiURLs.isEmpty {
+                    OrnithAgentConnectionControls(urls: model.apiURLs, contextTokens: model.contextCapacityTokens,
+                        copyKey: { copy(model.apiAccessKey) })
+                } else {
+                    Text("Starta API:t så visas färdiga datorkommandon för OpenCode, Codex, Hermes och PentAGI här. Adress, port och modell fylls i automatiskt.")
+                        .font(.callout)
                 }
                 ForEach(model.apiURLs, id: \.self) { url in
                     VStack(alignment: .leading, spacing: 6) {
@@ -418,6 +468,87 @@ struct OrnithAPIPage: View {
         #else
         NSPasteboard.general.clearContents(); NSPasteboard.general.setString(value, forType: .string)
         #endif
+    }
+}
+
+struct OrnithAgentConnectionControls: View {
+    let urls: [String]
+    let contextTokens: Int
+    var copyKey: () -> Void = {}
+    @State private var client: LocalAgentSetup.Client = .opencode
+    @State private var computer: LocalAgentSetup.Computer = .unix
+    @State private var selectedURL = ""
+    @State private var copied: String?
+    init(urls: [String], contextTokens: Int, copyKey: @escaping () -> Void = {},
+         initialClient: LocalAgentSetup.Client = .opencode, initialComputer: LocalAgentSetup.Computer = .unix) {
+        self.urls = urls; self.contextTokens = contextTokens; self.copyKey = copyKey
+        self._client = State(initialValue: initialClient); self._computer = State(initialValue: initialComputer)
+    }
+    private var setup: LocalAgentSetup? {
+        try? LocalAgentSetup(client: client, computer: computer,
+            baseURL: urls.contains(selectedURL) ? selectedURL : (urls.first ?? ""),
+            model: LocalChatRequest.modelID, contextTokens: contextTokens)
+    }
+    var body: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Koppla datorn till telefonen").font(.headline)
+                Picker("Agent", selection: $client) {
+                    ForEach(LocalAgentSetup.Client.allCases) { Text($0.title).tag($0) }
+                }
+                Picker("Dator", selection: $computer) {
+                    ForEach(LocalAgentSetup.Computer.allCases) { Text($0.title).tag($0) }
+                }
+                if urls.count > 1 {
+                    Picker("Telefonadress", selection: $selectedURL) {
+                        ForEach(urls, id: \.self) { Text($0).tag($0) }
+                    }.onAppear { if !urls.contains(selectedURL) { selectedURL = urls.first ?? "" } }
+                }
+                if let setup {
+                    Text("1. Samma nätverk. Låt Flash Local vara öppet. Datorn behöver Python 3.11+, Git och \(client.title) installerat.")
+                        .font(.callout)
+                    DisclosureGroup("Första gången: hämta anslutningshjälpen") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Kör detta en gång i datorns terminal. Det hämtar en testad version av hjälpskripten, inga modellvikter. Har du redan hämtat den här versionen går du till steg 2.")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Text(setup.installCommand).font(.caption.monospaced()).textSelection(.enabled)
+                            Button("Kopiera installation", systemImage: "doc.on.doc") { copy(setup.installCommand, label: "Installationen kopierad") }
+                        }.padding(.top, 6)
+                    }
+                    if let reason = setup.unavailableReason {
+                        Text(reason).font(.callout).foregroundStyle(.orange)
+                    } else if let command = setup.startCommand {
+                        Text("2. Kör på datorn för att starta \(client.title):").font(.callout.bold())
+                        if client == .pentagi {
+                            Text("Öppna först terminalen i din befintliga PentAGI-mapp. Docker Compose krävs; hjälpen installerar inte PentAGI.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Text(command).font(.caption.monospaced()).textSelection(.enabled)
+                        Button("Kopiera startkommando", systemImage: "terminal") { copy(command, label: "Startkommandot kopierat") }
+                            .buttonStyle(.borderedProminent).accessibilityIdentifier("ornith-copy-agent-command")
+                        Text("3. Klistra in API-nyckeln när datorn frågar. Den visas inte i terminalen och sparas inte av hjälpskriptet.")
+                            .font(.callout)
+                        Button("Kopiera API-nyckel", systemImage: "key") { copyKey(); copied = "API-nyckeln kopierad" }
+                    }
+                    Text("\(setup.baseURL) · \(setup.model) · \(contextTokens.formatted()) kontexttoken")
+                        .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                } else {
+                    Text("Ingen giltig lokal adress ännu. Anslut telefonen till Wi-Fi eller Ethernet och starta om API:t.")
+                        .font(.callout)
+                }
+                if let copied { Text(copied).font(.caption).foregroundStyle(.secondary).accessibilityIdentifier("ornith-agent-copy-status") }
+                Text("Hjälpen läser modellens aktuella gränser från telefonen. Codex använder en lokal Responses-adapter på datorn. Agenten utför sina verktyg på datorn; modellens inferens sker på telefonen.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }.frame(maxWidth: .infinity, alignment: .leading)
+        }.accessibilityIdentifier("ornith-agent-connection")
+    }
+    private func copy(_ value: String, label: String) {
+        #if os(iOS)
+        UIPasteboard.general.string = value
+        #else
+        NSPasteboard.general.clearContents(); NSPasteboard.general.setString(value, forType: .string)
+        #endif
+        copied = label
     }
 }
 #endif

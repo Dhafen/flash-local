@@ -75,6 +75,18 @@ public enum OrnithThinkingPreset: String, CaseIterable, Identifiable, Sendable {
         }
         return value
     }
+    /// Reasoning controls must not reset independently selected sampling.
+    public func applying(to current: LocalGenerationOptions) -> LocalGenerationOptions {
+        var value = options
+        value.temperature = current.temperature
+        value.topP = current.topP
+        value.seed = current.seed
+        return value
+    }
+    public static func restoring(_ saved: LocalGenerationOptions) throws -> LocalGenerationOptions {
+        try saved.validate()
+        return (matching(saved) ?? (saved.enableThinking ? .medium : .off)).applying(to: saved)
+    }
     public static func matching(_ value: LocalGenerationOptions) -> Self? {
         allCases.first { preset in
             let expected = preset.options
@@ -82,6 +94,21 @@ public enum OrnithThinkingPreset: String, CaseIterable, Identifiable, Sendable {
                 && value.thinkingBudget == expected.thinkingBudget
                 && value.maximumNewTokens == expected.maximumNewTokens
         }
+    }
+}
+
+/// Editing accepts either keyboard decimal separator, without treating an empty
+/// or incomplete draft as zero. No grouping, exponent or silent range clamping.
+public enum LocalSamplingInput {
+    public static func decimal(_ text: String, minimum: Double, maximum: Double,
+                               excludingMinimum: Bool = false) -> Double? {
+        let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty, value.utf8.allSatisfy({ (48...57).contains($0) || $0 == 44 || $0 == 46 }),
+              value.filter({ $0 == "," || $0 == "." }).count <= 1,
+              value.last != ",", value.last != ".",
+              let number = Double(value.replacingOccurrences(of: ",", with: ".")), number.isFinite,
+              number >= minimum, number <= maximum, !excludingMinimum || number > minimum else { return nil }
+        return number
     }
 }
 

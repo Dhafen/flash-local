@@ -82,16 +82,58 @@ private struct LESAppReport: Encodable {
     let nativeRevision = LESContext.revision
 }
 private actor LESAppWorker {
+    private struct SavedAdmission: Codable {
+        let baseline: LESNumericalCheck
+        let prefill: LESPrefillCheck?
+    }
     private var artifact: VerifiedGGUFArtifact?
     private var prepared: URL?
     private var chat: OrnithLESChatGeneration?
     private var chatCheck: LESNumericalCheck?
     private var prefillCheck: LESPrefillCheck?
+    private var reusedAdmission = false
     private var admissions: [LESMemoryAdmission] = []
     func memoryAdmissionReport() -> [LESMemoryAdmission] { admissions }
+    func admissionWasReused() -> Bool { reusedAdmission }
     func release() { chat?.close(); chat = nil; chatCheck = nil; prefillCheck = nil; artifact = nil; prepared = nil }
     func resetChat() { chat?.resetConversation() }
     func closeChat() { chat?.close(); chat = nil }
+    private func admissionIdentity(_ artifact: VerifiedGGUFArtifact, _ prepared: URL) throws -> [String: String] {
+        try artifact.assertUnchanged()
+        return ["model": artifact.manifest.sha256, "native": LESContext.revision,
+            "reference": Qwen4ExpCPUReference.sourceRevision, "source": BuildInfo.gitRevision,
+            "build": Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown",
+            "device": Sysctl.string("hw.machine") ?? "unknown",
+            "os": ProcessInfo.processInfo.operatingSystemVersionString,
+            "prepared": try FileDigestComputer.digest(ofFileAt: prepared.appendingPathComponent("seal.json"), algorithm: .sha256).hex]
+    }
+    private func restoreAdmission(_ artifact: VerifiedGGUFArtifact, _ prepared: URL) -> SavedAdmission? {
+        let url = prepared.appendingPathComponent("chat-admission-v1.json")
+        do {
+            let values = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
+            guard values.isRegularFile == true, values.isSymbolicLink != true,
+                  let size = values.fileSize, size <= 2 << 20,
+                  let key = try LocalAPIKeyStore(service: "com.dhafen.flashlocal.ornith-admission.v1").load(),
+                  let data = LocalAdmissionSeal.open(try Data(contentsOf: url), identity: try admissionIdentity(artifact, prepared), key: key),
+                  let saved = try? JSONDecoder().decode(SavedAdmission.self, from: data),
+                  saved.baseline.nativeBenchmarkAdmitted,
+                  saved.baseline.modelSHA256 == artifact.manifest.sha256,
+                  saved.baseline.nativeRevision == LESContext.revision,
+                  saved.baseline.referenceRevision == Qwen4ExpCPUReference.sourceRevision else { return nil }
+            return saved
+        } catch { return nil } // A missing/invalid/locked seal always runs the real check.
+    }
+    private func saveAdmission(_ artifact: VerifiedGGUFArtifact, _ prepared: URL) {
+        guard let chatCheck, chatCheck.nativeBenchmarkAdmitted else { return }
+        do {
+            let key = try LocalAPIKeyStore(service: "com.dhafen.flashlocal.ornith-admission.v1").loadOrCreate()
+            let data = try LocalAdmissionSeal.seal(JSONEncoder().encode(SavedAdmission(baseline: chatCheck, prefill: prefillCheck)),
+                identity: admissionIdentity(artifact, prepared), key: key)
+            let url = prepared.appendingPathComponent("chat-admission-v1.json")
+            try data.write(to: url, options: .atomic)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        } catch { /* Persistence is optional; it never substitutes for admission. */ }
+    }
     private func prepareFiles(modelsRoot: URL, privateRoot: URL, existing: VerifiedGGUFArtifact?, control: LESControl,
                               progress: @Sendable (String) -> Void) throws {
         if artifact == nil {
@@ -116,8 +158,15 @@ private actor LESAppWorker {
                      progress: @Sendable (String) -> Void,
                      onCheck: @Sendable (LESNumericalCheck) -> Void) throws -> LESNumericalCheck {
         chat?.close(); chat = nil
+        reusedAdmission = chatCheck != nil
         try prepareFiles(modelsRoot: modelsRoot, privateRoot: privateRoot, existing: existing, control: control, progress: progress)
         guard let artifact, let prepared else { throw CancellationError() }
+        try artifact.assertUnchanged()
+        if chatCheck == nil, let saved = restoreAdmission(artifact, prepared) {
+            chatCheck = saved.baseline; prefillCheck = saved.prefill
+            reusedAdmission = true
+            progress("Återanvänder godkänd kontroll för samma app, modell och motor…")
+        }
         if chatCheck == nil {
             progress("Kontrollerar mot originalvikterna innan snabbchatten startas…")
             chatCheck = try LESBenchmark.check(artifact: artifact, prepared: prepared, control: control,
@@ -140,6 +189,7 @@ private actor LESAppWorker {
             control: control, prefillConfiguration: configuration, prefillCheck: prefillCheck,
             contextProfile: contextProfile,
             onAdmission: { self.admissions.append($0) })
+        if !control.shouldAbort() { saveAdmission(artifact, prepared) }
         return check
     }
     func prefillAdmission() -> LESPrefillCheck? { prefillCheck }
@@ -177,15 +227,19 @@ private actor LESAppWorker {
                  onCheck: @Sendable (LESNumericalCheck) -> Void,
                  onRun: @Sendable (LESBenchmarkRun) -> Void) throws -> (LESNumericalCheck, [LESBenchmarkRun]) {
         admissions.removeAll(keepingCapacity: true)
-        chat?.close(); chat = nil; chatCheck = nil
+        chat?.close(); chat = nil; chatCheck = nil; prefillCheck = nil
         try prepareFiles(modelsRoot: modelsRoot, privateRoot: privateRoot, existing: existing, control: control, progress: progress)
         guard let artifact, let prepared else { throw CancellationError() }
+        // An explicit comparison is always fresh; a later failure must not
+        // leave a previously admitted startup receipt behind.
+        try? FileManager.default.removeItem(at: prepared.appendingPathComponent("chat-admission-v1.json"))
         // Every explicit run performs its own check and memory sampling.
         // Re-exporting a cached failed check must not look like another run
         // with zero measured RAM. The verified file/preparation may be reused.
         let check = try LESBenchmark.check(artifact: artifact, prepared: prepared, control: control,
             progress: progress, onAdmission: { self.admissions.append($0) })
         chatCheck = check.nativeBenchmarkAdmitted ? check : nil
+        if !control.shouldAbort() { saveAdmission(artifact, prepared) }
         onCheck(check)
         guard check.nativeBenchmarkAdmitted else { return (check, []) }
         var runs: [LESBenchmarkRun] = []
@@ -212,6 +266,8 @@ final class OrnithLESAppModel {
     private(set) var memoryAdmissions: [LESMemoryAdmission] = []
     private(set) var measurementURL: URL?
     private(set) var chatReady = false
+    private(set) var startupAdmissionReused = false
+    private(set) var activationSeconds: Double?
     private(set) var chatMessages: [REAMMessage] = []
     private(set) var chatProgress: Qwen4ExpTextGeneration.Progress?
     private(set) var chatSummary: OrnithLESChatGeneration.Summary?
@@ -221,7 +277,7 @@ final class OrnithLESAppModel {
         didSet {
             if persistOptions, (try? batchConfiguration.validate()) != nil,
                let data = try? JSONEncoder().encode(batchConfiguration) {
-                UserDefaults.standard.set(data, forKey: Self.batchPreferenceKey)
+                preferences.set(data, forKey: Self.batchPreferenceKey)
             }
         }
     }
@@ -234,7 +290,7 @@ final class OrnithLESAppModel {
     var systemPrompt = "" {
         didSet {
             if persistOptions, systemPrompt.utf8.count <= 32768 {
-                UserDefaults.standard.set(systemPrompt, forKey: Self.systemPreferenceKey)
+                preferences.set(systemPrompt, forKey: Self.systemPreferenceKey)
             }
         }
     }
@@ -251,7 +307,7 @@ final class OrnithLESAppModel {
                 do {
                     try chatOptions.validate()
                     let data = try JSONEncoder().encode(chatOptions)
-                    UserDefaults.standard.set(data, forKey: Self.optionsPreferenceKey)
+                    preferences.set(data, forKey: Self.optionsPreferenceKey)
                 } catch { /* Incomplete numeric edits are not persisted. */ }
             }
         }
@@ -260,9 +316,10 @@ final class OrnithLESAppModel {
     private static let batchPreferenceKey = "FlashLocal.Ornith.PrefillOptions.v1"
     private static let systemPreferenceKey = "FlashLocal.Ornith.SystemPrompt.v1"
     @ObservationIgnored private var persistOptions = false
+    @ObservationIgnored private var preferences: UserDefaults = .standard
     var chatThinkingEnabled: Bool {
         get { chatOptions.enableThinking }
-        set { chatOptions = (newValue ? OrnithThinkingPreset.medium : OrnithThinkingPreset.off).options }
+        set { chatOptions = (newValue ? OrnithThinkingPreset.medium : OrnithThinkingPreset.off).applying(to: chatOptions) }
     }
     private(set) var isAPIRunning = false
     private(set) var apiStatus = "Avstängd"
@@ -293,24 +350,22 @@ final class OrnithLESAppModel {
     init(modelsRoot: URL, privateRoot: URL, documents: URL) {
         self.modelsRoot = modelsRoot; self.privateRoot = privateRoot; self.documents = documents
     }
-    static func live() -> OrnithLESAppModel {
+    static func live(preferences: UserDefaults = .standard) -> OrnithLESAppModel {
         let fm = FileManager.default
         let documents = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
         let model = Self(modelsRoot: documents.appendingPathComponent("Models"),
             privateRoot: fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
                 .appendingPathComponent("FlashLocal/OrnithLES"), documents: documents)
-        if let data = UserDefaults.standard.data(forKey: Self.optionsPreferenceKey),
-           let options = try? JSONDecoder().decode(LocalGenerationOptions.self, from: data) {
-            do {
-                try options.validate()
-                let preset = OrnithThinkingPreset.matching(options) ?? (options.enableThinking ? .medium : .off)
-                model.chatOptions = preset.options
-            } catch { }
+        model.preferences = preferences
+        if let data = preferences.data(forKey: Self.optionsPreferenceKey),
+           let options = try? JSONDecoder().decode(LocalGenerationOptions.self, from: data),
+           let restored = try? OrnithThinkingPreset.restoring(options) {
+            model.chatOptions = restored
         }
-        if let data = UserDefaults.standard.data(forKey: Self.batchPreferenceKey),
+        if let data = preferences.data(forKey: Self.batchPreferenceKey),
            let batch = try? JSONDecoder().decode(LESPrefillConfiguration.self, from: data),
            (try? batch.validate()) != nil { model.batchConfiguration = batch }
-        if let prompt = UserDefaults.standard.string(forKey: Self.systemPreferenceKey), prompt.utf8.count <= 32768 {
+        if let prompt = preferences.string(forKey: Self.systemPreferenceKey), prompt.utf8.count <= 32768 {
             model.systemPrompt = prompt
         }
         model.persistOptions = true
@@ -388,6 +443,8 @@ final class OrnithLESAppModel {
         do { try batchConfiguration.validate() } catch { self.error = error.localizedDescription; return }
         let requestedBatch = batchConfiguration
         let requestedContext = contextProfile
+        let activationStart = MonotonicClock.now()
+        activationSeconds = nil; startupAdmissionReused = false
         chatReady = false; activePrefillCheck = nil
         let flag = LESControl(), id = UUID()
         activeID = id; control = flag; chatControl = flag; isBusy = true; error = nil
@@ -413,7 +470,11 @@ final class OrnithLESAppModel {
                 activeContextProfile = requestedContext
                 if requestedBatch == LESPrefillConfiguration() { activePrefillCheck = nil }
                 else { activePrefillCheck = await worker.prefillAdmission() }
-                chatReady = true; status = "Snabbchatten är redo · samma Ornith-GGUF · OS-cache."
+                startupAdmissionReused = await worker.admissionWasReused()
+                activationSeconds = MonotonicClock.seconds(since: activationStart)
+                chatReady = true
+                status = startupAdmissionReused ? "Snabbchatten är redo · tidigare godkänd startkontroll återanvänd."
+                    : "Snabbchatten är redo · ny startkontroll godkänd."
             } catch {
                 await worker.closeChat(); chatReady = false; chatControl = nil
                 if !flag.isCancellationRequested { self.error = error.localizedDescription }
@@ -736,6 +797,8 @@ final class OrnithLESAppModel {
             let osPageCacheControlled = false
             let fullModelNumericsVerified = false
             let timestamp: Date
+            let startupAdmissionReused: Bool
+            let activationSeconds: Double?
             let numericalCheck: LESNumericalCheck
             let generation: OrnithLESChatGeneration.Summary
         }
@@ -752,7 +815,8 @@ final class OrnithLESAppModel {
                 nativeRevision: LESContext.revision, platform: platform,
                 operatingSystem: ProcessInfo.processInfo.operatingSystemVersionString, deviceIdentifier: Sysctl.string("hw.machine"),
                 physicalMemoryBytes: ProcessInfo.processInfo.physicalMemory, userDeclaredAirplaneMode: userDeclaredAirplaneMode,
-                timestamp: Date(), numericalCheck: numericalCheck, generation: chatSummary)
+                timestamp: Date(), startupAdmissionReused: startupAdmissionReused, activationSeconds: activationSeconds,
+                numericalCheck: numericalCheck, generation: chatSummary)
             let folder = documents.appendingPathComponent("Diagnostics")
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             let url = folder.appendingPathComponent("ornith-chat-" + UUID().uuidString + ".json")

@@ -1,5 +1,24 @@
 # Connect agent clients to the iPhone
 
+The next app update adds **API → Koppla datorn till telefonen**. Choose the
+client and computer OS, copy the one-time helper installation, then copy its
+start command. The phone fills in its live LAN address, port and model ID.
+Enter the API key only at the computer's hidden prompt. No key is embedded in
+copied commands. Python 3.11+, Git and the selected client must already exist;
+PentAGI additionally needs its existing Docker Compose directory. Hermes is
+explicitly unavailable below its client's 64,000-token context floor; selecting
+an experimental 65K profile is not evidence that long context works.
+
+Temperature, top-p and seed now survive reopening the screen and changing a
+reasoning preset. Decimal entry accepts comma or point. After the first passed
+CPU comparison, normal activation may reuse a private device-key-authenticated
+receipt for the exact app build/source, native/reference revisions, model,
+prepared-file seal, device and OS. Model and prepared-file integrity checks
+remain. A changed identity, invalid receipt or unavailable keychain performs a
+fresh comparison. Explicit comparison tests always run again. Reports include
+`startupAdmissionReused` and actual `activationSeconds`; startup improvements
+still require a phone measurement. No model mathematics or routing changed.
+
 App support is delivered in private TestFlight **0.1.0 (185)**. Update without
 uninstalling or downloading the GGUF again. Real phone client/quality/context
 acceptance is still required; transport controls are not model benchmarks.

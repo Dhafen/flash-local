@@ -4,6 +4,76 @@ import XCTest
 
 final class LocalModelAPITests: XCTestCase {
     private let key = String(repeating: "test-key-", count: 8)
+    func testReasoningChangesAndRestoringPreferencesPreserveSampling() throws {
+        var options = LocalGenerationOptions()
+        options.temperature = 0.73; options.topP = 0.91; options.seed = 12345
+        for preset in OrnithThinkingPreset.allCases {
+            let selected = preset.applying(to: options)
+            XCTAssertEqual(OrnithThinkingPreset.matching(selected), preset)
+            let restored = try OrnithThinkingPreset.restoring(selected)
+            XCTAssertEqual(restored.temperature, 0.73); XCTAssertEqual(restored.topP, 0.91); XCTAssertEqual(restored.seed, 12345)
+        }
+        options.thinkingBudget = 100
+        let migrated = try OrnithThinkingPreset.restoring(options)
+        XCTAssertEqual(OrnithThinkingPreset.matching(migrated), .medium)
+        XCTAssertEqual(migrated.temperature, options.temperature)
+        options.temperature = .nan
+        XCTAssertThrowsError(try OrnithThinkingPreset.restoring(options))
+    }
+    func testDecimalKeyboardDraftsAcceptCommaAndPointWithoutResettingToZero() {
+        for text in ["0.7", "0,7", " 0,7 ", ".7", ",7"] {
+            XCTAssertEqual(LocalSamplingInput.decimal(text, minimum: 0, maximum: 2), 0.7)
+        }
+        for text in ["", "0,", "0.", "2.01", "-1", "1,2.3", "1,000", "NaN", "1e0", "0;print(1)"] {
+            // `1,000` is a valid decimal 1.000, never a thousands separator.
+            if text == "1,000" { XCTAssertEqual(LocalSamplingInput.decimal(text, minimum: 0, maximum: 2), 1); continue }
+            XCTAssertNil(LocalSamplingInput.decimal(text, minimum: 0, maximum: 2), text)
+        }
+        XCTAssertEqual(LocalSamplingInput.decimal("0", minimum: 0, maximum: 2), 0)
+        XCTAssertNil(LocalSamplingInput.decimal("0", minimum: 0, maximum: 1, excludingMinimum: true))
+    }
+    func testNumericalAdmissionSealRejectsTamperingWrongDeviceKeyOrAnyIdentityChange() throws {
+        let identity = ["model": "sha", "source": "commit", "build": "1", "native": "runtime", "reference": "cpu",
+            "prepared": "digest", "device": "phone", "os": "version"]
+        let payload = Data("synthetic admission only; no model loaded".utf8)
+        let sealed = try LocalAdmissionSeal.seal(payload, identity: identity, key: key)
+        XCTAssertEqual(LocalAdmissionSeal.open(sealed, identity: identity, key: key), payload)
+        for field in identity.keys {
+            var changed = identity; changed[field] = "changed"
+            XCTAssertNil(LocalAdmissionSeal.open(sealed, identity: changed, key: key), field)
+        }
+        XCTAssertNil(LocalAdmissionSeal.open(sealed, identity: identity, key: String(repeating: "different", count: 8)))
+        var tampered = try XCTUnwrap(JSONSerialization.jsonObject(with: sealed) as? [String: Any])
+        tampered["record"] = Data("forged imported report".utf8).base64EncodedString()
+        XCTAssertNil(LocalAdmissionSeal.open(try JSONSerialization.data(withJSONObject: tampered), identity: identity, key: key))
+        XCTAssertNil(LocalAdmissionSeal.open(Data("{}".utf8), identity: identity, key: key))
+        XCTAssertNil(LocalAdmissionSeal.open(Data(repeating: 0, count: (2 << 20) + 1), identity: identity, key: key))
+    }
+    func testAgentCommandsUseLiveAddressAndModelWithoutAnyCredential() throws {
+        for computer in LocalAgentSetup.Computer.allCases {
+            for client in LocalAgentSetup.Client.allCases {
+                let setup = try LocalAgentSetup(client: client, computer: computer, baseURL: "http://10.0.0.42:8181/v1",
+                    model: "ornith-q4", contextTokens: 8192)
+                XCTAssertTrue(setup.installCommand.contains(LocalAgentSetup.clientRevision))
+                XCTAssertFalse(setup.installCommand.contains(key))
+                if client == .hermes {
+                    XCTAssertNotNil(setup.unavailableReason); XCTAssertNil(setup.startCommand)
+                } else {
+                    let command = try XCTUnwrap(setup.startCommand)
+                    XCTAssertTrue(command.contains("--base-url 'http://10.0.0.42:8181/v1' --model 'ornith-q4' run \(client.rawValue)"))
+                    XCTAssertEqual(command.contains("--project ."), client == .pentagi)
+                    XCTAssertFalse(command.contains(key)); XCTAssertFalse(command.contains("api-key"))
+                    XCTAssertTrue(command.hasPrefix(computer == .unix ? "python3 " : "py -3 "))
+                }
+            }
+        }
+        let eligible = try LocalAgentSetup(client: .hermes, computer: .unix, baseURL: "http://192.168.1.2:8080/v1", model: "ornith", contextTokens: 65536)
+        XCTAssertNotNil(eligible.startCommand)
+        for address in ["http://8.8.8.8:8080/v1", "http://192.168.1.2:8080/v1?key=secret", "http://user@192.168.1.2:8080/v1", "http://localhost:8080/v1", "http://192.168.1.2:8080/v1\n'evil'"] {
+            XCTAssertThrowsError(try LocalAgentSetup(client: .opencode, computer: .unix, baseURL: address, model: "ornith", contextTokens: 8192))
+        }
+        XCTAssertThrowsError(try LocalAgentSetup(client: .opencode, computer: .unix, baseURL: "http://10.0.0.42:8080/v1", model: "bad';exec", contextTokens: 8192))
+    }
     func testFixedReasoningPresets() throws {
         let expected: [(OrnithThinkingPreset, Int, Int, Bool)] = [
             (.off, 0, 2048, false),

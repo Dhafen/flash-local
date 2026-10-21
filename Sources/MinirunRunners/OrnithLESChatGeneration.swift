@@ -8,7 +8,9 @@ import StorageCore
 
 /// Experimental page-cache chat, isolated from the ordinary GGUF/REAM engine.
 /// The same native graph, weights, routing and cache mode ran the phone benchmark.
-/// A fresh in-process reference check is required; no imported report enables it.
+/// Requires an admitted reference check. The app can restore only its own
+/// device-key-authenticated receipt after model/prepared integrity validation;
+/// imported reports never enable this runner.
 public final class OrnithLESChatGeneration {
     public struct Summary: Codable, Sendable {
         public let backend = "omniPageCache"
