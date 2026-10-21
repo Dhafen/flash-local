@@ -14,6 +14,7 @@ final class OrnithLESRenderTests: XCTestCase {
     private enum Fixture: String, CaseIterable {
         case missing, preview, chatThinking = "chat-thinking", chatComplete = "chat-complete"
         case apiMissing = "api-missing", apiReady = "api-ready", generation
+        case loading, apiPaused = "api-paused"
         case prefill = "prefill-controls", profile = "prompt-profile"
         case agentUnix = "agent-unix", agentWindows = "agent-windows", agentHermes = "agent-hermes"
     }
@@ -28,6 +29,8 @@ final class OrnithLESRenderTests: XCTestCase {
             case .chatComplete: model = .reviewChatPreview(thinking: false)
             case .apiMissing: model = .reviewPreview()
             case .apiReady: model = .reviewAPIPreview()
+            case .loading: model = .reviewLoadingPreview()
+            case .apiPaused: model = .reviewPausedAPIPreview()
             case .generation:
                 model = .reviewPreview(); model.chatOptions.temperature = 0.7; model.chatOptions.topP = 0.95
             case .prefill:
@@ -41,8 +44,8 @@ final class OrnithLESRenderTests: XCTestCase {
                 // text fields with yellow placeholders. Host real controls in
                 // a real window before capturing, so a PNG proves actual UI.
                 let content = Group {
-                    if fixture == .chatThinking || fixture == .chatComplete { OrnithLESChatPage(model: model) }
-                    else if fixture == .apiMissing || fixture == .apiReady { OrnithAPIPage(model: model) }
+                    if fixture == .chatThinking || fixture == .chatComplete || fixture == .loading { OrnithLESChatPage(model: model) }
+                    else if fixture == .apiMissing || fixture == .apiReady || fixture == .apiPaused { OrnithAPIPage(model: model) }
                     else if fixture == .generation { OrnithGenerationControls(options: .constant(model.chatOptions), expanded: true).padding(20) }
                     else if fixture == .prefill { OrnithPrefillControls(model: model, expanded: true).padding(20) }
                     else if fixture == .profile { OrnithPromptControls(model: model, expanded: true).padding(20) }

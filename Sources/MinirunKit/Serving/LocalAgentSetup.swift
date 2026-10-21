@@ -16,7 +16,8 @@ public struct LocalAgentSetup {
         public var id: String { rawValue }
         public var title: String { self == .unix ? "Kali / Linux / Mac" : "Windows PowerShell" }
     }
-    public static let clientRevision = "fe0a106e03d163ae0a83bf0a5c47ee3247e12694"
+    public static let clientRevision = "3e8aae7d4f15d5a2a7b897723c79a6348a609200"
+    private var clientDirectory: String { "flash-local-clients-" + String(Self.clientRevision.prefix(8)) }
     public let client: Client
     public let computer: Computer
     public let baseURL: String
@@ -44,7 +45,7 @@ public struct LocalAgentSetup {
             ? "Den här Hermes-versionen kräver minst 64 000 kontexttoken. Aktiv modell har \(contextTokens.formatted()). 65K-profilen är experimentell och måste testas på telefonen först." : nil
     }
     private var folder: String {
-        computer == .unix ? "\"$HOME/flash-local-clients-fe0a106e\"" : "\"$env:USERPROFILE\\flash-local-clients-fe0a106e\""
+        computer == .unix ? "\"$HOME/\(clientDirectory)\"" : "\"$env:USERPROFILE\\\(clientDirectory)\""
     }
     public var installCommand: String {
         // Chaining makes checkout conditional on a successful, new clone. PS 5
@@ -55,8 +56,8 @@ public struct LocalAgentSetup {
     }
     public var startCommand: String? {
         guard unavailableReason == nil else { return nil }
-        let script = computer == .unix ? "\"$HOME/flash-local-clients-fe0a106e/scripts/flash_local.py\""
-            : "\"$env:USERPROFILE\\flash-local-clients-fe0a106e\\scripts\\flash_local.py\""
+        let script = computer == .unix ? "\"$HOME/\(clientDirectory)/scripts/flash_local.py\""
+            : "\"$env:USERPROFILE\\\(clientDirectory)\\scripts\\flash_local.py\""
         let python = computer == .unix ? "python3" : "py -3"
         let project = client == .pentagi ? " --project ." : ""
         return "\(python) \(script) --base-url '\(baseURL)' --model '\(model)' run \(client.rawValue)\(project)"

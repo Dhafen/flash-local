@@ -106,7 +106,7 @@ struct OrnithLESPage: View {
     }
 }
 /// A separate experimental conversation; the ordinary chat keeps its engine
-/// and saved history. The parent sheet owns inference cancellation/teardown.
+/// and saved history. The process owner retains inference across navigation.
 struct OrnithLESChatPage: View {
     @Bindable var model: OrnithLESAppModel
     var activate: () -> Void = {}
@@ -169,7 +169,7 @@ struct OrnithLESChatPage: View {
             }
             OrnithPromptControls(model: model)
             OrnithPrefillControls(model: model, activate: activate)
-            OrnithGenerationControls(options: $model.chatOptions, contextTokens: model.contextCapacityTokens).disabled(!model.canStart || model.isAPIRunning)
+            OrnithGenerationControls(options: $model.chatOptions, contextTokens: model.contextCapacityTokens).disabled(!model.canStart || model.isAPIListening)
             if let progress = model.chatProgress, model.isBusy {
                 Text("Kontext: \(progress.promptTokensTotal) prompt + högst \(model.chatOptions.maximumNewTokens) nya / \(model.contextCapacityTokens.formatted()) token")
                     .font(.caption.monospacedDigit())
@@ -178,6 +178,8 @@ struct OrnithLESChatPage: View {
             }
             if let summary = model.chatSummary {
                 Text("Evaluation \(summary.evaluationBatchTokens) · fysisk gräns \(summary.physicalBatchTokens) · uppmätt högst \(summary.metricsAfter.maximumPhysicalBatchTokens ?? 0) token per fysisk batch")
+                    .font(.caption.monospacedDigit())
+                Text("Största inlämnade promptbatch: \(summary.maximumEvaluationBatchActuallySubmitted) · cache: \(summary.prefixReuseSource == "none" ? "ny kontext" : "exakt prefix")")
                     .font(.caption.monospacedDigit())
                 if let speed = summary.decodeTokensPerSecond {
                     Text(String(format: "%.2f token/s · prompt %.2f s · %d återanvända token", speed,
@@ -239,7 +241,7 @@ struct OrnithPromptControls: View {
                 Text("Ändringar gäller nästa chattfråga och kan kräva att prompten läses om. API:t tar en kopia vid start; klientens egen systemroll har företräde.")
                     .font(.caption).foregroundStyle(.secondary)
             }.padding(.top, 8)
-        }.disabled(!model.canStart || model.isAPIRunning)
+        }.disabled(!model.canStart || model.isAPIListening)
     }
 }
 
@@ -283,6 +285,15 @@ struct OrnithPrefillControls: View {
                 Toggle("Använd sparad, uppmätt batchprofil automatiskt", isOn: $model.automaticBatch)
                 Text("En godkänd jämförelse sparar vinnaren för samma telefon, modell, motor och kontext. Ingen benchmark körs vid vanlig laddning. Utan mätning behålls den kontrollerade batchen. Fysisk batch över 16 stöds ännu inte av denna streaminggraf; 128/256/512 visas inte som fungerande.")
                     .font(.caption).foregroundStyle(.secondary)
+                Button("Optimera batch automatiskt · engångstest") { model.startBatchOptimization() }
+                    .buttonStyle(.bordered).disabled(!model.canBenchmark)
+                Text("Full matris: 21 stödda par med minst 2 048 riktiga prompttoken och fyra körningar per par. Kan ta flera timmar. Avbryt när som helst; godkända färdiga prov sparas och hoppas över vid återupptagning. Ingen benchmark körs automatiskt vid modellstart.")
+                    .font(.caption).foregroundStyle(.secondary)
+                if !model.batchOptimizationRows.isEmpty {
+                    Text("\(model.batchOptimizationRows.filter(\.comparable).count) jämförbara par · \(model.batchOptimizationRows.count) resultat")
+                        .font(.caption.monospacedDigit())
+                }
+                if let url = model.batchOptimizationURL { ShareLink("Dela batchmatris", item: url) }
                 if model.batchSettingsChanged {
                     Text("Nytt kontext- eller batchval väntar. Ladda om motorn innan chatten eller API:t används.").font(.caption)
                     Button("Kontrollera och ladda om") { activate() }.buttonStyle(.borderedProminent)
@@ -317,7 +328,7 @@ struct OrnithPrefillControls: View {
                 }
                 if let url = model.prefillBenchmarkURL { ShareLink("Dela batchrapport", item: url) }
             }.padding(.top, 8)
-        }.disabled(!model.canStart || model.isAPIRunning)
+        }.disabled(!model.canStart || model.isAPIListening)
     }
 }
 
@@ -433,6 +444,17 @@ struct OrnithAPIPage: View {
                     Text("Förbered samma verifierade motor som används i snabbchatten.").font(.callout)
                     Button("Ladda modell") { activate() }.buttonStyle(.borderedProminent).disabled(!model.canStart)
                 }
+                if model.chatReady || model.isBusy {
+                    Button("Ladda ur modell", role: .destructive) { Task { await model.unloadModel() } }
+                        .buttonStyle(.bordered).disabled(model.isShuttingDown)
+                }
+                Text("Modell: \(model.loadState)").font(.caption.bold())
+                if let started = model.loadingStartedAt, model.isBusy {
+                    TimelineView(.periodic(from: started, by: 1)) { tick in
+                        Text("Förfluten tid: \(Int(max(0, tick.date.timeIntervalSince(started)))) s · \(model.loadingFootprintText)")
+                            .font(.caption.monospacedDigit())
+                    }
+                }
                 HStack {
                     Text("Port"); Spacer()
                     TextField("Port", value: $model.apiPort, format: .number.grouping(.never))
@@ -495,7 +517,7 @@ struct OrnithAPIPage: View {
                     Text("Kontext \(summary.promptTokenIDs.count) + \(summary.generatedTokenIDs.count) / \(model.contextCapacityTokens) · \(summary.reusedPromptTokens) återanvända token")
                         .font(.caption.monospacedDigit())
                 }
-                OrnithGenerationControls(options: $model.chatOptions, contextTokens: model.contextCapacityTokens).disabled(!model.canStart || model.isAPIRunning)
+                OrnithGenerationControls(options: $model.chatOptions, contextTokens: model.contextCapacityTokens).disabled(!model.canStart || model.isAPIListening)
                 OrnithPromptControls(model: model)
                 OrnithPrefillControls(model: model, activate: activate)
             }.padding(20).frame(maxWidth: .infinity, alignment: .leading)

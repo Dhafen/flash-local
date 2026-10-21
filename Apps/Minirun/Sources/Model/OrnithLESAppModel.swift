@@ -87,6 +87,12 @@ private actor LESAppWorker {
         let prefill: LESPrefillCheck?
         var automaticConfiguration: LESPrefillConfiguration? = nil
         var automaticContextTokens: Int? = nil
+        var prefixCheckpointValidated: Bool? = nil
+        var prefixCheckpointContextTokens: Int? = nil
+        var prefixCheckpointConfiguration: LESPrefillConfiguration? = nil
+        var automaticScore: Double? = nil
+        var automaticPrefillCheck: LESPrefillCheck? = nil
+        var completedBatchMeasurements: [OrnithPrefillBenchmark.Measurement]? = nil
     }
     private var artifact: VerifiedGGUFArtifact?
     private var prepared: URL?
@@ -97,11 +103,17 @@ private actor LESAppWorker {
     private var automaticConfiguration: LESPrefillConfiguration?
     private var automaticContextTokens: Int?
     private var effectiveConfiguration = LESPrefillConfiguration()
+    private var prefixCheckpointValidated = false
+    private var prefixCheckpointContextTokens: Int?
+    private var prefixCheckpointConfiguration: LESPrefillConfiguration?
+    private var automaticScore: Double?
+    private var automaticPrefillCheck: LESPrefillCheck?
+    private var completedBatchMeasurements: [OrnithPrefillBenchmark.Measurement] = []
     func usedConfiguration() -> LESPrefillConfiguration { effectiveConfiguration }
     private var admissions: [LESMemoryAdmission] = []
     func memoryAdmissionReport() -> [LESMemoryAdmission] { admissions }
     func admissionWasReused() -> Bool { reusedAdmission }
-    func release() { chat?.close(); chat = nil; chatCheck = nil; prefillCheck = nil; artifact = nil; prepared = nil }
+    func release() { chat?.close(); chat = nil; chatCheck = nil; prefillCheck = nil; artifact = nil; prepared = nil; prefixCheckpointValidated = false }
     func resetChat() { chat?.resetConversation() }
     func closeChat() { chat?.close(); chat = nil }
     private func admissionIdentity(_ artifact: VerifiedGGUFArtifact, _ prepared: URL) throws -> [String: String] {
@@ -138,7 +150,11 @@ private actor LESAppWorker {
         do {
             let key = try LocalAPIKeyStore(service: "com.dhafen.flashlocal.ornith-admission.v1").loadOrCreate()
             let data = try LocalAdmissionSeal.seal(JSONEncoder().encode(SavedAdmission(baseline: chatCheck, prefill: prefillCheck,
-                automaticConfiguration: automaticConfiguration, automaticContextTokens: automaticContextTokens)),
+                automaticConfiguration: automaticConfiguration, automaticContextTokens: automaticContextTokens,
+                prefixCheckpointValidated: prefixCheckpointValidated, prefixCheckpointContextTokens: prefixCheckpointContextTokens,
+                prefixCheckpointConfiguration: prefixCheckpointConfiguration,
+                automaticScore: automaticScore, automaticPrefillCheck: automaticPrefillCheck,
+                completedBatchMeasurements: completedBatchMeasurements)),
                 identity: admissionIdentity(artifact, prepared), key: key)
             let url = prepared.appendingPathComponent("chat-admission-v1.json")
             try data.write(to: url, options: .atomic)
@@ -180,6 +196,11 @@ private actor LESAppWorker {
         if chatCheck == nil, let saved = restoreAdmission(artifact, prepared) {
             chatCheck = saved.baseline; prefillCheck = saved.prefill
             automaticConfiguration = saved.automaticConfiguration; automaticContextTokens = saved.automaticContextTokens
+            prefixCheckpointValidated = saved.prefixCheckpointValidated == true
+            prefixCheckpointContextTokens = saved.prefixCheckpointContextTokens
+            prefixCheckpointConfiguration = saved.prefixCheckpointConfiguration
+            automaticScore = saved.automaticScore; automaticPrefillCheck = saved.automaticPrefillCheck
+            completedBatchMeasurements = saved.completedBatchMeasurements ?? []
             reusedAdmission = true
             progress("Återanvänder godkänd kontroll för samma app, modell och motor…")
         }
@@ -196,10 +217,15 @@ private actor LESAppWorker {
             configuration = automaticConfiguration
             progress("Använder sparad, jämförd batchprofil för samma modell, motor, telefon och kontext…")
         }
+        prefixCheckpointValidated = prefixCheckpointValidated && prefixCheckpointContextTokens == contextProfile.rawValue &&
+            prefixCheckpointConfiguration == configuration
         try configuration.validate()
         if configuration != LESPrefillConfiguration() {
             var effective = configuration
             effective.physicalTokens = try configuration.physicalTokens(checkedDefault: check.nativePrefillTokens)
+            if automaticPrefillCheck?.configuration == effective, automaticPrefillCheck?.passed == true {
+                prefillCheck = automaticPrefillCheck
+            }
             if prefillCheck?.configuration != effective || prefillCheck?.passed != true {
                 prefillCheck = try LESBenchmark.checkPrefill(artifact: artifact, prepared: prepared,
                     baseline: check, configuration: effective, control: control, progress: progress,
@@ -209,6 +235,7 @@ private actor LESAppWorker {
         func open(_ value: LESPrefillConfiguration) throws -> OrnithLESChatGeneration {
             try OrnithLESChatGeneration(artifact: artifact, prepared: prepared, check: check,
                 control: control, prefillConfiguration: value, prefillCheck: prefillCheck, contextProfile: contextProfile,
+                prefixCheckpointAdmitted: prefixCheckpointValidated,
                 onAdmission: { self.admissions.append($0) })
         }
         do { chat = try open(configuration) }
@@ -217,6 +244,12 @@ private actor LESAppWorker {
             configuration = .init(); chat = try open(configuration)
         }
         effectiveConfiguration = configuration
+        if !prefixCheckpointValidated, let chat {
+            progress("Verifierar KV/SSM-återställning mot en färsk körning på din modell…")
+            try chat.validatePrefixCheckpoint()
+            prefixCheckpointValidated = true; prefixCheckpointContextTokens = contextProfile.rawValue
+            prefixCheckpointConfiguration = configuration
+        }
         if !control.shouldAbort() { saveAdmission(artifact, prepared) }
         return check
     }
@@ -234,6 +267,7 @@ private actor LESAppWorker {
     func benchmarkPrefill(modelsRoot: URL, privateRoot: URL, existing: VerifiedGGUFArtifact?,
                           configuration: LESPrefillConfiguration, control: LESControl,
                           contextProfile: LocalContextProfile = .standard,
+                          minimumPromptTokens: Int = 0,
                           progress: @Sendable (String) -> Void,
                           onCheck: @Sendable (LESNumericalCheck) -> Void) throws -> OrnithPrefillBenchmark.Report {
         let baseline = try prepareChat(modelsRoot: modelsRoot, privateRoot: privateRoot, existing: existing,
@@ -241,13 +275,71 @@ private actor LESAppWorker {
         chat?.close(); chat = nil
         guard let artifact, let prepared else { throw CancellationError() }
         let report = try OrnithPrefillBenchmark.execute(artifact: artifact, prepared: prepared, baseline: baseline,
-            candidate: configuration, check: prefillCheck, control: control, contextProfile: contextProfile, progress: progress,
+            candidate: configuration, check: prefillCheck, control: control, contextProfile: contextProfile,
+            prefixCheckpointAdmitted: prefixCheckpointValidated, minimumPromptTokens: minimumPromptTokens, progress: progress,
             onAdmission: { self.admissions.append($0) })
-        if let winner = report.preferredConfiguration {
-            automaticConfiguration = winner; automaticContextTokens = contextProfile.rawValue
+        let measurement = OrnithPrefillBenchmark.Measurement(configuration: configuration, contextTokens: contextProfile.rawValue, report: report)
+        if report.comparable {
+            completedBatchMeasurements.removeAll { $0.configuration == configuration && $0.contextTokens == contextProfile.rawValue &&
+                $0.minimumPromptTokensActuallyEvaluated == measurement.minimumPromptTokensActuallyEvaluated }
+            completedBatchMeasurements.append(measurement)
+        }
+        if let winner = report.preferredConfiguration, winner == configuration,
+           let score = measurement.promptTokensPerSecond,
+           automaticContextTokens != contextProfile.rawValue || automaticScore == nil || score > (automaticScore ?? 0) * 1.03 {
+            automaticConfiguration = winner; automaticContextTokens = contextProfile.rawValue; automaticScore = score
+            automaticPrefillCheck = prefillCheck
+        }
+        if report.comparable {
             saveAdmission(artifact, prepared)
         }
         return report
+    }
+    func optimizeBatches(modelsRoot: URL, privateRoot: URL, context: LocalContextProfile, control: LESControl,
+                         progress: @Sendable (String) -> Void,
+                         onRow: @Sendable (OrnithPrefillBenchmark.Measurement) -> Void) throws -> [OrnithPrefillBenchmark.Measurement] {
+        _ = try prepareChat(modelsRoot: modelsRoot, privateRoot: privateRoot, existing: nil, control: control,
+            contextProfile: context, progress: progress, onCheck: { _ in })
+        chat?.close(); chat = nil
+        defer { chat?.close(); chat = nil }
+        guard let artifact else { throw LESChatPresentationError.notReady }
+        var rows: [OrnithPrefillBenchmark.Measurement] = []
+        // Resume only sealed, comparable results for the same runtime/device
+        // identity. Each supported pair still has its own exact logit proof.
+        for logical in [32, 64, 128, 256, 512, 1024, 2048] {
+            for physical in [4, 8, 16] {
+                if control.shouldAbort() { throw CancellationError() }
+                var candidate = LESPrefillConfiguration(); candidate.evaluationTokens = logical; candidate.physicalTokens = physical
+                if let previous = completedBatchMeasurements.first(where: { $0.configuration == candidate && $0.contextTokens == context.rawValue && $0.comparable &&
+                    ($0.minimumPromptTokensActuallyEvaluated ?? 0) >= 2048 }) {
+                    rows.append(previous); onRow(previous); continue
+                }
+                progress("Optimerar batch \(logical)/\(physical) · \(rows.count + 1)/21 · sparar färdiga prov")
+                let row: OrnithPrefillBenchmark.Measurement
+                do {
+                    _ = try LESBenchmark.plan(artifact, context: context.rawValue, depth: 0, pageCache: true,
+                        phase: "batch-matrix", physicalBatchTokens: physical, onAdmission: { self.admissions.append($0) })
+                    let report = try benchmarkPrefill(modelsRoot: modelsRoot, privateRoot: privateRoot, existing: artifact,
+                        configuration: candidate, control: control, contextProfile: context, minimumPromptTokens: 2048, progress: progress, onCheck: { _ in })
+                    row = .init(configuration: candidate, contextTokens: context.rawValue, report: report)
+                } catch {
+                    chat?.close(); chat = nil
+                    if control.isCancellationRequested { throw CancellationError() }
+                    row = .init(configuration: candidate, contextTokens: context.rawValue, failure: error.localizedDescription)
+                }
+                rows.append(row); onRow(row)
+            }
+        }
+        for (logical, physical) in [(256,128), (512,128), (512,256), (512,512), (1024,256), (1024,512)] {
+            var rejected = LESPrefillConfiguration(); rejected.evaluationTokens = logical; rejected.physicalTokens = physical
+            let row = OrnithPrefillBenchmark.Measurement(configuration: rejected, contextTokens: context.rawValue,
+                failure: "Ej körd: denna streaminggraf har en validerad fysisk gräns på 16. Ingen framgång eller hårdvarumätning påstås.")
+            rows.append(row); onRow(row)
+        }
+        return rows
+    }
+    func completedOptimizationRows(context: Int) -> [OrnithPrefillBenchmark.Measurement] {
+        completedBatchMeasurements.filter { $0.contextTokens == context }
     }
     func generateChat(messages: [Qwen35ChatMessage], options: LocalGenerationOptions,
                       tools: [LocalToolDefinition] = [],
@@ -304,7 +396,7 @@ final class OrnithLESAppModel {
     private(set) var sceneIsActive = true
     private(set) var loadingStartedAt: Date?
     @ObservationIgnored private var wantsModelLoaded = false
-    var isAPIListening: Bool { apiServer != nil || (isPreview && isAPIRunning) }
+    var isAPIListening: Bool { apiServer != nil || (isPreview && !apiAccessKey.isEmpty) }
     var loadState: String {
         if isShuttingDown { return "Laddar ur" }
         if loadingStartedAt != nil && isBusy { return "Laddar" }
@@ -351,6 +443,8 @@ final class OrnithLESAppModel {
     private(set) var prefillBenchmarkURL: URL?
     private(set) var cacheBenchmark: OrnithCacheBenchmark.Report?
     private(set) var cacheBenchmarkURL: URL?
+    private(set) var batchOptimizationRows: [OrnithPrefillBenchmark.Measurement] = []
+    private(set) var batchOptimizationURL: URL?
     var batchSettingsChanged: Bool { chatReady && (activeBatchConfiguration != batchConfiguration || activeContextProfile != contextProfile || activeAutomaticBatch != automaticBatch) }
     var systemPrompt = "" {
         didSet {
@@ -360,7 +454,7 @@ final class OrnithLESAppModel {
         }
     }
     func applyProfile(_ profile: LocalChatProfile) {
-        guard canStart, !isAPIRunning else { return }
+        guard canStart, !isAPIListening else { return }
         systemPrompt = profile.systemPrompt
     }
     var contextProfile: LocalContextProfile = .standard {
@@ -471,6 +565,18 @@ final class OrnithLESAppModel {
         model.apiURLs = ["http://192.168.1.25:8080/v1"]
         model.apiAccessKey = "example-only-not-a-live-key"
         model.chatReady = true; model.isAPIRunning = true
+        return model
+    }
+    static func reviewLoadingPreview() -> OrnithLESAppModel {
+        let model = Self.reviewPreview()
+        model.isBusy = true; model.loadingStartedAt = Date()
+        model.status = "Förhandsvisning: verifierar KV/SSM-återställning. Ingen modell körs."
+        return model
+    }
+    static func reviewPausedAPIPreview() -> OrnithLESAppModel {
+        let model = Self.reviewAPIPreview()
+        model.sceneIsActive = false; model.isAPIRunning = false
+        model.apiStatus = "Förhandsvisning: API pausat · appen är inte aktiv"
         return model
     }
     func start(existing: VerifiedGGUFArtifact? = nil) {
@@ -755,6 +861,49 @@ final class OrnithLESAppModel {
                 status = report.cacheVerified ? "Cachetest klart · identiska svar med och utan återanvändning." :
                     "Cachetest klart · återanvändning eller svar avvek. Se rapporten."
             } catch { self.error = error.localizedDescription; status = "Cachetestet stoppades."; await worker.closeChat() }
+        }
+    }
+    func startBatchOptimization() {
+        guard canBenchmark, sceneIsActive else { return }
+        let flag = LESControl(), id = UUID(), context = contextProfile
+        activeID = id; control = flag; isBusy = true; chatReady = false; chatControl = nil
+        batchOptimizationRows = []; batchOptimizationURL = nil; error = nil
+        status = "Startar engångsmätning av batchmatrisen…"
+        operation = Task { [weak self] in
+            guard let self else { return }
+            defer { if activeID == id { activeID = nil; control = nil; isBusy = false; operation = nil } }
+            var failure: String?
+            do {
+                batchOptimizationRows = try await worker.optimizeBatches(modelsRoot: modelsRoot, privateRoot: privateRoot,
+                    context: context, control: flag, progress: { [weak self] value in
+                        Task { @MainActor in guard let self, self.activeID == id else { return }; self.status = value }
+                    }, onRow: { [weak self] row in
+                        Task { @MainActor in guard let self, self.activeID == id else { return }; self.batchOptimizationRows.append(row) }
+                    })
+                status = "Batchmatrisen är klar. Om en jämförd förbättring hittades används den vid nästa laddning."
+            } catch {
+                failure = error.localizedDescription
+                batchOptimizationRows = await worker.completedOptimizationRows(context: context.rawValue)
+                status = "Batchmatrisen stoppades. Färdiga godkända prov behålls för återupptagning."
+                if !flag.isCancellationRequested { self.error = error.localizedDescription }
+            }
+            struct Export: Encodable {
+                let sourceRevision, nativeRevision, modelSHA256, appBuild: String
+                let contextTokens: Int
+                let rows: [OrnithPrefillBenchmark.Measurement]
+                let failure: String?
+            }
+            do {
+                let folder = documents.appendingPathComponent("Diagnostics")
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                let url = folder.appendingPathComponent("ornith-batch-matrix-" + UUID().uuidString + ".json")
+                let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+                try encoder.encode(Export(sourceRevision: BuildInfo.gitRevision, nativeRevision: LESContext.revision,
+                    modelSHA256: GGUFModelManifest.primaryOrnith.sha256,
+                    appBuild: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown",
+                    contextTokens: context.rawValue, rows: batchOptimizationRows, failure: failure)).write(to: url, options: .atomic)
+                batchOptimizationURL = url
+            } catch { self.error = error.localizedDescription }
         }
     }
     func startAPI() {

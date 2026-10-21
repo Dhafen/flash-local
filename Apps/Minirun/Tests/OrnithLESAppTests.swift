@@ -11,6 +11,14 @@ import AppKit
 
 @MainActor
 final class OrnithLESAppTests: XCTestCase {
+    func testPausedListenerKeepsControlsLockedAndDoesNotClaimReadyServer() {
+        let model = OrnithLESAppModel.reviewPausedAPIPreview()
+        XCTAssertTrue(model.isAPIListening); XCTAssertFalse(model.isAPIRunning)
+        XCTAssertTrue(model.chatReady); XCTAssertFalse(model.sceneIsActive)
+        XCTAssertEqual(model.loadState, "Redo")
+        model.stopAPI()
+        XCTAssertFalse(model.isAPIListening); XCTAssertTrue(model.chatReady)
+    }
     func testIdleBackgroundAndForegroundPreserveLoadedModelAndConversation() async {
         let model = OrnithLESAppModel.reviewChatPreview(thinking: false)
         let messages = model.chatMessages.map(\.id)
@@ -103,6 +111,18 @@ final class OrnithLESAppTests: XCTestCase {
         XCTAssertFalse(reopened.chatThinkingEnabled)
         reopened.chatThinkingEnabled = true
         XCTAssertEqual(reopened.chatOptions.temperature, 0.7)
+    }
+    func testChosenContextAndAutomaticBatchSurviveReopeningWithoutClaimingLoadedKV() throws {
+        let suite = "OrnithContext-" + UUID().uuidString
+        let preferences = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { preferences.removePersistentDomain(forName: suite) }
+        let first = OrnithLESAppModel.live(preferences: preferences)
+        first.contextProfile = try XCTUnwrap(LocalContextProfile(rawValue: 65536))
+        first.automaticBatch = false
+        let reopened = OrnithLESAppModel.live(preferences: preferences)
+        XCTAssertEqual(reopened.contextProfile.rawValue, 65536)
+        XCTAssertFalse(reopened.automaticBatch); XCTAssertFalse(reopened.chatReady)
+        XCTAssertNil(reopened.chatSummary)
     }
     func testWorkProfilesOnlyChangeEditableSystemInstruction() {
         let root = FileManager.default.temporaryDirectory

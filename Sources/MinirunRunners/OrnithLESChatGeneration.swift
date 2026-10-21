@@ -22,6 +22,7 @@ public final class OrnithLESChatGeneration {
         public let prefixCheckpointBytes: UInt64
         public let prefixReuseSource: String
         public let evaluationBatchTokens, physicalBatchTokens: Int
+        public let maximumEvaluationBatchActuallySubmitted: Int
         public let prefillConfiguration: LESPrefillConfiguration
         public let prefillCheck: LESPrefillCheck?
         public let prefillIOBytes, decodeIOBytes, maximumObservedFootprintBytes: UInt64
@@ -50,6 +51,7 @@ public final class OrnithLESChatGeneration {
     private var prefixTokens: [Int] = []
     private var prefixLogits: [Float] = []
     private var checkpointBytes: UInt64 = 0
+    private var prefixRestorationAdmitted = false
     private var running = false
     public let contextTokens: Int
 
@@ -80,12 +82,14 @@ public final class OrnithLESChatGeneration {
     public init(artifact: VerifiedGGUFArtifact, prepared: URL, check: LESNumericalCheck, control: LESControl,
                 prefillConfiguration: LESPrefillConfiguration = .init(), prefillCheck: LESPrefillCheck? = nil,
                 contextProfile: LocalContextProfile = .standard,
+                prefixCheckpointAdmitted: Bool = false,
                 onAdmission: (LESMemoryAdmission) -> Void = { _ in }) throws {
         let batch = try Self.validatedBatch(prefillConfiguration, proof: prefillCheck, baseline: check, modelSHA256: artifact.manifest.sha256,
             nativeRevision: LESContext.revision)
         batchSize = batch.0; physicalBatchSize = batch.1
         self.prefillConfiguration = prefillConfiguration; self.prefillCheck = prefillCheck
         self.artifact = artifact; self.control = control
+        prefixRestorationAdmitted = prefixCheckpointAdmitted
         contextTokens = contextProfile.rawValue
         tokenizer = try CanonicalQwen35Tokenizer(artifact: artifact)
         let plan = try LESBenchmark.plan(artifact, context: contextProfile.rawValue, depth: 0, pageCache: true,
@@ -100,6 +104,27 @@ public final class OrnithLESChatGeneration {
         stateTokens.removeAll(); stateLogits.removeAll(); prefixTokens.removeAll(); prefixLogits.removeAll(); checkpointBytes = 0
     }
     public func resetConversation() { native.reset(); clearTokens() }
+    /// Executed on the real installed model/device before the app enables the
+    /// new restore path. The app may seal this proof for its exact identity.
+    public func validatePrefixCheckpoint() throws {
+        guard !running else { throw GGUFError.limit("Prefix check requires an idle owner") }
+        defer { resetConversation() }
+        let tokens = try tokenizer.chat([.init(role: .user, content: "Compare exact cache states before and after a restored prefix.")], maximumTokens: 64).tokenIDs
+        guard tokens.count >= 14 else { throw GGUFError.invalid("Prefix validation fixture is too short") }
+        let prefix = Array(tokens.prefix(8)), oldSuffix = Array(tokens[8..<10]), newSuffix = Array(tokens[10..<12])
+        _ = try native.logits(tokens: prefix)
+        guard native.capturePrefix() > 0 else { throw GGUFError.limit("Recurrent checkpoint could not be captured within its budget") }
+        _ = try native.logits(tokens: oldSuffix)
+        try native.restorePrefix()
+        let restored = try native.logits(tokens: newSuffix)
+        native.reset()
+        _ = try native.logits(tokens: prefix)
+        let fresh = try native.logits(tokens: newSuffix)
+        guard restored.count == fresh.count, zip(restored, fresh).allSatisfy({ pair in pair.0.bitPattern == pair.1.bitPattern }) else {
+            throw GGUFError.invalid("Restored hybrid KV/SSM logits differ from fresh execution; prefix reuse was not enabled")
+        }
+        prefixRestorationAdmitted = true
+    }
     deinit { close() }
 
     /// Exact token-prefix reuse only. A changed template/history resets SSM/KV;
@@ -155,9 +180,11 @@ public final class OrnithLESChatGeneration {
                 footprintBytes: ProcessFootprint.current()?.footprintBytes ?? peak, reusedPromptTokens: reused)
         }
         if reused > 0 { try onEvent(.prefill(progress(reused))) }
+        var largestEvaluation = 0
         for first in stride(from: reused, to: prompt.count, by: batchSize) {
             try sample()
             let end = min(first + batchSize, prompt.count), tokens = Array(prompt[first..<end])
+            largestEvaluation = max(largestEvaluation, tokens.count)
             stateLogits = try autoreleasepool { try native.logits(tokens: tokens) }
             stateTokens.append(contentsOf: tokens)
             try onEvent(.prefill(progress(end)))
@@ -166,7 +193,7 @@ public final class OrnithLESChatGeneration {
         // Keep the exact pre-generation boundary so that a later canonical
         // rendering can reuse all of its unchanged prefix without replaying it.
         // The snapshot contains recurrent state only (<=128 MiB), not full KV.
-        checkpointBytes = native.capturePrefix()
+        checkpointBytes = prefixRestorationAdmitted ? native.capturePrefix() : 0
         prefixTokens = checkpointBytes > 0 ? stateTokens : []
         prefixLogits = checkpointBytes > 0 ? stateLogits : []
         let prefillSeconds = MonotonicClock.seconds(since: start), afterPrefill = native.metrics
@@ -216,6 +243,7 @@ public final class OrnithLESChatGeneration {
             prefillSeconds: prefillSeconds, decodeForwardSeconds: decodeSeconds, elapsedSeconds: MonotonicClock.seconds(since: start),
             timeToFirstTokenSeconds: firstTokenSeconds, prefixCheckpointBytes: checkpointBytes, prefixReuseSource: reuseSource,
             evaluationBatchTokens: batchSize, physicalBatchTokens: physicalBatchSize,
+            maximumEvaluationBatchActuallySubmitted: largestEvaluation,
             prefillConfiguration: prefillConfiguration, prefillCheck: prefillCheck,
             prefillIOBytes: afterPrefill.ioBytes - before.ioBytes, decodeIOBytes: after.ioBytes - afterPrefill.ioBytes,
             maximumObservedFootprintBytes: peak, sessionMaximumObservedFootprintBytes: control.maximumObservedFootprintBytes,

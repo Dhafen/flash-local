@@ -7,6 +7,20 @@ import MinirunKit
 @testable import MinirunRunners
 
 final class OrnithLESChatTests: XCTestCase {
+    func testAutomaticBatchProfileRejectsNoiseDecodeRegressionAndUnavailableRates() {
+        func improves(_ prompt: Double, _ decode: Double) -> Bool {
+            OrnithPrefillBenchmark.Report.improves(promptBaseline: 10, promptCandidate: prompt,
+                decodeBaseline: 5, decodeCandidate: decode)
+        }
+        XCTAssertTrue(improves(11, 5)); XCTAssertTrue(improves(10.5, 4.75))
+        XCTAssertFalse(improves(10.49, 5)); XCTAssertFalse(improves(30, 4.7))
+        XCTAssertFalse(improves(.nan, 5)); XCTAssertFalse(improves(.infinity, 5))
+        XCTAssertFalse(improves(20, 0)); XCTAssertFalse(improves(0, 8))
+        let unsupported = OrnithPrefillBenchmark.Measurement(configuration: .init(), contextTokens: 65536,
+            failure: "not executed")
+        XCTAssertFalse(unsupported.comparable); XCTAssertNil(unsupported.promptTokensPerSecond)
+        XCTAssertNil(unsupported.peakMemoryBytes); XCTAssertNil(unsupported.maximumEvaluationBatchActuallySubmitted)
+    }
     func testBatchBenchmarkRejectsDifferentPartialOrMissingTokenOutputs() {
         let tokens = Array(0..<129)
         XCTAssertTrue(OrnithPrefillBenchmark.Report.same128TokenOutputs([tokens, tokens, tokens, tokens]))
