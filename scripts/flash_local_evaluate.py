@@ -14,6 +14,7 @@ import random
 import re
 import shutil
 import subprocess
+import sys
 import time
 import uuid
 
@@ -275,7 +276,16 @@ def code_case(client, model, case, runner, image):
                 raise ValueError('Unsupported generated call')
         reference = eval('lambda ' + case['signature'] + ': ' + case['reference'], {'__builtins__': __builtins__})
         checks = [(args, reference(*args)) for args in case['inputs']]
-        program = code + '\n' + '\n'.join(f'assert {case["name"]}(*{args!r}) == {expected!r}' for args, expected in checks) + '\nprint("FLASH_LOCAL_CODE_PASS")\n'
+        # Python equality alone accepts True == 1, including nested structures.
+        # Define the trusted oracle after generated code so it cannot be replaced.
+        oracle = '''
+def _flash_exact(a, b):
+    if type(a) is not type(b): return False
+    if isinstance(a, list): return len(a) == len(b) and all(_flash_exact(x,y) for x,y in zip(a,b))
+    if isinstance(a, dict): return a.keys() == b.keys() and all(_flash_exact(a[k],b[k]) for k in a)
+    return a == b
+'''
+        program = code + '\n' + oracle + '\n'.join(f'assert _flash_exact({case["name"]}(*{args!r}), {expected!r})' for args, expected in checks) + '\nprint("FLASH_LOCAL_CODE_PASS")\n'
         container = 'flash-local-eval-' + uuid.uuid4().hex
         command = [runner, 'run', '--name', container, '--rm', '--pull=never', '--network=none', '--read-only', '--cap-drop=ALL',
             '--security-opt=no-new-privileges', '--pids-limit=64', '--memory=256m', '--cpus=1', '--user=65534:65534',
@@ -377,6 +387,23 @@ def baseline_comparison(report, baseline):
     return {'baseline_context_tokens':8192, 'lost_logic_cases':sorted(lost), 'passed':len(lost) <= 1}
 
 
+def boundary_controls():
+    """Owned-loopback/validator controls, separate from actual model capability."""
+    directory = Path(__file__).resolve().parent / 'tests'
+    result = subprocess.run([sys.executable, '-m', 'unittest', 'discover', '-s', str(directory),
+        '-p', 'test_flash_local_agent.py', '-v'], capture_output=True, timeout=90, check=False)
+    transcript = (result.stdout + result.stderr).decode('utf-8', errors='replace').replace('\r\n', '\n')
+    required = ['test_dry_run_and_denied_action_never_execute_network_tools',
+        'test_repetition_out_of_scope_and_cancellation_stop_before_another_probe',
+        'test_validation_cannot_expand_scope_or_coerce_argument_types',
+        'test_real_owned_tcp_api_tool_round_trip_and_private_log']
+    complete = all(re.search(r'^' + name + r' .* \.\.\. ok$', transcript, re.MULTILINE) for name in required)
+    return {'passed': result.returncode == 0 and complete, 'all_required_guards_executed': bool(complete),
+        'synthetic_generation_provider': True, 'actual_owned_loopback_tools': True,
+        'phone_inference_evidence': False, 'third_party_client_scope_certified': False,
+        'transcript_sha256': hashlib.sha256((result.stdout + result.stderr)).hexdigest()}
+
+
 def evaluate(client, live, output, full=False, expected_context=None, long_context=False, endurance=False,
              code_runner=None, code_image=None, baseline=None, reasoning='medium'):
     if expected_context is not None and live['context'] != expected_context:
@@ -395,6 +422,10 @@ def evaluate(client, live, output, full=False, expected_context=None, long_conte
         def checkpoint():
             handle.seek(0); json.dump(report, handle, indent=2, allow_nan=False); handle.write('\n'); handle.truncate(); handle.flush()
         try:
+            report['execution_boundary_controls'] = boundary_controls()
+            checkpoint()
+            if not report['execution_boundary_controls']['passed']:
+                raise ValueError('Execution boundary controls failed')
             report['protocol'] = verify(client, live['model'], include_cancellation=True)
             bank = logic_cases() + tool_cases() if full else logic_cases()[:6] + tool_cases()[:3] + tool_cases()[60:61] + tool_cases()[80:82]
             for case in bank:
@@ -430,7 +461,7 @@ def evaluate(client, live, output, full=False, expected_context=None, long_conte
         except (ValueError, OSError, KeyError, TypeError, IndexError) as error:
             report['failure_type'] = type(error).__name__
         quick_passed = all(r['passed'] for r in report['rows']) and bool(report['rows'])
-        success = report['verification_complete'] and all(report.get('protocol', {}).get('checks', {}).values()) and (report.get('quality_gates_passed', False) if full else quick_passed)
+        success = report['verification_complete'] and report.get('execution_boundary_controls', {}).get('passed', False) and bool(report.get('protocol', {}).get('checks')) and all(report.get('protocol', {}).get('checks', {}).values()) and (report.get('quality_gates_passed', False) if full else quick_passed)
         if long_context:
             success = success and report.get('context_probe', {}).get('passed', False) and report.get('context_probe', {}).get('near_full_window_exercised', False)
         if endurance:

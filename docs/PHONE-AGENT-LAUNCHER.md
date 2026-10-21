@@ -93,8 +93,10 @@ missing arguments and exact string escaping), ten fresh-receipt multistep
 fixture tasks and 20 executable Python tasks. Passing thresholds are 34/40,
 95/100 correct tools with 99/100 valid formats, 8/10 agent tasks and 16/20 code.
 These are bounded fixtures, not evidence of broad security expertise.
-Existing scoped-client tests separately cover approval/scope/cancellation
-guards; the model harness does not certify third-party tool execution policies.
+Before phone requests, the harness runs the existing scoped-client
+approval/scope/cancellation suite, including owned-loopback tools and explicitly
+synthetic generation. Its result is separate from actual phone model scores
+and does not certify third-party tool execution policies.
 
 Near-full context uses the phone tokenizer's actual counts and five distributed
 fresh facts, with at least 70% of the selected total window exercised. Endurance
