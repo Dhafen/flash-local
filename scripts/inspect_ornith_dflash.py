@@ -8,6 +8,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import struct
 import urllib.request
 
 DRAFT = 'ornith-ai/Ornith-1.5-35B-A3B-DFlash'
@@ -96,11 +97,40 @@ def fetch_json(url, expected_sha=None, limit=2000000):
     return json.loads(raw), {'url': url, 'bytes': len(raw), 'sha256': digest}
 
 
+def fetch_tensor_header(file_bytes=771819680):
+    """Read only the Safetensors header; reject full-file HTTP responses."""
+    url = f'https://huggingface.co/{DRAFT}/resolve/{DRAFT_REVISION}/model.safetensors'
+    def span(first, last):
+        request = urllib.request.Request(url, headers={'Range': f'bytes={first}-{last}',
+            'User-Agent': 'Flash-Local-header-audit'})
+        with urllib.request.urlopen(request, timeout=30) as response:
+            if response.status != 206 or response.headers.get('Content-Range') != f'bytes {first}-{last}/{file_bytes}':
+                raise ValueError('Exact HTTP range was not honored; refusing weight download')
+            raw = response.read(last - first + 2)
+        if len(raw) != last - first + 1:
+            raise ValueError('Unexpected header range length')
+        return raw
+    length = struct.unpack('<Q', span(0, 7))[0]
+    if not 0 < length <= 131072:
+        raise ValueError('Safetensors header bound exceeded')
+    header = json.loads(span(8, 7 + length))
+    tensors = {k: v for k, v in header.items() if k != '__metadata__'}
+    fc = tensors.get('fc.weight', {})
+    if fc.get('shape') != [2048, 16384] or any(t.get('dtype') != 'BF16' for t in tensors.values()):
+        raise ValueError('Unexpected draft tensor geometry or dtype')
+    return {'header_bytes_read': length + 8, 'tensor_payload_bytes_read': 0,
+        'tensor_count': len(tensors), 'feature_projection_shape': fc['shape'],
+        'own_token_embeddings_present': any('embed_tokens' in k for k in tensors),
+        'own_output_head_present': any('lm_head' in k for k in tensors),
+        'whole_weight_file_digest_verified': False}
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--context', type=int, choices=[8192, 16384, 32768, 65536], default=8192)
     p.add_argument('--verify-width', type=int, choices=[2, 4, 5, 8, 16], default=4)
     p.add_argument('--output', type=Path, required=True)
+    p.add_argument('--inspect-tensor-header', action='store_true', help='Also read bounded Safetensors header ranges; never tensor data')
     args = p.parse_args(argv)
     draft, a = fetch_json(f'https://huggingface.co/{DRAFT}/resolve/{DRAFT_REVISION}/config.json', DRAFT_CONFIG_SHA256)
     target, b = fetch_json(f'https://huggingface.co/{TARGET}/resolve/{TARGET_REVISION}/config.json', TARGET_CONFIG_SHA256)
@@ -114,6 +144,8 @@ def main(argv=None):
     report.update(metadata_downloads=[a, b, c], downloaded_weight_bytes=0,
         checkpoint_parameters=metadata.get('safetensors', {}).get('total'),
         draft_revision=DRAFT_REVISION, target_revision=TARGET_REVISION)
+    if args.inspect_tensor_header:
+        report['tensor_header_inspection'] = fetch_tensor_header(weight['size'])
     args.output.write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
     print(f'Metadata only: {report["checkpoint_parameters"]} draft parameters; no weights downloaded; no inference executed.')
     return 0

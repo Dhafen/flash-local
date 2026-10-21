@@ -3,12 +3,29 @@ import json
 from pathlib import Path
 import sys
 import unittest
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from inspect_ornith_dflash import inspect
+from inspect_ornith_dflash import inspect, fetch_tensor_header
 
 
 class DFlashInspectionTests(unittest.TestCase):
+    def test_server_ignoring_range_is_rejected_without_reading_weight_body(self):
+        response = MagicMock(); response.status = 200
+        response.__enter__.return_value = response
+        with patch('inspect_ornith_dflash.urllib.request.urlopen', return_value=response):
+            with self.assertRaisesRegex(ValueError, 'refusing weight download'): fetch_tensor_header()
+        response.read.assert_not_called()
+
+    def test_oversized_header_is_rejected_before_second_request(self):
+        response = MagicMock(); response.status = 206
+        response.headers = {'Content-Range': 'bytes 0-7/771819680'}
+        response.read.return_value = (131073).to_bytes(8, 'little')
+        response.__enter__.return_value = response
+        with patch('inspect_ornith_dflash.urllib.request.urlopen', return_value=response) as request:
+            with self.assertRaisesRegex(ValueError, 'header bound'): fetch_tensor_header()
+            self.assertEqual(request.call_count, 1)
+
     def setUp(self):
         # Public checkpoint geometry; no weights or generated model outputs.
         self.draft = {'architectures': ['DFlashDraftModel'], 'hidden_size': 2048,

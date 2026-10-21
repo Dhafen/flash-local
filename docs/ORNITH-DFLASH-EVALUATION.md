@@ -47,6 +47,11 @@ and repository metadata specify **385,906,176 BF16 parameters**, a
 **771,819,680-byte** Safetensors file, six draft layers, hidden size 2048,
 vocabulary 248320 and block size 16. Five layers use a 4096 sliding window;
 one uses full attention. This is DFlash v1, not DFlash2.
+An exact HTTP-range read of **7328 header bytes**, with zero tensor-payload
+bytes read, independently finds 69 BF16 tensors and `fc.weight` shape
+`[2048,16384]`. There is no private token-embedding table or output head;
+the draft must share these with the target. The full weight checksum has not
+been verified because the tensor payload was not downloaded.
 
 The eight target layer outputs are `[1,6,11,16,22,27,32,37]`. The inspected
 [GGUF converter](https://github.com/ggml-org/llama.cpp/blob/d454a204ef2b63af357744809c05af897611a72e/conversion/qwen.py)
@@ -108,7 +113,8 @@ F32 feature block is 262,144 bytes, excluding draft KV and recurrent state.
 
 Run `python scripts/inspect_ornith_dflash.py --context 65536 --output audit.json`.
 It downloads only pinned public JSON, verifies config digests and weight
-identity from metadata, and records zero downloaded weight bytes. Five controls
+identity from metadata, and records zero downloaded weight bytes. Add
+`--inspect-tensor-header` for the bounded header-only range check. Seven controls
 test geometry, layer offsets, memory arithmetic, invalid configurations and
 honest unverified status. This is not a converter or a model benchmark.
 
