@@ -72,7 +72,9 @@ public struct LESMemoryPlan: Codable, Sendable, Equatable {
             config.attentionHeads * contextTokens + config.vocabularySize + config.hiddenSize * 16
         let extraScratch = UInt64(max(0, physicalBatchTokens - 4)) * max(32 << 20, UInt64(elementsPerToken) * 4 * 8)
         batchScratchReserveBytes = extraScratch
-        runtimeReserveBytes = (1 << 30) + (128 << 20) + extraScratch
+        // One bounded recurrent-only prompt checkpoint; attention KV is retained
+        // in place. Do not consume the existing 128 MiB emergency stop margin.
+        runtimeReserveBytes = (1 << 30) + (128 << 20) + (pageCacheOnly ? (128 << 20) : 0) + extraScratch
         let fixed = baselineFootprintBytes + denseBytes + kvBytes + ssmBytes + runtimeReserveBytes
         let staging = groups.values.reduce(UInt64(0)) { $0 + $1.bytes * UInt64(stagingSlots) }
         let perSlot = groups.values.reduce(UInt64(0)) { $0 + $1.bytes * $1.layers }

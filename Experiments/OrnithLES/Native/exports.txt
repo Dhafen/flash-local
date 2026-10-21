@@ -4,6 +4,8 @@ _flo_close
 _flo_vocabulary_size
 _flo_decode
 _flo_reset
+_flo_capture_prefix
+_flo_restore_prefix
 _flo_snapshot
 _flo_last_error
 _flo_revision

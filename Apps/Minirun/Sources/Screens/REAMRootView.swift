@@ -19,7 +19,7 @@ struct REAMRootView: View {
     @State private var alternateRunner: AlternateRunner?
     @State private var performanceModel = OrnithPerformanceAppModel.live()
     #if canImport(OrnithLES)
-    @State private var lesModel = OrnithLESAppModel.live()
+    private var lesModel: OrnithLESAppModel { model.ornithSession }
     #endif
     var body: some View {
         NavigationStack {

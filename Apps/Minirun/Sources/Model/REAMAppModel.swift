@@ -183,6 +183,10 @@ struct REAMRunReport: Codable, Sendable {
 /// operation. A verified descriptor is the only authority that enables Send.
 @Observable @MainActor
 final class REAMAppModel {
+    #if canImport(OrnithLES)
+    // Owned by the process-level model, not by a sheet or tab identity.
+    @ObservationIgnored lazy var ornithSession = OrnithLESAppModel.live()
+    #endif
     enum Activity { case idle, downloading, verifying, generating, checkingNumerics, resetting, stopping }
     private(set) var activity = Activity.idle
     private(set) var messages: [REAMMessage] = []

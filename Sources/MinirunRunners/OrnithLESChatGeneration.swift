@@ -18,6 +18,9 @@ public final class OrnithLESChatGeneration {
         public let promptTokenIDs, generatedTokenIDs: [Int]
         public let reusedPromptTokens, evaluatedPromptTokens, decodeForwardPasses: Int
         public let prefillSeconds, decodeForwardSeconds, elapsedSeconds: Double
+        public let timeToFirstTokenSeconds: Double?
+        public let prefixCheckpointBytes: UInt64
+        public let prefixReuseSource: String
         public let evaluationBatchTokens, physicalBatchTokens: Int
         public let prefillConfiguration: LESPrefillConfiguration
         public let prefillCheck: LESPrefillCheck?
@@ -44,6 +47,9 @@ public final class OrnithLESChatGeneration {
     private let prefillCheck: LESPrefillCheck?
     private var stateTokens: [Int] = []
     private var stateLogits: [Float] = []
+    private var prefixTokens: [Int] = []
+    private var prefixLogits: [Float] = []
+    private var checkpointBytes: UInt64 = 0
     private var running = false
     public let contextTokens: Int
 
@@ -89,8 +95,11 @@ public final class OrnithLESChatGeneration {
             native.close(); throw GGUFError.invalid("Tokenizer and native vocabulary disagree")
         }
     }
-    public func close() { native.close(); stateTokens.removeAll(); stateLogits.removeAll() }
-    public func resetConversation() { native.reset(); stateTokens.removeAll(); stateLogits.removeAll() }
+    public func close() { native.close(); clearTokens() }
+    private func clearTokens() {
+        stateTokens.removeAll(); stateLogits.removeAll(); prefixTokens.removeAll(); prefixLogits.removeAll(); checkpointBytes = 0
+    }
+    public func resetConversation() { native.reset(); clearTokens() }
     deinit { close() }
 
     /// Exact token-prefix reuse only. A changed template/history resets SSM/KV;
@@ -105,6 +114,7 @@ public final class OrnithLESChatGeneration {
                          tools: [LocalToolDefinition] = [],
                          onEvent: (Qwen4ExpTextGeneration.Event) throws -> Void) throws -> Summary {
         try options.validate()
+        let start = MonotonicClock.now()
         guard !running else { throw GGUFError.limit("Native inference is already running") }
         let maximumNewTokens = options.maximumNewTokens
         running = true
@@ -116,9 +126,16 @@ public final class OrnithLESChatGeneration {
             enableThinking: options.thinkingEnabled, tools: tools).tokenIDs
         let thinkingEnd = try tokenizer.tokenize("</think>\n\n", parseSpecial: true, maximumTokens: 8)
         guard !thinkingEnd.isEmpty else { throw GGUFError.invalid("Missing canonical thinking-end tokens") }
-        let reused = Self.reusablePrefix(previous: stateTokens, prompt: prompt, hasLogits: !stateLogits.isEmpty)
+        var reused = Self.reusablePrefix(previous: stateTokens, prompt: prompt, hasLogits: !stateLogits.isEmpty)
+        var reuseSource = reused > 0 ? "liveExactPrefix" : "none"
+        if reused == 0, checkpointBytes > 0,
+           Self.reusablePrefix(previous: prefixTokens, prompt: prompt, hasLogits: !prefixLogits.isEmpty) > 0 {
+            try native.restorePrefix()
+            stateTokens = prefixTokens; stateLogits = prefixLogits
+            reused = prefixTokens.count; reuseSource = "recurrentCheckpointAndRetainedAttentionKV"
+        }
         if reused == 0 { resetConversation() }
-        let start = MonotonicClock.now(), before = native.metrics
+        let before = native.metrics
         var peak = ProcessFootprint.current()?.footprintBytes ?? 0
         let thermal = ProcessInfo.processInfo.thermalState.rawValue
         let lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
@@ -145,14 +162,23 @@ public final class OrnithLESChatGeneration {
             stateTokens.append(contentsOf: tokens)
             try onEvent(.prefill(progress(end)))
         }
+        // Chat templates trim/normalize assistant reasoning and tool envelopes.
+        // Keep the exact pre-generation boundary so that a later canonical
+        // rendering can reuse all of its unchanged prefix without replaying it.
+        // The snapshot contains recurrent state only (<=128 MiB), not full KV.
+        checkpointBytes = native.capturePrefix()
+        prefixTokens = checkpointBytes > 0 ? stateTokens : []
+        prefixLogits = checkpointBytes > 0 ? stateLogits : []
         let prefillSeconds = MonotonicClock.seconds(since: start), afterPrefill = native.metrics
         var decodeSeconds = 0.0, passes = 0, reason = "tokenLimit"
+        var firstTokenSeconds: Double?
         func append(_ id: Int, forced: Bool) throws {
             let bytes = try tokenizer.bytes(for: id, includeControl: true)
             outputBytes += bytes.count
             guard outputBytes <= 4 << 20 else { throw GGUFError.limit("Generated text exceeds 4 MiB") }
             if forced { forcedTokens += 1 } else if thinking.isThinking { reasoningTokens += 1 }
             generated.append(id)
+            if firstTokenSeconds == nil { firstTokenSeconds = MonotonicClock.seconds(since: start) }
             let delta = text.append(bytes); thinking.append(delta)
             try onEvent(.token(id: id, textDelta: delta, progress: progress(prompt.count)))
             if generated.count < maximumNewTokens {
@@ -188,6 +214,7 @@ public final class OrnithLESChatGeneration {
         return Summary(promptTokenIDs: prompt, generatedTokenIDs: generated, reusedPromptTokens: reused,
             evaluatedPromptTokens: prompt.count - reused, decodeForwardPasses: passes,
             prefillSeconds: prefillSeconds, decodeForwardSeconds: decodeSeconds, elapsedSeconds: MonotonicClock.seconds(since: start),
+            timeToFirstTokenSeconds: firstTokenSeconds, prefixCheckpointBytes: checkpointBytes, prefixReuseSource: reuseSource,
             evaluationBatchTokens: batchSize, physicalBatchTokens: physicalBatchSize,
             prefillConfiguration: prefillConfiguration, prefillCheck: prefillCheck,
             prefillIOBytes: afterPrefill.ioBytes - before.ioBytes, decodeIOBytes: after.ioBytes - afterPrefill.ioBytes,

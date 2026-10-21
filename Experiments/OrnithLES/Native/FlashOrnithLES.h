@@ -47,6 +47,10 @@ int32_t flo_vocabulary_size(const flo_context *);
 int flo_decode(flo_context *, const int32_t * tokens, int32_t count,
                float * logits, int32_t capacity);
 void flo_reset(flo_context *);
+// One bounded recurrent-only checkpoint. Attention KV remains in place and is
+// trimmed on restore. No model weights or full-context KV copy is made.
+uint64_t flo_capture_prefix(flo_context *);
+int flo_restore_prefix(flo_context *);
 flo_metrics flo_snapshot(const flo_context *);
 const char * flo_last_error(void);
 const char * flo_revision(void);

@@ -134,7 +134,7 @@ public final class LESContext {
     public func logits(tokens: [Int]) throws -> [Float] {
         try artifact.assertUnchanged()
         guard let handle else { throw GGUFError.invalid("LES context is closed") }
-        guard !tokens.isEmpty, tokens.count <= 32, tokens.allSatisfy({ (0..<vocabularySize).contains($0) }),
+        guard !tokens.isEmpty, tokens.count <= 2048, tokens.allSatisfy({ (0..<vocabularySize).contains($0) }),
               !control.shouldAbort() else { throw CancellationError() }
         let ids = tokens.map(Int32.init)
         var output = [Float](repeating: 0, count: vocabularySize)
@@ -145,6 +145,10 @@ public final class LESContext {
         try artifact.assertUnchanged(); return output
     }
     public func reset() { flo_reset(handle) }
+    public func capturePrefix() -> UInt64 { flo_capture_prefix(handle) }
+    public func restorePrefix() throws {
+        guard let handle, flo_restore_prefix(handle) == 0 else { throw Self.failure() }
+    }
     public var metrics: LESMetrics { LESMetrics(flo_snapshot(handle)) }
     public var projectionProbe: LESProjectionProbe? { LESProjectionProbe(flo_snapshot(handle)) }
     public static var revision: String { String(cString: flo_revision()) }

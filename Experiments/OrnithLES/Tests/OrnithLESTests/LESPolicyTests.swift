@@ -164,6 +164,31 @@ final class LESPolicyTests: XCTestCase {
         options.evaluationTokens = 8; XCTAssertThrowsError(try options.validate())
         options.physicalTokens = 3; XCTAssertThrowsError(try options.validate())
         options.evaluationTokens = 4096; options.physicalTokens = 0; XCTAssertThrowsError(try options.validate())
+        for logical in [32, 64, 128, 256, 512, 1024, 2048] {
+            options.evaluationTokens = logical; options.physicalTokens = 4
+            XCTAssertNoThrow(try options.validate())
+        }
+        for physical in [128, 256, 512] {
+            options.evaluationTokens = 2048; options.physicalTokens = physical
+            XCTAssertThrowsError(try options.validate(), "Unsupported physical graphs must not be advertised as optimized")
+        }
+    }
+    func testPublished65KPlanKeepsOriginalRoPEAndIncludesRecurrentCheckpointReserve() throws {
+        let root = try XCTUnwrap(ProcessInfo.processInfo.environment["ORNITH_LES_FIXTURE_ROOT"])
+        let data = try Data(contentsOf: URL(fileURLWithPath: root).appendingPathComponent("ornith.header"))
+        let idx = try GGUFIndex.parse(header: data, fileByteCount: 21_713_463_040)
+        let config = try Qwen35MoEConfig(index: idx)
+        XCTAssertGreaterThanOrEqual(config.contextLimit, 65536)
+        XCTAssertEqual(config.layers, 40); XCTAssertEqual(config.expertsPerToken, 8)
+        for context in [32768, 65536] {
+            let plan = try LESMemoryPlan(index: idx, contextTokens: context,
+                footprint: .init(footprintBytes: 350_000_000, peakFootprintBytes: 350_000_000, availableBytes: nil),
+                pageCacheOnly: true, physicalBatchTokens: 4)
+            XCTAssertEqual(plan.kvBytes, UInt64(context) * 20480)
+            XCTAssertEqual(plan.runtimeReserveBytes, (1 << 30) + (256 << 20))
+            XCTAssertLessThanOrEqual(plan.admittedProcessBytes, 5_500_000_000)
+            print("ORNITH_LONG_CONTEXT_PLAN context=\(context) dense=\(plan.denseBytes) KV=\(plan.kvBytes) SSM=\(plan.ssmBytes) admitted=\(plan.admittedProcessBytes) ropeBase=\(config.ropeBase) metadataOnly=true physicalQualityVerified=false")
+        }
     }
     func testLargerPhysicalBatchesBudgetTheCompleteExpertUnion() throws {
         let idx = try index()

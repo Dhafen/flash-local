@@ -150,6 +150,8 @@ int flo_prepare(int source, const char * directory, flo_abort abort, void * user
 }
 
 struct flo_context {
+    std::vector<uint8_t> prefix_state;
+    int prefix_position = 0;
     std::unique_lock<std::mutex> exclusive;
     fd_owner source;
     fs::path manifest;
@@ -265,7 +267,7 @@ flo_context * flo_open(int source, const char * directory, flo_options o, flo_ab
         if (!result->model) throw std::runtime_error(loader_diagnostics.describe("LES model loading failed"));
         check_abort(abort, user);
         auto cp = llama_context_default_params();
-        cp.n_ctx = o.context_tokens; cp.n_batch = 32;
+        cp.n_ctx = o.context_tokens; cp.n_batch = 2048;
         cp.n_ubatch = streaming ? std::max(1, std::min(16, o.prefill_slots / 8)) : 1;
         cp.n_threads = cp.n_threads_batch = o.cpu_threads; cp.n_seq_max = 1; cp.n_rs_seq = 0;
         cp.type_k = cp.type_v = GGML_TYPE_F16; cp.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED;
@@ -312,7 +314,7 @@ void flo_close(flo_context * c) { delete c; }
 int32_t flo_vocabulary_size(const flo_context * c) { return c ? c->vocabulary : 0; }
 int flo_decode(flo_context * c, const int32_t * tokens, int32_t count, float * output, int32_t capacity) {
     try {
-        require(c && !c->poisoned && tokens && output && count > 0 && count <= 32 && capacity == c->vocabulary &&
+        require(c && !c->poisoned && tokens && output && count > 0 && count <= 2048 && capacity == c->vocabulary &&
             count <= c->capacity - c->position, "Invalid LES decode request");
         for (int i = 0; i < count; ++i) require(tokens[i] >= 0 && tokens[i] < c->vocabulary, "Token outside vocabulary");
         for (int first = 0; first < count; first += c->batch) {
@@ -321,7 +323,7 @@ int flo_decode(flo_context * c, const int32_t * tokens, int32_t count, float * o
             // All recurrent/KV work and real expert choices are still evaluated.
             // Only the final microbatch's logits escape this API. The pinned
             // Qwen graph selects output rows after all transformer layers.
-            int8_t no_output[32]{};
+            int8_t no_output[16]{};
             const bool intermediate = first + n < count;
             if (intermediate) batch.logits = no_output;
             require(llama_decode(c->context, batch) == 0, "LES forward failed");
@@ -337,10 +339,43 @@ int flo_decode(flo_context * c, const int32_t * tokens, int32_t count, float * o
     } catch (const std::exception & e) { if (c) c->poisoned = true; last_error = e.what(); return -1; }
 }
 void flo_reset(flo_context * c) {
+    if (c) { std::vector<uint8_t>().swap(c->prefix_state); c->prefix_position = 0; }
     if (c && !c->poisoned) {
         llama_memory_clear(llama_get_memory(c->context), true); c->position = 0;
         c->routing = {};
     }
+}
+uint64_t flo_capture_prefix(flo_context * c) {
+    try {
+        require(c && !c->poisoned && c->position > 0, "Invalid prefix checkpoint");
+        check_abort(c->abort, c->user);
+        c->prefix_state.clear(); c->prefix_position = 0;
+        const auto flags = LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY;
+        const size_t size = llama_state_seq_get_size_ext(c->context, 0, flags);
+        require(size > 0 && size <= (128ULL << 20), "Recurrent checkpoint exceeds 128 MiB");
+        c->prefix_state.resize(size);
+        require(llama_state_seq_get_data_ext(c->context, c->prefix_state.data(), size, 0, flags) == size,
+            "Incomplete recurrent checkpoint");
+        c->prefix_position = c->position;
+        return size;
+    } catch (const std::exception & e) {
+        if (c) { std::vector<uint8_t>().swap(c->prefix_state); c->prefix_position = 0; }
+        last_error = e.what(); return 0;
+    }
+}
+int flo_restore_prefix(flo_context * c) {
+    try {
+        require(c && !c->poisoned && c->prefix_position > 0 && !c->prefix_state.empty(), "No reusable prefix checkpoint");
+        check_abort(c->abort, c->user);
+        // The pinned hybrid implementation restores only recurrent state for
+        // PARTIAL_ONLY. Restore that first, then discard attention suffix cells;
+        // recurrent seq_rm now sees no state beyond the checkpoint position.
+        require(llama_state_seq_set_data_ext(c->context, c->prefix_state.data(), c->prefix_state.size(),
+            0, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY) == c->prefix_state.size(), "Prefix state restore failed");
+        require(llama_memory_seq_rm(llama_get_memory(c->context), 0, c->prefix_position, -1), "Prefix KV suffix trim failed");
+        c->position = c->prefix_position;
+        return 0;
+    } catch (const std::exception & e) { if (c) c->poisoned = true; last_error = e.what(); return -1; }
 }
 flo_metrics flo_snapshot(const flo_context * c) {
     flo_metrics out{};
@@ -372,4 +407,4 @@ flo_metrics flo_snapshot(const flo_context * c) {
     return out;
 }
 const char * flo_last_error() { return last_error.c_str(); }
-const char * flo_revision() { return "96bbf61710d44421ea54e63f5194f9b17c20d877+flash-local-batch-observation-v2"; }
+const char * flo_revision() { return "96bbf61710d44421ea54e63f5194f9b17c20d877+flash-local-prefix-v3"; }

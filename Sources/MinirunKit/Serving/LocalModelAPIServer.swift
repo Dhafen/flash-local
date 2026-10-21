@@ -67,6 +67,16 @@ public final class LocalModelAPIServer: @unchecked Sendable {
         listener.start(queue: queue)
     }
     public func stop() { queue.async { self.stopOnQueue() } }
+    /// Re-evaluate actual listener state and current interface addresses after
+    /// suspension. Never report ready merely because a server object exists.
+    public func refreshState() {
+        queue.async { [weak self] in
+            guard let self, !self.stopped, let listener = self.listener else { return }
+            if case .ready = listener.state, let port = listener.port?.rawValue {
+                self.onState(.ready(port: port, addresses: Self.localIPv4Addresses(loopbackOnly: self.loopbackOnly)))
+            }
+        }
+    }
     private func stopOnQueue(notify: Bool = true) {
         guard !stopped else { return }; stopped = true
         listener?.cancel(); listener = nil

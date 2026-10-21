@@ -11,6 +11,50 @@ import AppKit
 
 @MainActor
 final class OrnithLESAppTests: XCTestCase {
+    func testIdleBackgroundAndForegroundPreserveLoadedModelAndConversation() async {
+        let model = OrnithLESAppModel.reviewChatPreview(thinking: false)
+        let messages = model.chatMessages.map(\.id)
+        XCTAssertTrue(model.chatReady)
+        model.prepareForInactivity()
+        XCTAssertFalse(model.sceneIsActive); XCTAssertTrue(model.chatReady)
+        await model.enterBackground()
+        XCTAssertTrue(model.chatReady); XCTAssertEqual(model.chatMessages.map(\.id), messages)
+        model.enterForeground()
+        XCTAssertTrue(model.sceneIsActive); XCTAssertTrue(model.chatReady)
+        await model.unloadModel()
+        XCTAssertFalse(model.chatReady); XCTAssertEqual(model.chatMessages.map(\.id), messages)
+        XCTAssertEqual(model.loadState, "Ej laddad")
+    }
+    func testRootOwnerRetainsSameSessionAcrossViewRecreation() {
+        let root = FileManager.default.temporaryDirectory
+        let owner = REAMAppModel(root: root)
+        let first = owner.ornithSession
+        _ = REAMRootView(model: owner); _ = REAMRootView(model: owner)
+        XCTAssertTrue(first === owner.ornithSession)
+    }
+    func testStoppingIdleAPIDoesNotUnloadModelOrDeleteConversation() {
+        let model = OrnithLESAppModel.reviewChatPreview(thinking: false)
+        let messages = model.chatMessages.map(\.id)
+        model.stopAPI()
+        XCTAssertTrue(model.chatReady); XCTAssertEqual(model.chatMessages.map(\.id), messages)
+        XCTAssertFalse(model.isAPIRunning)
+    }
+    func testRestoredPrivateHistoryDoesNotClaimWarmKVAfterProcessRestart() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let history = [REAMMessage(role: .user, text: "Synthetic cache test"),
+            REAMMessage(role: .assistant, text: "Fixture answer", reasoning: "Fixture reasoning", isThinking: true)]
+        try JSONEncoder().encode(history).write(to: root.appendingPathComponent("quick-chat-v1.json"))
+        let app = OrnithLESAppModel(modelsRoot: root, privateRoot: root, documents: root)
+        app.restoreHistory()
+        XCTAssertEqual(app.chatMessages.map(\.text), history.map(\.text))
+        XCTAssertEqual(app.chatMessages.last?.isThinking, false)
+        XCTAssertEqual(app.chatMessages.last?.interrupted, true)
+        XCTAssertFalse(app.chatReady); XCTAssertNil(app.chatSummary)
+        await app.unloadModel()
+        XCTAssertEqual(app.chatMessages.count, 2)
+    }
     func testActiveOwnerBootstrapsModelStorageWithoutCreatingUnverifiedDerivedFiles() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("les-first-start-" + UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

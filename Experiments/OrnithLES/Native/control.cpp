@@ -116,11 +116,11 @@ static output evaluate(int fd, const char * dir, bool metal, int depth, int step
         const int32_t tokens[] = {1, 2, 3, 15, 4};
         for (int first = 0; first < steps;) {
             const int count = first < prefill ? std::min(evaluation, prefill - first) : 1;
-            int32_t chunk[32]{};
+            std::vector<int32_t> chunk(count);
             for (int i = 0; i < count; ++i) chunk[i] = tokens[(first + i) % 5];
             std::vector<float> row(flo_vocabulary_size(context));
             trace.reset();
-            if (flo_decode(context, chunk, count, row.data(), (int)row.size())) throw std::runtime_error(flo_last_error());
+            if (flo_decode(context, chunk.data(), count, row.data(), (int)row.size())) throw std::runtime_error(flo_last_error());
             if (trace_layers && trace.points != trace.expected) throw std::runtime_error("Incomplete native semantic layer trace");
             out.logits.push_back(row);
             first += count; out.positions.push_back(first - 1);
@@ -131,11 +131,11 @@ static output evaluate(int fd, const char * dir, bool metal, int depth, int step
                 out.metrics.probe_samples)) throw std::runtime_error("Callback-free execution unexpectedly observed tensors");
         flo_reset(context);
         const int first_count = prefill > 0 ? std::min(evaluation, prefill) : 1;
-        int32_t initial[32]{};
+        std::vector<int32_t> initial(first_count);
         for (int i = 0; i < first_count; ++i) initial[i] = tokens[i % 5];
         std::vector<float> replay(out.logits[0].size());
         trace.reset();
-        if (flo_decode(context, initial, first_count, replay.data(), (int)replay.size()) || replay != out.logits[0])
+        if (flo_decode(context, initial.data(), first_count, replay.data(), (int)replay.size()) || replay != out.logits[0])
             throw std::runtime_error("Reset did not restore the complete recurrent/KV state");
         if (trace_layers && trace.points != trace.expected) throw std::runtime_error("Reset lost native semantic layer trace");
     } catch (...) { flo_close(context); throw; }
@@ -202,6 +202,33 @@ int main(int argc, char ** argv) {
         if (diagnostic.describe("load").size() > 2054) throw std::runtime_error("Unbounded native loader error");
         diagnostic.end();
         if (flo_prepare(fd, dir.c_str(), nullptr, nullptr)) throw std::runtime_error(flo_last_error());
+        uint64_t prefix_bytes = 0;
+        {
+            flo_options options{};
+            options.context_tokens = 32; options.prefill_slots = 32;
+            options.io_threads = options.cpu_threads = 2; options.memory_ceiling_bytes = 5500000000ULL;
+            flo_context * context = flo_open(fd, dir.c_str(), options, nullptr, nullptr);
+            if (!context) throw std::runtime_error(flo_last_error());
+            try {
+                const int32_t prefix[] = {1, 2, 3, 15}, old_suffix[] = {4, 3, 2}, new_suffix[] = {2, 4};
+                std::vector<float> expected(flo_vocabulary_size(context)), actual(expected.size());
+                auto decode = [&](const int32_t * ids, int count, std::vector<float> & row) {
+                    if (flo_decode(context, ids, count, row.data(), (int)row.size())) throw std::runtime_error(flo_last_error());
+                };
+                decode(prefix, 4, actual);
+                prefix_bytes = flo_capture_prefix(context);
+                if (!prefix_bytes || prefix_bytes > (128ULL << 20)) throw std::runtime_error("Missing bounded recurrent snapshot");
+                decode(old_suffix, 3, actual);
+                if (flo_restore_prefix(context)) throw std::runtime_error(flo_last_error());
+                decode(new_suffix, 2, actual);
+                flo_reset(context);
+                decode(prefix, 4, expected); decode(new_suffix, 2, expected);
+                if (actual != expected) throw std::runtime_error("Restored hybrid state differs from fresh exact-prefix replay");
+                // Reset invalidates the snapshot rather than resurrecting history.
+                if (flo_restore_prefix(context) == 0) throw std::runtime_error("Cleared chat restored a stale snapshot");
+            } catch (...) { flo_close(context); throw; }
+            flo_close(context);
+        }
         const fs::path invalid = dir / "invalid-header";
         fs::create_directory(invalid);
         fs::copy_file(dir / "manifest-template.json", invalid / "manifest-template.json");
@@ -269,8 +296,16 @@ int main(int argc, char ** argv) {
             ++tuning_variants;
         }
         if (tuning_error > 1e-6) throw std::runtime_error("Larger physical/evaluation batch changed model logits");
+        int extended_variants = 0;
+        for (int evaluation : {64, 128, 256, 512, 1024, 2048}) for (bool observed : {true, false}) {
+            const auto tuned = evaluate(fd, dir.c_str(), false, 0, tuning_steps, 0, 33, false, observed, 4, evaluation);
+            if (compare(tuning_reference, tuned, observed) > 1e-6) throw std::runtime_error("Extended logical batch changed logits or routing");
+            ++extended_variants;
+        }
         json report{{"syntheticOnly", true}, {"physicalPhone", false}, {"revision", flo_revision()},
             {"residentCPUReference", true}, {"cpuStreamingMaximumAbsoluteError", error},
+            {"recurrentOnlyPrefixCheckpointBitwiseReplay", true}, {"prefixCheckpointBytes", prefix_bytes},
+            {"extendedLogicalBatchControls", extended_variants}, {"logicalBatchLimit", 2048},
             {"metalExecutionVerified", false}, {"actualRoutingIdentical", true},
             {"invalidLookaheadRejected", true},
             {"verifiedDescriptorMetadata", true}, {"boundedPrivateLoaderErrors", true},

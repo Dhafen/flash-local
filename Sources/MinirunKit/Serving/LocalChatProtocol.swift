@@ -237,12 +237,13 @@ public struct LocalInferenceMetrics: Sendable {
     public let thermalStateAtStart, maximumThermalState: Int
     public let platform, deviceIdentifier, appBuild, sourceRevision, nativeRevision: String?
     public let memoryBudgetBytes: UInt64?
+    public let timeToFirstTokenSeconds: Double?
     public init(modelSHA256: String, contextTokens: Int, evaluatedPromptTokens: Int, reusedPromptTokens: Int,
                 decodeForwardPasses: Int, prefillSeconds: Double, decodeSeconds: Double, elapsedSeconds: Double,
                 prefillIOBytes: UInt64, decodeIOBytes: UInt64, peakMemoryBytes: UInt64,
                 thermalStateAtStart: Int, maximumThermalState: Int, platform: String? = nil,
                 deviceIdentifier: String? = nil, appBuild: String? = nil, sourceRevision: String? = nil,
-                nativeRevision: String? = nil, memoryBudgetBytes: UInt64? = nil) {
+                nativeRevision: String? = nil, memoryBudgetBytes: UInt64? = nil, timeToFirstTokenSeconds: Double? = nil) {
         self.modelSHA256 = modelSHA256; self.contextTokens = contextTokens
         self.evaluatedPromptTokens = evaluatedPromptTokens; self.reusedPromptTokens = reusedPromptTokens
         self.decodeForwardPasses = decodeForwardPasses; self.prefillSeconds = prefillSeconds
@@ -251,6 +252,7 @@ public struct LocalInferenceMetrics: Sendable {
         self.thermalStateAtStart = thermalStateAtStart; self.maximumThermalState = maximumThermalState
         self.platform = platform; self.deviceIdentifier = deviceIdentifier; self.appBuild = appBuild
         self.sourceRevision = sourceRevision; self.nativeRevision = nativeRevision; self.memoryBudgetBytes = memoryBudgetBytes
+        self.timeToFirstTokenSeconds = timeToFirstTokenSeconds
     }
     var json: [String: Any] {
         var value: [String: Any] = ["model_sha256": modelSHA256, "context_capacity_tokens": contextTokens, "full_model_numerics_verified": false,
@@ -264,6 +266,7 @@ public struct LocalInferenceMetrics: Sendable {
             if let entry { value[key] = entry }
         }
         if let memoryBudgetBytes { value["memory_budget_bytes"] = memoryBudgetBytes }
+        if let timeToFirstTokenSeconds { value["time_to_first_token_seconds"] = timeToFirstTokenSeconds }
         return value
     }
 }

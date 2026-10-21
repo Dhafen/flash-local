@@ -99,6 +99,15 @@ final class OrnithLESChatTests: XCTestCase {
         // An interrupted state is discarded, never approximated by overlap.
         XCTAssertEqual(reuse([1, 9, 3], [1, 2, 3, 4]), 0)
     }
+    func testCheckpointRequiresItsEntireExactPrefixDespiteChangedGeneratedSuffix() {
+        let prompt = [1, 2, 3, 4]
+        let generatedState = prompt + [10, 11, 12]
+        let canonicalNext = prompt + [10, 99, 5, 6]
+        XCTAssertEqual(OrnithLESChatGeneration.reusablePrefix(previous: generatedState, prompt: canonicalNext, hasLogits: true), 0)
+        XCTAssertEqual(OrnithLESChatGeneration.reusablePrefix(previous: prompt, prompt: canonicalNext, hasLogits: true), 4)
+        XCTAssertEqual(OrnithLESChatGeneration.reusablePrefix(previous: prompt, prompt: [1, 9, 3, 4, 10], hasLogits: true), 0)
+        XCTAssertEqual(OrnithLESChatGeneration.reusablePrefix(previous: prompt, prompt: prompt, hasLogits: false), 0)
+    }
     func testChatRejectsUnadmittedAndMismatchedModelOrRuntimeChecks() throws {
         let raw: [String: Any] = ["modelSHA256": "model", "referenceRevision": "reference", "nativeRevision": "native",
             "noLookahead": ["positions": 4, "maximumAbsoluteError": 0, "relativeL2Error": 0, "sameGreedy": true],
