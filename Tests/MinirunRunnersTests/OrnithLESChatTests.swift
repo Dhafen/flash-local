@@ -7,6 +7,22 @@ import MinirunKit
 @testable import MinirunRunners
 
 final class OrnithLESChatTests: XCTestCase {
+    func testCheckpointExcludesGenerationSuffixThatChangesInHistoricalAssistantTurns() {
+        let history = [1, 2, 3, 4, 5, 6]
+        for trailer in [[100, 101, 102], [100, 101, 102, 103, 104]] {
+            let prompt = history + trailer
+            let boundary = OrnithLESChatGeneration.stableCheckpointPosition(prompt: prompt, generationSuffix: trailer)
+            XCTAssertEqual(boundary, history.count)
+            let canonicalNext = history + [100, 101, 500, 600, 700]
+            XCTAssertEqual(OrnithLESChatGeneration.reusablePrefix(previous: prompt, prompt: canonicalNext, hasLogits: true), 0)
+            XCTAssertEqual(OrnithLESChatGeneration.reusablePrefix(previous: Array(prompt.prefix(boundary)),
+                prompt: canonicalNext, hasLogits: true), history.count)
+            XCTAssertEqual(OrnithLESChatGeneration.reusablePrefix(previous: Array(prompt.prefix(boundary)),
+                prompt: [9] + Array(canonicalNext.dropFirst()), hasLogits: true), 0)
+        }
+        XCTAssertEqual(OrnithLESChatGeneration.stableCheckpointPosition(prompt: history, generationSuffix: [999]), 0)
+        XCTAssertEqual(OrnithLESChatGeneration.stableCheckpointPosition(prompt: history, generationSuffix: []), 0)
+    }
     func testAutomaticBatchProfileRejectsNoiseDecodeRegressionAndUnavailableRates() {
         func improves(_ prompt: Double, _ decode: Double) -> Bool {
             OrnithPrefillBenchmark.Report.improves(promptBaseline: 10, promptCandidate: prompt,

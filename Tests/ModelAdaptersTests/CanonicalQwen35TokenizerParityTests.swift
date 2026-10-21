@@ -168,6 +168,30 @@ final class CanonicalQwen35TokenizerParityTests: XCTestCase {
         XCTAssertFalse(text.isThinking); XCTAssertEqual(text.reasoning, "Räknar"); XCTAssertTrue(text.answer.hasSuffix("55"))
         print("ORNITH_THINKING_BUDGET canonicalClosingTokens=true reasoningSeparated=true modelWeightsLoaded=false phoneInference=false")
     }
+    func testStableConversationPrefixExcludesRewrittenGenerationThinkingMarkers() throws {
+        let (folder, _, _, manifest) = try fixture()
+        let artifact = try VerifiedGGUFArtifact.verify(insideRoot: folder, manifest: manifest)
+        let tokenizer = try CanonicalQwen35Tokenizer(artifact: artifact)
+        let user = Qwen35ChatMessage(role: .user, content: "Hello cache.")
+        for enabled in [false, true] {
+            let first = try tokenizer.chat([user], maximumTokens: 1024, enableThinking: enabled)
+            let suffix = "<|im_start|>assistant\n" + (enabled ? "<think>\n" : "<think>\n\n</think>\n\n")
+            XCTAssertTrue(first.renderedText.hasSuffix(suffix))
+            let suffixTokens = try tokenizer.tokenize(suffix, parseSpecial: true, maximumTokens: 64)
+            XCTAssertTrue(first.tokenIDs.suffix(suffixTokens.count).elementsEqual(suffixTokens))
+            let stable = Array(first.tokenIDs.dropLast(suffixTokens.count))
+            let stableText = String(first.renderedText.dropLast(suffix.count))
+            XCTAssertEqual(stable, try tokenizer.tokenize(stableText, parseSpecial: true, maximumTokens: 1024))
+            let next = try tokenizer.chat([user, .init(role: .assistant, content: "Fixture answer."),
+                .init(role: .user, content: "Continue.")], maximumTokens: 1024, enableThinking: enabled)
+            XCTAssertTrue(next.tokenIDs.starts(with: stable))
+            XCTAssertFalse(next.tokenIDs.starts(with: first.tokenIDs), "A whole prefill checkpoint would reject this valid conversation prefix")
+            let changed = try tokenizer.chat([.init(role: .user, content: "Changed instructions.")],
+                maximumTokens: 1024, enableThinking: enabled)
+            XCTAssertFalse(changed.tokenIDs.starts(with: stable))
+        }
+        print("ORNITH_STABLE_PREFIX thinkingOnOff=true generationSuffixExcluded=true unchangedTokens=true changedHistoryRejected=true trainedInference=false")
+    }
 
     func testLoadedCanonicalVocabularyStillRefusesAChangedVerifiedFile() throws {
         let (folder, _, _, manifest) = try fixture()

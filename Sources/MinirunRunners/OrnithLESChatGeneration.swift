@@ -66,6 +66,11 @@ public final class OrnithLESChatGeneration {
         !previous.isEmpty && prompt.starts(with: previous) && (previous.count < prompt.count || hasLogits)
             ? previous.count : 0
     }
+    static func stableCheckpointPosition(prompt: [Int], generationSuffix: [Int]) -> Int {
+        guard !generationSuffix.isEmpty, prompt.count > generationSuffix.count,
+              prompt.suffix(generationSuffix.count).elementsEqual(generationSuffix) else { return 0 }
+        return prompt.count - generationSuffix.count
+    }
     static func validatedBatch(_ configuration: LESPrefillConfiguration, proof: LESPrefillCheck?,
                                baseline: LESNumericalCheck, modelSHA256: String, nativeRevision: String) throws -> (Int, Int) {
         let legacy = try validatedPrefill(baseline, modelSHA256: modelSHA256, nativeRevision: nativeRevision)
@@ -147,8 +152,16 @@ public final class OrnithLESChatGeneration {
         defer { running = false; if !completed { resetConversation() } }
         try artifact.assertUnchanged()
         if control.shouldAbort() { throw CancellationError() }
-        let prompt = try tokenizer.chat(messages, maximumTokens: contextTokens - maximumNewTokens,
-            enableThinking: options.thinkingEnabled, tools: tools).tokenIDs
+        let rendered = try tokenizer.chat(messages, maximumTokens: contextTokens - maximumNewTokens,
+            enableThinking: options.thinkingEnabled, tools: tools)
+        let prompt = rendered.tokenIDs
+        // The pinned template can strip historical reasoning, and Off adds an
+        // empty think block only to the generation suffix. Checkpoint before
+        // that suffix, at the special-token boundary, without changing tokens.
+        let suffixText = "<|im_start|>assistant\n" + (options.thinkingEnabled ? "<think>\n" : "<think>\n\n</think>\n\n")
+        let suffix = try tokenizer.tokenize(suffixText, parseSpecial: true, maximumTokens: 64)
+        let checkpointPosition = rendered.renderedText.hasSuffix(suffixText)
+            ? Self.stableCheckpointPosition(prompt: prompt, generationSuffix: suffix) : 0
         let thinkingEnd = try tokenizer.tokenize("</think>\n\n", parseSpecial: true, maximumTokens: 8)
         guard !thinkingEnd.isEmpty else { throw GGUFError.invalid("Missing canonical thinking-end tokens") }
         var reused = Self.reusablePrefix(previous: stateTokens, prompt: prompt, hasLogits: !stateLogits.isEmpty)
@@ -181,21 +194,31 @@ public final class OrnithLESChatGeneration {
         }
         if reused > 0 { try onEvent(.prefill(progress(reused))) }
         var largestEvaluation = 0
-        for first in stride(from: reused, to: prompt.count, by: batchSize) {
+        func captureStableBoundary() {
+            checkpointBytes = prefixRestorationAdmitted ? native.capturePrefix() : 0
+            prefixTokens = checkpointBytes > 0 ? stateTokens : []
+            prefixLogits = checkpointBytes > 0 ? stateLogits : []
+        }
+        if checkpointPosition > 0, checkpointPosition == reused { captureStableBoundary() }
+        var first = reused
+        while first < prompt.count {
             try sample()
-            let end = min(first + batchSize, prompt.count), tokens = Array(prompt[first..<end])
+            var end = min(first + batchSize, prompt.count)
+            if first < checkpointPosition { end = min(end, checkpointPosition) }
+            let tokens = Array(prompt[first..<end])
             largestEvaluation = max(largestEvaluation, tokens.count)
             stateLogits = try autoreleasepool { try native.logits(tokens: tokens) }
             stateTokens.append(contentsOf: tokens)
+            if end == checkpointPosition { captureStableBoundary() }
             try onEvent(.prefill(progress(end)))
+            first = end
         }
         // Chat templates trim/normalize assistant reasoning and tool envelopes.
         // Keep the exact pre-generation boundary so that a later canonical
         // rendering can reuse all of its unchanged prefix without replaying it.
         // The snapshot contains recurrent state only (<=128 MiB), not full KV.
-        checkpointBytes = prefixRestorationAdmitted ? native.capturePrefix() : 0
-        prefixTokens = checkpointBytes > 0 ? stateTokens : []
-        prefixLogits = checkpointBytes > 0 ? stateLogits : []
+        // Keep the stable snapshot above: taking another at prompt.end would
+        // reintroduce the unstable generation suffix and destroy Off reuse.
         let prefillSeconds = MonotonicClock.seconds(since: start), afterPrefill = native.metrics
         var decodeSeconds = 0.0, passes = 0, reason = "tokenLimit"
         var firstTokenSeconds: Double?

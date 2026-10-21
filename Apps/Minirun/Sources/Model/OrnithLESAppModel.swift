@@ -256,13 +256,14 @@ private actor LESAppWorker {
     func prefillAdmission() -> LESPrefillCheck? { prefillCheck }
     func benchmarkCache(modelsRoot: URL, privateRoot: URL, control: LESControl,
                         configuration: LESPrefillConfiguration, context: LocalContextProfile,
+                        enableThinking: Bool,
                         progress: @Sendable (String) -> Void) throws -> OrnithCacheBenchmark.Report {
         let check = try prepareChat(modelsRoot: modelsRoot, privateRoot: privateRoot, existing: nil,
             control: control, configuration: configuration, contextProfile: context,
             progress: progress, onCheck: { _ in })
         guard check.nativeBenchmarkAdmitted, let chat else { throw LESChatPresentationError.numericalCheck }
         defer { self.chat?.close(); self.chat = nil }
-        return try OrnithCacheBenchmark.execute(engine: chat, progress: progress)
+        return try OrnithCacheBenchmark.execute(engine: chat, enableThinking: enableThinking, progress: progress)
     }
     func benchmarkPrefill(modelsRoot: URL, privateRoot: URL, existing: VerifiedGGUFArtifact?,
                           configuration: LESPrefillConfiguration, control: LESControl,
@@ -841,7 +842,7 @@ final class OrnithLESAppModel {
             defer { if activeID == id { activeID = nil; control = nil; isBusy = false; operation = nil } }
             do {
                 let report = try await worker.benchmarkCache(modelsRoot: modelsRoot, privateRoot: privateRoot,
-                    control: flag, configuration: batch, context: context, progress: { [weak self] value in
+                    control: flag, configuration: batch, context: context, enableThinking: self.chatOptions.thinkingEnabled, progress: { [weak self] value in
                         Task { @MainActor in guard let self, self.activeID == id else { return }; self.status = value }
                     })
                 cacheBenchmark = report
