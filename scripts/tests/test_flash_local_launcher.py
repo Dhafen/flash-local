@@ -68,7 +68,7 @@ class LauncherTests(unittest.TestCase):
             self.assertNotIn(KEY, path.read_text())
         client = LocalClient('http://127.0.0.1:8080/v1', KEY)
         with patch('flash_local.shutil.which', return_value='/fixture/opencode'), patch('flash_local.subprocess.run') as run:
-            run.return_value.returncode = 0
+            run.side_effect = [subprocess.CompletedProcess([], 0, '1.19.3\n', ''), subprocess.CompletedProcess([], 0)]
             with patch.dict(os.environ, {'HTTP_PROXY': 'http://untrusted.invalid', 'ANTHROPIC_API_KEY': 'ambient'}):
                 self.assertEqual(launcher.run_opencode(client, self.live()), 0)
             args, kwargs = run.call_args
@@ -78,6 +78,37 @@ class LauncherTests(unittest.TestCase):
             self.assertEqual(kwargs['env']['FLASH_LOCAL_API_KEY'], KEY)
             self.assertNotIn('HTTP_PROXY', kwargs['env'])
             self.assertFalse(kwargs.get('shell', False))
+            self.assertIn('--pure', args[0]); self.assertIn('--model', args[0])
+
+    def test_v2_uses_standalone_inline_model_and_private_config_without_removed_flags(self):
+        client = LocalClient('http://127.0.0.1:8080/v1', KEY)
+        with tempfile.TemporaryDirectory() as folder, patch('flash_local.settings_path', return_value=Path(folder)/'connection.json'), \
+             patch('flash_local.shutil.which', return_value='/fixture/opencode'), patch('flash_local.subprocess.run') as run:
+            run.side_effect = [subprocess.CompletedProcess([], 0, 'opencode v2.1.2\n', ''), subprocess.CompletedProcess([], 0)]
+            self.assertEqual(launcher.run_opencode(client, self.live()), 0)
+            args, kwargs = run.call_args
+            self.assertEqual(args[0], ['/fixture/opencode', '--standalone'])
+            self.assertNotIn(KEY, str(args))
+            config = json.loads(kwargs['env']['OPENCODE_CONFIG_CONTENT'])
+            self.assertEqual(config['model'], 'flashlocal/' + MODEL)
+            self.assertEqual(config['enabled_providers'], ['flashlocal'])
+            self.assertTrue(Path(kwargs['env']['OPENCODE_CONFIG_DIR']).is_dir())
+            self.assertIn({'action': 'execute', 'resource': '*', 'effect': 'deny'}, config['permissions'])
+            self.assertEqual(config['policies'][1], {'action': 'provider.use', 'resource': 'flashlocal', 'effect': 'allow'})
+
+    def test_unknown_opencode_version_fails_before_any_client_session(self):
+        with patch('flash_local.subprocess.run', return_value=subprocess.CompletedProcess([], 0, 'opencode v3.0.0\n', '')) as run:
+            with self.assertRaises(launcher.ClientSetupError): launcher.opencode_major('/fixture/opencode', {})
+            self.assertEqual(run.call_count, 1)
+    def test_connection_errors_distinguish_authentication_and_network_without_leaking_exception_text(self):
+        import urllib.error
+        for error, expected in [(urllib.error.HTTPError('http://secret.invalid/'+KEY, 401, KEY, {}, None), 'API key was rejected'),
+                                (urllib.error.URLError(KEY), 'network connection failed')]:
+            with tempfile.TemporaryDirectory() as folder, patch('flash_local.settings_path', return_value=Path(folder)/'connection.json'), \
+                 patch('flash_local.getpass.getpass', return_value=KEY), patch('flash_local.discover', side_effect=error), \
+                 patch('sys.stderr', new_callable=io.StringIO) as output:
+                self.assertEqual(launcher.main(['--base-url', 'http://127.0.0.1:8080/v1', 'status']), 1)
+                self.assertIn(expected, output.getvalue()); self.assertNotIn(KEY, output.getvalue())
 
 
 class ScorerTests(unittest.TestCase):

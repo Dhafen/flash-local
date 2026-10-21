@@ -4,14 +4,16 @@ import argparse
 import getpass
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
+import urllib.error
 
 from flash_local_agent import LocalClient, MODEL, strict_json
-from flash_local_clients import ClientSetupError, request_timeout_seconds
+from flash_local_clients import ClientSetupError, request_timeout_seconds, environment, private_profile
 
 
 def settings_path():
@@ -57,10 +59,10 @@ def discover(client, requested=None):
     return {'model': name, 'context': context, 'output': output, 'capabilities': capabilities}
 
 
-def opencode_configuration(client, live):
+def opencode_configuration(client, live, major=1):
     model = live['model']
     timeout = request_timeout_seconds(live) * 1000
-    return {
+    config = {
         '$schema': 'https://opencode.ai/config.json',
         'enabled_providers': ['flashlocal'],
         'model': 'flashlocal/' + model, 'small_model': 'flashlocal/' + model,
@@ -71,16 +73,33 @@ def opencode_configuration(client, live):
                 'timeout': timeout, 'headerTimeout': timeout, 'chunkTimeout': timeout},
             'models': {model: {'name': 'Flash Local / ' + model, 'tool_call': True,
                 'limit': {'context': live['context'], 'output': live['output']}}}}}}
+    if major == 2:
+        # v2 renamed execution/delegation tools. Keep the existing ask/deny
+        # policy instead of accidentally granting a newly named executor.
+        config['permissions'] = [{'action': name, 'resource': '*', 'effect': 'deny'}
+            for name in ['execute', 'shell', 'bash', 'webfetch', 'websearch', 'subagent', 'external_directory']]
+        config['policies'] = [{'action': 'provider.use', 'resource': '*', 'effect': 'deny'},
+            {'action': 'provider.use', 'resource': 'flashlocal', 'effect': 'allow'},
+            {'action': 'integration.use', 'resource': '*', 'effect': 'deny'}]
+    return config
 
 
 def run_opencode(client, live, project=None):
     executable = shutil.which('opencode')
     if executable is None:
         raise ClientSetupError('OpenCode is not installed. Install its official CLI: https://opencode.ai/docs/')
-    config = opencode_configuration(client, live)
-    env = dict(os.environ)
+    env = environment()
+    major = opencode_major(executable, env)
+    config = opencode_configuration(client, live, major)
     env['FLASH_LOCAL_API_KEY'] = client.key
     env['OPENCODE_CONFIG_CONTENT'] = json.dumps(config, separators=(',', ':'))
+    if major == 2:
+        # v2 removed root --pure/--model. Its original ConfigNormalize migrates
+        # our v1 provider/limits/permissions document. The inline default model
+        # and enabled_providers become a deny-all/allow-flashlocal policy.
+        # Standalone prevents an existing daemon from retaining other settings.
+        profile = private_profile(settings_path().parent / 'profiles', 'opencode-v2')
+        env['OPENCODE_CONFIG_DIR'] = str(profile)
     # Do not let ambient proxy configuration forward a LAN credential.
     for key in list(env):
         if key.lower() in {'http_proxy', 'https_proxy', 'all_proxy'}:
@@ -89,8 +108,19 @@ def run_opencode(client, live, project=None):
     directory = str(Path(project).resolve(strict=True)) if project else None
     if directory and not Path(directory).is_dir():
         raise ValueError('Project must be a directory')
-    return subprocess.run([executable, '--pure', '--model', 'flashlocal/' + live['model']],
+    arguments = [executable, '--pure', '--model', 'flashlocal/' + live['model']] if major == 1 else [executable, '--standalone']
+    print('Phone connected; starting OpenCode v' + str(major) + ' with the phone model and live context ' + str(live['context']) + '.', flush=True)
+    return subprocess.run(arguments,
                           cwd=directory, env=env, check=False).returncode
+
+
+def opencode_major(executable, env):
+    result = subprocess.run([executable, '--version'], env=env, capture_output=True, text=True,
+                            timeout=15, check=False)
+    match = re.search(r'(?m)^\s*(?:opencode\s+)?v?([12])\.\d+\.\d+(?:\s|$)', result.stdout or '')
+    if result.returncode != 0 or match is None:
+        raise ClientSetupError('Unsupported or unreadable OpenCode version. Run opencode --version; this launcher supports v1 and v2. No client was started.')
+    return int(match.group(1))
 
 
 def main(argv=None):
@@ -157,6 +187,16 @@ def main(argv=None):
         return 130
     except ClientSetupError as error:
         print(str(error), file=sys.stderr)
+        return 1
+    except urllib.error.HTTPError as error:
+        reason = {401: 'Phone reachable, but the API key was rejected. Copy the current key from Flash Local.',
+                  403: 'Phone reachable, but access was denied.',
+                  429: 'Phone is busy with another request.',
+                  503: 'Phone API reachable, but the model is not ready. Load it and keep the app foreground.'}
+        print(reason.get(error.code, 'Phone returned HTTP ' + str(error.code) + '. Check its server status.') + ' No cloud fallback.', file=sys.stderr)
+        return 1
+    except (urllib.error.URLError, TimeoutError, ConnectionError):
+        print('Phone network connection failed. Check the current IP/port, same LAN, local-network permission and that Flash Local is foreground with its API started. No cloud fallback.', file=sys.stderr)
         return 1
     except (ValueError, OSError, KeyError, TypeError):
         # Exception text may contain a key-bearing request URL or private config.
