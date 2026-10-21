@@ -106,6 +106,7 @@ class ScorerTests(unittest.TestCase):
 
     def test_baseline_rejects_different_source_and_two_lost_logic_cases(self):
         report = {'suite':'fixture', 'fixture_seed':42183, 'fixture_bank_sha256':'bank',
+            'harness_sha256':'b'*64,
             'reasoning_mode':'medium', 'model':MODEL, 'context_capacity_tokens':16384,
             'resources':{'model_sha256':'a'*64, 'source_revision':'same'},
             'rows':[{'id':'logic-1','category':'logic','passed':True}]}
@@ -117,6 +118,9 @@ class ScorerTests(unittest.TestCase):
             report['rows'].append({'id':'logic-2','category':'logic','passed':True})
             self.assertTrue(evaluate.baseline_comparison(report,path)['passed'])
             report['resources'] = {'model_sha256':'a'*64,'source_revision':'changed'}
+            with self.assertRaises(ValueError): evaluate.baseline_comparison(report,path)
+            report['resources']['source_revision'] = 'same'
+            report['harness_sha256'] = 'c'*64
             with self.assertRaises(ValueError): evaluate.baseline_comparison(report,path)
 
     def response(self, text):

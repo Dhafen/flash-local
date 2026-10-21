@@ -105,7 +105,7 @@ logic/tool/code bank retains `--reasoning`. It does not certify every reasoning
 mode at the context boundary. Endurance
 requires at least ten minutes, at least 128 output tokens per measured run,
 at least 3 decode token/s, reported peak <=5.5 GB and thermal state below critical.
-Compare identical source/model SHA, reasoning mode and cases against the 8K
+Compare identical app/model SHA, hashed benchmark/client source, reasoning mode and cases against the 8K
 baseline; losing more than one previously passed logic case fails promotion.
 Missing native measurements or container execution are blocking, not a pass.
 Reports checkpoint after each case and never overwrite an existing output file.

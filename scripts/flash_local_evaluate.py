@@ -389,7 +389,8 @@ def baseline_comparison(report, baseline):
         raise ValueError('Oversized baseline report')
     previous = strict_json(path.read_text(encoding='utf-8'))
     valid = previous.get('full_suite') and previous.get('verification_complete') and all(
-        previous.get(key) == report.get(key) for key in ['suite','fixture_seed','fixture_bank_sha256','reasoning_mode','model'])
+        previous.get(key) == report.get(key) for key in ['suite','fixture_seed','fixture_bank_sha256','reasoning_mode','model','harness_sha256'])
+    valid = valid and isinstance(report.get('harness_sha256'), str) and re.fullmatch(r'[0-9a-f]{64}', report['harness_sha256'])
     valid = valid and previous.get('context_capacity_tokens') == 8192 and all(
         previous.get('resources', {}).get(key) == report.get('resources', {}).get(key) and report.get('resources', {}).get(key)
         for key in ['model_sha256','source_revision'])
@@ -423,14 +424,18 @@ def evaluate(client, live, output, full=False, expected_context=None, long_conte
         raise ValueError('Phone session has the wrong context; change it in app and reactivate first')
     path = Path(output)
     path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    source_files = {name:hashlib.sha256((Path(__file__).resolve().parent / name).read_bytes()).hexdigest()
+        for name in ['flash_local_evaluate.py','flash_local_verify.py','flash_local_agent.py']}
     client.evaluation_effort = {'off':'none','small':'low','medium':'medium','ultra':'high'}[reasoning]
     report = {'schema_version': 1, 'suite': 'flash-local-agent-acceptance-v1', 'fixture_seed': 42183,
         'fixture_bank_sha256':hashlib.sha256(json.dumps(logic_cases()+tool_cases()+code_cases(),sort_keys=True).encode()).hexdigest(),
+        'harness_source_files':source_files,
+        'harness_sha256':hashlib.sha256(json.dumps(source_files,sort_keys=True).encode()).hexdigest(),
         'reasoning_mode':reasoning,
         'model': live['model'], 'context_capacity_tokens': live['context'], 'full_suite': full,
         'simulated_inference': False, 'physical_device_independently_verified': False,
         'three_model_benchmark_complete': False, 'rows': [], 'verification_complete': False}
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(descriptor, 'w', encoding='utf-8') as handle:
         def checkpoint():
             handle.seek(0); json.dump(report, handle, indent=2, allow_nan=False); handle.write('\n'); handle.truncate(); handle.flush()
