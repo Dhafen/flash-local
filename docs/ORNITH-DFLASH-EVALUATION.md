@@ -117,6 +117,7 @@ KV costs `2 × 2 × 8 × 128 × (context + 5 × min(context,4096))` bytes.
 | Context | BF16 draft file | Draft F16 KV payload | Sum before other additions |
 | --- | ---: | ---: | ---: |
 | 8192 | 771,819,680 | 117,440,512 | 889,260,192 |
+| 30000 | 771,819,680 | 206,766,080 | 978,585,760 |
 | 32768 | 771,819,680 | 218,103,808 | 989,923,488 |
 | 65536 | 771,819,680 | 352,321,536 | 1,124,141,216 |
 
@@ -127,6 +128,15 @@ allocator scratch, logits and recurrent rollback still need admission/measuremen
 This estimate does not establish that every possible streaming draft design
 fails. Draft-only quantization, a smaller adaptive block or file-backed draft
 weights are separate experiments; retain the target's original quantization.
+
+At 32K the same target plan, baseline and physical batch four give
+4,202,367,267 bytes. Adding BF16 draft weights and F16 draft KV gives
+5,192,290,755 bytes, leaving 307,709,245 bytes before new speculative rollback,
+draft/verification scratch and logits. At 30,000 tokens the equivalent sum is
+5,124,264,387 bytes. This makes 30–32K a more plausible experiment than 65K;
+it is not runtime admission or proof that Ultra thinking fits sustainably.
+Flash Attention remains disabled in the current native options. No verified
+enabled run is available, so no Flash Attention benefit is claimed.
 
 Compare two rollback designs in the prototype: native per-position recurrent
 snapshots, or one bounded block-start snapshot followed by re-evaluation of the
