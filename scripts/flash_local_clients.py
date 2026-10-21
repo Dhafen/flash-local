@@ -129,10 +129,26 @@ def codex_arguments(live, base, project=None):
     return arguments
 
 
-def run_codex(client, live, project=None):
-    executable = shutil.which('codex')
+def codex_command(platform=None):
+    if (platform or os.name) == 'nt':
+        # Prefer the actual installed npm entry point, not a preceding .cmd/.ps1
+        # bootstrap that might start Docker or override the selected provider.
+        root = Path(os.environ.get('APPDATA', Path.home() / 'AppData/Roaming')) / 'npm/node_modules/@openai/codex'
+        node, entry = shutil.which('node'), root / 'bin/codex.js'
+        package = root / 'package.json'
+        if node and entry.is_file() and package.is_file() and package.stat().st_size <= 32768:
+            if json.loads(package.read_text(encoding='utf-8')).get('name') == '@openai/codex':
+                return [node, str(entry)]
+        executable = shutil.which('codex.exe')
+    else:
+        executable = shutil.which('codex')
     if not executable:
-        raise ClientSetupError('Install the official Codex CLI first')
+        raise ClientSetupError('Install the official Codex CLI first (Windows: official npm package or codex.exe)')
+    return [executable]
+
+
+def run_codex(client, live, project=None):
+    command = codex_command()
     from flash_local_responses import gateway
     with gateway(client, live) as (base, key):
         env = environment()
@@ -140,7 +156,7 @@ def run_codex(client, live, project=None):
         env['FLASH_LOCAL_BRIDGE_KEY'] = key
         print('Codex uses the local Responses adapter; text/tool inference stays on iPhone. '
               'Read-only sandbox; no hosted search or stored responses.', flush=True)
-        return subprocess.run([executable] + codex_arguments(live, base, project),
+        return subprocess.run(command + codex_arguments(live, base, project),
                               cwd=project, env=env, check=False).returncode
 
 

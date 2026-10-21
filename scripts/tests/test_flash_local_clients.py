@@ -150,6 +150,20 @@ class AdapterTests(unittest.TestCase):
 
 
 class ProfileTests(unittest.TestCase):
+    def test_windows_codex_uses_official_entry_not_an_ambient_bootstrap(self):
+        with tempfile.TemporaryDirectory() as folder, patch.dict('os.environ', {'APPDATA':folder}):
+            root = Path(folder)/'npm/node_modules/@openai/codex'
+            (root/'bin').mkdir(parents=True)
+            (root/'bin/codex.js').write_text('// synthetic path fixture; never executed')
+            (root/'package.json').write_text('{"name":"@openai/codex"}')
+            with patch('flash_local_clients.shutil.which', return_value='/fixture/node') as which:
+                command = clients.codex_command('nt')
+                self.assertEqual(command, ['/fixture/node',str(root/'bin/codex.js')])
+                which.assert_called_once_with('node')
+            (root/'package.json').write_text('{"name":"unrelated"}')
+            with patch('flash_local_clients.shutil.which', side_effect=lambda name: '/fixture/node' if name=='node' else None):
+                with self.assertRaises(clients.ClientSetupError): clients.codex_command('nt')
+
     def test_client_deadlines_follow_the_active_window_and_remain_bounded(self):
         self.assertEqual([clients.request_timeout_seconds({'context':n}) for n in [8192,16384,32768,65536]],
                          [1800,3600,7200,10800])
