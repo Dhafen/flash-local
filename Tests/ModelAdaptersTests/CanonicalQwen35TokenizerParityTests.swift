@@ -185,7 +185,12 @@ final class CanonicalQwen35TokenizerParityTests: XCTestCase {
             let next = try tokenizer.chat([user, .init(role: .assistant, content: "Fixture answer."),
                 .init(role: .user, content: "Continue.")], maximumTokens: 1024, enableThinking: enabled)
             XCTAssertTrue(next.tokenIDs.starts(with: stable))
-            XCTAssertFalse(next.tokenIDs.starts(with: first.tokenIDs), "A whole prefill checkpoint would reject this valid conversation prefix")
+            // The installed GGUF template preserves the empty thinking block
+            // in history when thinking is off, unlike the HF config template.
+            // With thinking on the generation trailer changes. The stable
+            // boundary must remain reusable in both modes without editing it.
+            XCTAssertEqual(next.tokenIDs.starts(with: first.tokenIDs), !enabled,
+                "Original GGUF whole-prefill prefix behavior, thinking=\(enabled)")
             let changed = try tokenizer.chat([.init(role: .user, content: "Changed instructions.")],
                 maximumTokens: 1024, enableThinking: enabled)
             XCTAssertFalse(changed.tokenIDs.starts(with: stable))

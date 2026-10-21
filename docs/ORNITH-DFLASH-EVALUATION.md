@@ -24,6 +24,9 @@ plan without further work; that is a budget calculation, not a hardware failure.
 - The fast chat uses OS page cache; the comparison also has bounded own-cache
   and LES variants. Metal offloads supported graph operations; CPU reference
   controls remain separate. Target KV is F16; Flash Attention is disabled.
+- Swiftlet/QPack is preserved as a separate experiment; it is not the engine
+  serving the installed Ornith GGUF in fast chat or the LAN API. A trained
+  phone model has no silent full-model CPU fallback in the native LES path.
 - `OrnithLESChatGeneration` supplies canonical tokenizer/template, reasoning
   channel separation, generation budgets and prefix accounting. The new exact
   recurrent checkpoint is bounded to 128 MiB and retains attention KV in place.
@@ -34,7 +37,11 @@ plan without further work; that is a budget calculation, not a hardware failure.
 - iOS device, iOS Simulator build controls and macOS app are supported. Windows
   hosts the client/development tools, not this Apple runtime. The last
   independently confirmed private delivery is build 206; the new lifecycle
-  and batch changes have a separate pending release gate.
+  and batch changes have a separate pending release gate. Build 215 stopped in
+  a canonical-tokenizer regression test before the app/sign/archive/upload
+  stages. The test assumed the HF template's behavior instead of the installed
+  GGUF's actual behavior with thinking off; that assumption has been corrected.
+  Passing local metadata controls does not establish a delivered phone update.
 - Historical phone build 123 measured 4.299/4.082 decode token/s for initial/warm
   page cache on its fixed 128-token comparison. Later screenshots show 5.54
   token/s on a short run. Neither is a DFlash benchmark. The user's 32K/Ultra
@@ -47,6 +54,7 @@ and repository metadata specify **385,906,176 BF16 parameters**, a
 **771,819,680-byte** Safetensors file, six draft layers, hidden size 2048,
 vocabulary 248320 and block size 16. Five layers use a 4096 sliding window;
 one uses full attention. This is DFlash v1, not DFlash2.
+The block includes one anchor, so size 16 allows at most 15 draft proposals.
 An exact HTTP-range read of **7328 header bytes**, with zero tensor-payload
 bytes read, independently finds 69 BF16 tensors and `fc.weight` shape
 `[2048,16384]`. There is no private token-embedding table or output head;
@@ -83,6 +91,23 @@ Sources for the runtime findings: pinned
 The current upstream converter is not registered in the inspected pinned omni
 conversion file; conversion must be pinned and its emitted metadata checked
 against the pinned graph. Do not silently upgrade the whole inference engine.
+
+The inspected Speculators converter is also not a drop-in conversion route for
+this target's raw config: automatic layer selection reads the root
+`num_hidden_layers`, while Ornith puts it in `text_config`. A source-level
+metadata-method probe reproduces that missing-key error; supplying the eight
+validated input-layer IDs avoids that branch. This probe mocks I/O and model
+constructors; it is not a successful full conversion or inference. A native
+prototype must adapt the config deliberately. Speculators' newer inspected
+`4f9cbf8` changes navigation documentation only; its converter has the same
+behavior.
+
+Keep the installed target's tokenizer, chat template and stop policy authoritative.
+The draft config's EOS is `248044`; the installed GGUF declares EOS `248046`.
+Do not replace target stopping behavior with draft metadata. The HF config and
+GGUF chat templates also differ, so merely copying a reference tokenizer config
+does not establish chat/tool parity. Validate token IDs and special-token
+handling against the installed GGUF before exposing a converted draft.
 
 ## Memory findings
 
@@ -150,11 +175,15 @@ remove long-prompt prefill or increase context capacity by itself.
 
 The ordinary installed-model tokenizer was also checked independently, without
 inference. On a public fixture, the first generation prompt has 15 tokens with
-Thinking off and 13 with it on. Neither complete prompt remains a prefix when
-the answer is rendered as history without reasoning. The eight-token history
-boundary before the assistant's generation suffix remains exact in both cases.
-The new runner captures there and verifies token-suffix equality; it does not
-edit the original chat template. Matching Swift canonical-tokenizer and cache
-policy regressions were added. This establishes the tokenizer cause, not an
-on-phone cache speedup; the pending full app gate and physical warm/fresh test
-are still required.
+Thinking off and 13 with it on. With the actual GGUF template the complete
+prompt remains a prefix with Thinking off, but changes with Thinking on when
+the answer is rendered as history without reasoning. The HF config template
+instead changes it in both modes. Their SHA256 digests are respectively
+`f55f52930aa8bf44ab5cb85f99370fcc3c56e9a85640b812086d5330bce5d86b`
+and `e84f32a23fdda27689f868aa4a1a5621f41133e51a48d7f3efcbea2839574259`.
+The eight-token history boundary before the assistant's generation suffix
+remains exact in all four cases. The new runner captures there and verifies
+token-suffix equality; it does not edit the original chat template. Matching
+Swift canonical-tokenizer and cache policy regressions were added. This
+establishes a tokenizer-level invalidation mechanism, not an on-phone cache
+speedup; the full app gate and physical warm/fresh test are still required.
