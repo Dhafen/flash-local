@@ -7,6 +7,7 @@ here. Completed tool arguments come from the phone's validated Chat response.
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import hmac
+import http.client
 import json
 import queue
 import secrets
@@ -14,6 +15,7 @@ import socket
 import threading
 import time
 import uuid
+import urllib.parse
 
 from flash_local_agent import strict_json
 
@@ -223,9 +225,24 @@ def phone_chunks(client, payload, cancelled):
             except queue.Full:
                 pass
     def read():
+        url = urllib.parse.urlsplit(client.base)
+        connection_type = http.client.HTTPSConnection if url.scheme == 'https' else http.client.HTTPConnection
+        connection = connection_type(url.hostname, url.port, timeout=min(15, client.timeout))
+        # Retain the connection before waiting for response headers, so disconnect
+        # can shut down an already-connected request during owner preparation.
+        holder.append(connection)
         try:
-            with client.request('/chat/completions', payload) as upstream:
-                holder.append(upstream)
+            encoded = json.dumps(payload, allow_nan=False).encode()
+            if len(encoded) > 262144:
+                raise ValueError('Translated input exceeds phone request bound')
+            connection.connect()
+            if cancelled.is_set(): return
+            connection.sock.settimeout(client.timeout)
+            connection.request('POST', url.path + '/chat/completions', encoded,
+                {'Authorization': 'Bearer ' + client.key, 'Content-Type': 'application/json'})
+            with connection.getresponse() as upstream:
+                if upstream.status != 200 or upstream.headers.get_content_type() != 'text/event-stream':
+                    raise ValueError('Phone did not accept a streaming completion')
                 total, data = 0, []
                 while not cancelled.is_set():
                     line = upstream.readline(65538)
@@ -241,6 +258,8 @@ def phone_chunks(client, payload, cancelled):
                         data.append(line[5:].strip())
         except Exception:
             put(('error', None))
+        finally:
+            connection.close()
     worker = threading.Thread(target=read, daemon=True); worker.start()
     try:
         while not cancelled.is_set():
@@ -255,10 +274,10 @@ def phone_chunks(client, payload, cancelled):
             yield value
     finally:
         cancelled.set()
-        for response in holder:
+        for connection in holder:
             # Shutdown the socket before buffered close, which otherwise waits for a reader.
             try:
-                response.fp.raw._sock.shutdown(socket.SHUT_RDWR)
+                connection.sock.shutdown(socket.SHUT_RDWR)
             except (AttributeError, OSError):
                 pass
         worker.join(timeout=2)

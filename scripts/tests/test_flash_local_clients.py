@@ -22,6 +22,30 @@ LIVE = {'model': MODEL, 'context': 16384, 'output': 4096,
 
 
 class AdapterTests(unittest.TestCase):
+    def test_pre_header_phone_request_is_closed_on_cancel(self):
+        reserved, disconnected = threading.Event(), threading.Event()
+        class PreparingPhone(BaseHTTPRequestHandler):
+            def do_POST(self):
+                self.rfile.read(int(self.headers['Content-Length']))
+                self.connection.settimeout(5)
+                reserved.set()
+                if self.connection.recv(1) == b'':
+                    disconnected.set()
+            def log_message(self, *args): pass
+        server = ThreadingHTTPServer(('127.0.0.1', 0), PreparingPhone)
+        worker = threading.Thread(target=server.serve_forever, daemon=True); worker.start()
+        stop = threading.Event()
+        try:
+            client = LocalClient(f'http://127.0.0.1:{server.server_port}/v1', KEY)
+            chunks = bridge.phone_chunks(client, {'model':MODEL,'stream':True}, stop)
+            self.assertIsNone(next(chunks))  # heartbeat while response headers are pending
+            self.assertTrue(reserved.wait(2))
+            chunks.close()
+            self.assertTrue(stop.is_set())
+            self.assertTrue(disconnected.wait(3))
+        finally:
+            stop.set(); server.shutdown(); server.server_close(); worker.join(5)
+
     def test_stateless_text_tools_and_outputs_are_preserved(self):
         request = {'model': MODEL, 'instructions': 'system contract', 'input': [
             {'role': 'developer', 'content': 'additional contract'},
