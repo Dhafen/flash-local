@@ -101,6 +101,50 @@ static errors compare(const std::vector<float> & actual, const std::vector<float
     }
     return out;
 }
+static json cpu_flash_precision() {
+    // Independent operator regression: zero Q/K gives exactly uniform weights.
+    // Average the actually stored F16 V bytes in double; the old half
+    // accumulator drifts after repeated additions, despite requested F32.
+    constexpr int width = 32, keys = 256;
+    std::vector<ggml_fp16_t> values(width * keys), zero_keys(width * keys, 0);
+    std::vector<float> expected(width, 0);
+    for (int key = 0; key < keys; ++key) for (int col = 0; col < width; ++col)
+        values[key * width + col] = ggml_fp32_to_fp16(float(key % 7 + 1) / 7.f + float(col) / 64.f);
+    for (int col = 0; col < width; ++col) {
+        double sum = 0;
+        for (int key = 0; key < keys; ++key) sum += ggml_fp16_to_fp32(values[key * width + col]);
+        expected[col] = float(sum / keys);
+    }
+    json runs = json::array();
+    for (int queries : {1, 4}) {
+        backend_owner backend(ggml_backend_cpu_init(), ggml_backend_free);
+        check(bool(backend), "CPU attention control backend");
+        context_owner context(ggml_init({2u << 20, nullptr, true}), ggml_free);
+        check(bool(context), "CPU attention metadata");
+        auto * q = ggml_new_tensor_4d(context.get(), GGML_TYPE_F32, width, queries, 1, 1);
+        auto * k = ggml_new_tensor_4d(context.get(), GGML_TYPE_F16, width, keys, 1, 1);
+        auto * v = ggml_new_tensor_4d(context.get(), GGML_TYPE_F16, width, keys, 1, 1);
+        auto * output = ggml_flash_attn_ext(context.get(), q, k, v, nullptr, 1.f / std::sqrt(float(width)), 0, 0);
+        ggml_flash_attn_ext_set_prec(output, GGML_PREC_F32);
+        auto * graph = ggml_new_graph_custom(context.get(), 32, false);
+        ggml_build_forward_expand(graph, output);
+        buffer_owner storage(ggml_backend_alloc_ctx_tensors(context.get(), backend.get()), ggml_backend_buffer_free);
+        check(bool(storage), "CPU attention tensor allocation");
+        std::vector<float> zeros(width * queries, 0), actual(width * queries), oracle;
+        for (int i = 0; i < queries; ++i) oracle.insert(oracle.end(), expected.begin(), expected.end());
+        ggml_backend_tensor_set(q, zeros.data(), 0, zeros.size() * sizeof(float));
+        ggml_backend_tensor_set(k, zero_keys.data(), 0, zero_keys.size() * sizeof(ggml_fp16_t));
+        ggml_backend_tensor_set(v, values.data(), 0, values.size() * sizeof(ggml_fp16_t));
+        check(ggml_backend_graph_compute(backend.get(), graph) == GGML_STATUS_SUCCESS, "CPU fused attention control forward");
+        ggml_backend_tensor_get(output, actual.data(), 0, actual.size() * sizeof(float));
+        const auto error = compare(actual, oracle);
+        check(error.maximum <= 1e-6 && error.relative() <= 1e-6, "Requested F32 CPU attention lost value precision");
+        runs.push_back({{"queries", queries}, {"keys", keys}, {"maximumAbsoluteError", error.maximum},
+            {"relativeL2Error", error.relative()}, {"reference", "double mean of stored F16 V"}});
+    }
+    std::cout << "ORNITH_CPU_FLASH_PRECISION queries=1,4 keys=256 f16Storage=true f32Accumulation=true independentDoubleOracle=true physicalPhone=false\n";
+    return runs;
+}
 static std::vector<float> metal(const fixture & f, int batch, bool decode_rows = false) {
     std::vector<float> result(decode_rows ? size_t(f.columns) * f.rows : size_t(f.rows) * f.selected * batch);
     @autoreleasepool {
@@ -168,6 +212,7 @@ int main(int argc, char ** argv) {
     try {
         check(argc == 2, "Expected aggregate JSON output path");
         ggml_cpu_init(); // Canonical test-weight quantization, never projection fallback.
+        report["cpuFlashPrecisionControls"] = cpu_flash_precision();
         @autoreleasepool {
             // GET_ROWS uses the actual same pinned Q4_K dequantizer as the
             // small-batch matvec, without requiring SIMD-group reductions.

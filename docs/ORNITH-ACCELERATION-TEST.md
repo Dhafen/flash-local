@@ -99,6 +99,17 @@ L2 are exported; non-finite logits fail explicitly. Ordinary engine controls
 remain at 0.000001. This does not waive any installed-model phone check or
 establish the quality of either attention graph.
 
+The rerun (`c41bd9a`, run 39685924156) then exposed an actual precision defect:
+the mixed control had zero resident/streamed FA error, but FA versus decomposed
+attention had max absolute error 0.00216386 and relative L2 0.00326704, exceeding
+the unchanged 0.001 relative limit. The pinned CPU scalar FA implementation
+accumulated F16 V in F16 even for `GGML_PREC_F32`. The source patch now honors
+the requested F32 accumulation using its existing bounded F32 scratch path;
+KV storage and default precision remain unchanged. A separate CPU operator
+regression checks one and four queries over 256 F16 value rows against an
+independent double-precision mean, within 0.000001. Neither this repair nor a
+passing synthetic control establishes phone Metal precision or trained quality.
+
 Thinking budgets, nonzero-temperature rejection sampling, streaming tool calls
 and foreground recovery remain in the ordinary backend. Extending DFlash to
 them requires additional validation; this benchmark is not a replacement server.

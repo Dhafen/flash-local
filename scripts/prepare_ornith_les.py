@@ -4,6 +4,7 @@ The local patch preserves router selection and all mathematical operators. It
 adds a tensor-major source reader, aggregate instrumentation and an accessor.
 Q4_K decoding promotes the stored half scale before dividing by sixteen, so
 small scales retain the values represented by the original packed weights.
+CPU fused attention honors requested F32 value accumulation with F16 KV.
 The upstream checkout is an ignored build input, never the production runtime.
 """
 import argparse
@@ -169,6 +170,14 @@ def patched_files(source):
     replace("ggml/src/ggml-metal/ggml-metal.metal",
             "    const float d   = il < 2 ? xb->d : xb->d / 16.h;",
             "    const float d   = il < 2 ? xb->d : float(xb->d) / 16.f;")
+    # The scalar CPU flash-attention path previously accumulated V in half
+    # even when its graph explicitly requested GGML_PREC_F32. Reuse its
+    # existing F32 accumulator/conversion path, keeping F16 storage and the
+    # default-precision branch unchanged. No additional sequence-sized buffer.
+    file = "ggml/src/ggml-cpu/ops.cpp"
+    old = "    ggml_to_float_t   const v_to_float     = ggml_get_type_traits(v->type)->to_float;"
+    replace(file, old, old + "\n    const bool f16_accumulator = v->type == GGML_TYPE_F16 && dst->op_params[3] != GGML_PREC_F32;")
+    replace(file, "if (v->type == GGML_TYPE_F16) {", "if (f16_accumulator) {", count=3)
     return result
 
 
@@ -203,7 +212,7 @@ def prepare(root, run=None):
         patchedSHA256={name: hashlib.sha256((source / name).read_bytes()).hexdigest() for name in files},
         changes=["tensor-major direct GGUF reads", "aggregate I/O and Metal telemetry", "exclude unused MTP prediction",
                  "Apple VM-backed page buffers with symmetric deallocation", "native buffer lifetime accounting",
-                 "Q4_K GPU nibble-scale adjustment in F32"],
+                 "Q4_K GPU nibble-scale adjustment in F32", "CPU Flash Attention requested F32 accumulation honored"],
         routingChanged=False, quantizationChanged=False), indent=2) + "\n")
     return source
 

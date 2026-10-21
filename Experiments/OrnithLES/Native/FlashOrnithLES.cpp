@@ -446,6 +446,6 @@ flo_metrics flo_snapshot(const flo_context * c) {
     return out;
 }
 const char * flo_last_error() { return last_error.c_str(); }
-const char * flo_revision() { return "96bbf61710d44421ea54e63f5194f9b17c20d877+flash-local-experiments-v4"; }
+const char * flo_revision() { return "96bbf61710d44421ea54e63f5194f9b17c20d877+flash-local-experiments-v5"; }
 
 #include "DFlashBenchmark.inc"
