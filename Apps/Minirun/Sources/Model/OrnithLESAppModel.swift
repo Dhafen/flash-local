@@ -241,7 +241,7 @@ private actor LESAppWorker {
         do { chat = try open(configuration) }
         catch GGUFError.limit where preferAutomatic && configuration != LESPrefillConfiguration() {
             progress("Den större batchen ryms inte i aktuellt iOS-minne. Använder kontrollerad grundbatch.")
-            configuration = .init(); chat = try open(configuration)
+            configuration = .init(); prefixCheckpointValidated = false; chat = try open(configuration)
         }
         effectiveConfiguration = configuration
         if !prefixCheckpointValidated, let chat {
