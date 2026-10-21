@@ -16,6 +16,7 @@
 #include <array>
 #include <cstring>
 #include <set>
+#include <thread>
 namespace fs = std::filesystem;
 using json = nlohmann::json;
 struct output { std::vector<std::vector<float>> logits; std::vector<int> positions; flo_metrics metrics; };
@@ -232,6 +233,39 @@ int main(int argc, char ** argv) {
             if (std::string(flo_last_error()).find("physical batch four") == std::string::npos || flo_snapshot(nullptr).live_contexts)
                 throw std::runtime_error("Draft geometry failed after allocation or retained an owner");
         }
+        {
+            flo_options serial{};
+            serial.context_tokens = 32; serial.prefill_slots = 32;
+            serial.io_threads = serial.cpu_threads = 2; serial.memory_ceiling_bytes = 5500000000ULL;
+            auto * context = flo_open(fd, dir.c_str(), serial, nullptr, nullptr);
+            if (!context) throw std::runtime_error(flo_last_error());
+            const int32_t token = 1;
+            std::vector<float> moved(flo_vocabulary_size(context)), fresh(moved.size());
+            bool duplicate_rejected = true;
+            int status = -1;
+            // The creating thread remains alive while another thread calls
+            // inference and teardown. A failed second owner must not release
+            // the first owner's lease. Never use a context concurrently.
+            std::thread worker([&] {
+                for (int i = 0; i < 2; ++i) {
+                    auto * duplicate = flo_open(fd, dir.c_str(), serial, nullptr, nullptr);
+                    duplicate_rejected = duplicate_rejected && duplicate == nullptr;
+                    if (duplicate) flo_close(duplicate);
+                }
+                status = flo_decode(context, &token, 1, moved.data(), int32_t(moved.size()));
+                flo_close(context);
+            });
+            worker.join(); context = nullptr;
+            if (!duplicate_rejected || status != 0 || flo_snapshot(nullptr).live_contexts)
+                throw std::runtime_error("Serial native ownership did not survive a thread hop");
+            context = flo_open(fd, dir.c_str(), serial, nullptr, nullptr);
+            if (!context) throw std::runtime_error("Thread-hop close did not release the native lease");
+            status = flo_decode(context, &token, 1, fresh.data(), int32_t(fresh.size()));
+            flo_close(context);
+            if (status != 0 || moved != fresh || flo_snapshot(nullptr).live_contexts)
+                throw std::runtime_error("Thread-hop inference changed logits or retained an owner");
+            std::cout << "ORNITH_SERIAL_THREAD_HOP openedOnCaller=true inferredAndClosedOnWorker=true duplicateOwnersRejected=2 freshReplayBitwise=true syntheticOnly=true\n";
+        }
         uint64_t prefix_bytes = 0;
         {
             flo_options options{};
@@ -394,6 +428,7 @@ int main(int argc, char ** argv) {
             {"recurrentOnlyPrefixCheckpointBitwiseReplay", true}, {"prefixCheckpointBytes", prefix_bytes},
             {"greedyBlockRollbackBranches", 4}, {"trainedDFlashGraphExecuted", false},
             {"unsupportedDraftPhysicalBatchRejectedBeforeLoad", true},
+            {"serialThreadHopLifetimeAndBitwiseReplay", true},
             {"cpuFlashAttentionMaximumAbsoluteError", flash_error}, {"phoneFlashAttentionExecuted", false},
             {"cpuFlashAttentionRelativeL2Error", flash_relative}, {"cpuFlashAttentionResidentStreamingMaximumAbsoluteError", flash_streaming_error},
             {"cpuFlashAttentionSameGreedy", flash_greedy}, {"cpuFlashAttentionRoutingIdentical", flash_routing},

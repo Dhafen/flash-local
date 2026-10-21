@@ -33,7 +33,16 @@ extern "C" void flash_omni_metal_snapshot(uint64_t *, uint64_t *, uint64_t *, ui
 extern "C" void flash_omni_memory_snapshot(uint64_t *, uint64_t *, uint64_t *, uint64_t *, bool *);
 static std::atomic<uint64_t> live_contexts{0};
 static thread_local std::string last_error;
-static std::mutex owner;
+static std::atomic_flag owner = ATOMIC_FLAG_INIT;
+// Swift actor calls are serial but may resume on different OS threads.
+// This is an instance lease, not a thread-affine mutex held across calls.
+struct context_lease {
+    const bool acquired = !owner.test_and_set(std::memory_order_acquire);
+    context_lease() = default;
+    context_lease(const context_lease &) = delete;
+    context_lease & operator=(const context_lease &) = delete;
+    ~context_lease() { if (acquired) owner.clear(std::memory_order_release); }
+};
 static std::once_flag initialized;
 static flash_local_loader_diagnostics loader_diagnostics;
 struct loader_log_scope {
@@ -167,10 +176,10 @@ struct flo_draft {
     }
 };
 struct flo_context {
+    context_lease exclusive; // first member: released after all other members
     std::unique_ptr<flo_draft> draft;
     std::vector<uint8_t> prefix_state;
     int prefix_position = 0;
-    std::unique_lock<std::mutex> exclusive;
     fd_owner source;
     fs::path manifest;
     llama_model * model = nullptr;
@@ -188,7 +197,7 @@ struct flo_context {
     void * checkpoint_user = nullptr;
     flash_local_projection_probe projection_probe;
     flash_local_routing_trace routing;
-    explicit flo_context() : exclusive(owner, std::try_to_lock) { live_contexts.fetch_add(1, std::memory_order_relaxed); }
+    explicit flo_context() { live_contexts.fetch_add(1, std::memory_order_relaxed); }
     ~flo_context() {
         draft.reset(); // shared embedding/head must outlive the draft context
         // Complete queued GPU work before releasing recurrent state and model
@@ -207,7 +216,7 @@ static void environment(const char * name, int value) {
 flo_context * flo_open(int source, const char * directory, flo_options o, flo_abort abort, void * user) {
     try {
         last_error.clear(); auto result = std::make_unique<flo_context>();
-        require(result->exclusive.owns_lock(), "Only one LES context may own the engine");
+        require(result->exclusive.acquired, "Only one LES context may own the engine");
         loader_log_scope diagnostic_scope;
         result->source.value = dup(source); require(result->source.value >= 0, "Cannot retain verified descriptor");
         const auto size = file_size(result->source.value); check_abort(abort, user);
@@ -447,6 +456,6 @@ flo_metrics flo_snapshot(const flo_context * c) {
     return out;
 }
 const char * flo_last_error() { return last_error.c_str(); }
-const char * flo_revision() { return "96bbf61710d44421ea54e63f5194f9b17c20d877+flash-local-experiments-v6"; }
+const char * flo_revision() { return "96bbf61710d44421ea54e63f5194f9b17c20d877+flash-local-experiments-v7"; }
 
 #include "DFlashBenchmark.inc"

@@ -124,6 +124,15 @@ server. HTTP is intended for the trusted LAN. iOS foreground/locking,
 IPv4/Wi-Fi/Ethernet and USB forwarding limits remain as documented in
 [the API guide](ORNITH-LOCAL-API.md). The same admitted inference context serves
 chat and API serially. Disconnect cancels the owner before context recovery.
+Native ownership uses an atomic instance lease, released only after the
+context, model, descriptors and checkpoint buffers are destroyed. The previous
+lifetime `std::mutex` could be acquired and unlocked on different executor
+threads; C++ [requires the unlocking thread to own the mutex](https://eel.is/c++draft/thread.mutex.requirements.mutex.general).
+Swift actor isolation guarantees serial access, not a dedicated OS thread.
+A generated native regression opens on the caller, rejects two competing
+owners, performs inference and teardown on a distinct worker while the caller
+remains alive, then checks bitwise fresh replay and complete ownership release.
+No context is used concurrently; this is not trained-phone lifecycle proof.
 OpenAI `reasoning_effort` maps to the four local modes. Inherited thinking
 budgets fit shorter client-supplied totals; explicit incompatible budgets fail.
 
