@@ -81,6 +81,22 @@ class LauncherTests(unittest.TestCase):
 
 
 class ScorerTests(unittest.TestCase):
+    def test_retrieval_exercises_8k_even_when_the_logic_suite_uses_ultra(self):
+        client = Mock(); client.evaluation_effort = 'high'
+        nonce = 'a' * 32
+        first = self.response('OK'); first['usage'] = {'prompt_tokens':512}
+        second = self.response(json.dumps({'answer':[nonce+'-'+str(i) for i in range(5)]}))
+        second['usage'] = {'prompt_tokens':7168}
+        client.json.side_effect = [first,second]
+        with patch('flash_local_evaluate.uuid.uuid4', return_value=Mock(hex=nonce)):
+            result = evaluate.context_probe(client, {'model':MODEL,'context':8192})
+        self.assertTrue(result['passed']); self.assertTrue(result['near_full_window_exercised'])
+        self.assertEqual(result['reasoning_mode'],'off')
+        self.assertEqual(client.evaluation_effort,'high')
+        for request in client.json.call_args_list:
+            self.assertEqual(request.args[1]['max_tokens'],512)
+            self.assertEqual(request.args[1]['reasoning_effort'],'none')
+
     def test_real_owned_boundary_suite_runs_all_required_guards(self):
         result = evaluate.boundary_controls()
         self.assertTrue(result['passed'])

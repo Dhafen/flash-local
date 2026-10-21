@@ -99,7 +99,10 @@ synthetic generation. Its result is separate from actual phone model scores
 and does not certify third-party tool execution policies.
 
 Near-full context uses the phone tokenizer's actual counts and five distributed
-fresh facts, with at least 70% of the selected total window exercised. Endurance
+fresh facts, with at least 70% of the selected total window exercised. This
+retrieval-only test explicitly uses Off and at most 512 output tokens; the
+logic/tool/code bank retains `--reasoning`. It does not certify every reasoning
+mode at the context boundary. Endurance
 requires at least ten minutes, at least 128 output tokens per measured run,
 at least 3 decode token/s, reported peak <=5.5 GB and thermal state below critical.
 Compare identical source/model SHA, reasoning mode and cases against the 8K
