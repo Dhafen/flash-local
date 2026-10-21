@@ -214,8 +214,9 @@ flo_context * flo_open(int source, const char * directory, flo_options o, flo_ab
         require(o.context_tokens >= 32 && o.context_tokens <= 65536 && o.memory_ceiling_bytes > 0 &&
             o.memory_ceiling_bytes <= 5500000000ULL, "Invalid context or process ceiling");
         require(o.additional_reserve_bytes <= 1500000000ULL &&
-            (!o.experimental_dflash || (o.context_tokens <= 32768 && o.additional_reserve_bytes >= 800000000ULL)),
-            "DFlash benchmark needs explicit additional memory and at most 32K context");
+            (!o.experimental_dflash || (o.context_tokens <= 32768 && o.additional_reserve_bytes >= 800000000ULL &&
+                o.prefill_slots == 32)),
+            "DFlash benchmark needs explicit additional memory, physical batch four and at most 32K context");
         result->experimental_dflash = o.experimental_dflash;
         result->additional_reserve = o.additional_reserve_bytes; result->metal = o.metal;
         require(o.lookahead_depth >= 0 && o.lookahead_depth <= 16 && o.io_threads >= 1 && o.io_threads <= 8 &&
@@ -446,6 +447,6 @@ flo_metrics flo_snapshot(const flo_context * c) {
     return out;
 }
 const char * flo_last_error() { return last_error.c_str(); }
-const char * flo_revision() { return "96bbf61710d44421ea54e63f5194f9b17c20d877+flash-local-experiments-v5"; }
+const char * flo_revision() { return "96bbf61710d44421ea54e63f5194f9b17c20d877+flash-local-experiments-v6"; }
 
 #include "DFlashBenchmark.inc"

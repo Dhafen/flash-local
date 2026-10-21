@@ -36,7 +36,7 @@ static void flo_positions(llama_batch & b, int start, bool mrope, bool logits) {
 static void draft_process(flo_context * c, int position, int count) {
     auto & d = *c->draft;
     check_abort(c->abort, c->user);
-    require(count > 0 && count <= 16, "Draft feature microbatch bound");
+    require(count > 0 && count <= 4, "Draft feature microbatch bound");
     const int hidden = llama_model_n_embd(c->model), width = hidden * int(d.layers.size());
     d.features.resize(size_t(count) * width);
     c->feature_peak = std::max(c->feature_peak, uint64_t(d.features.size() * sizeof(float)));
@@ -64,7 +64,7 @@ static void draft_process(flo_context * c, int position, int count) {
 int flo_attach_dflash(flo_context * c, int source) {
     try {
         require(c && !c->poisoned && c->experimental_dflash && c->metal && !c->draft &&
-            c->position == 0 && c->batch >= 4, "DFlash needs a fresh benchmark-only Metal context, batch four");
+            c->position == 0 && c->batch == 4, "DFlash needs a fresh benchmark-only Metal context, batch four");
         const uint64_t bytes = file_size(source);
         const uint64_t draft_kv = 4096ULL * (c->capacity + 5ULL * std::min(c->capacity, 4096));
         require(bytes <= 800000000ULL && c->additional_reserve >= bytes + draft_kv + (64ULL << 20),
@@ -102,7 +102,10 @@ int flo_attach_dflash(flo_context * c, int source) {
         require(llama_vocab_mask(b) == 248077, "Draft mask ID mismatch");
         d->mrope = llama_model_rope_type(d->model) == LLAMA_ROPE_TYPE_MROPE;
         auto cp = llama_context_default_params();
-        cp.n_ctx = c->capacity; cp.n_batch = cp.n_ubatch = 16; cp.n_seq_max = 1; cp.n_rs_seq = 0;
+        // Every consumed target microbatch and noise block is at most four.
+        // n_ubatch sizes scheduler reservation even for a short actual prompt;
+        // reserving sixteen needlessly multiplies draft attention scratch.
+        cp.n_ctx = c->capacity; cp.n_batch = cp.n_ubatch = 4; cp.n_seq_max = 1; cp.n_rs_seq = 0;
         cp.n_threads = cp.n_threads_batch = 4; cp.type_k = cp.type_v = GGML_TYPE_F16;
         cp.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED; cp.ctx_other = c->context;
         cp.no_perf = false; cp.abort_callback = c->abort; cp.abort_callback_data = c->user;

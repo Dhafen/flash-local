@@ -28,6 +28,9 @@ draft scheduler/features/logit allowance. The existing 128 MiB recurrent
 checkpoint reserve is reused by this benchmark; it does not retain a separate
 conversation checkpoint. A live DFlash chat integration would need separate
 checkpoint ownership/budget and remains follow-up work.
+The draft reserves only four physical rows, matching every actual feature and
+noise microbatch. The native boundary rejects other draft physical sizes before
+model allocation; this does not constrain the ordinary engine's batch controls.
 
 This is an allocation-capacity test with a short fixed public prompt. It does
 not establish usable near-full 32K context, long reasoning quality or 65K.

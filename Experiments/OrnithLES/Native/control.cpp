@@ -222,6 +222,16 @@ int main(int argc, char ** argv) {
         if (diagnostic.describe("load").size() > 2054) throw std::runtime_error("Unbounded native loader error");
         diagnostic.end();
         if (flo_prepare(fd, dir.c_str(), nullptr, nullptr)) throw std::runtime_error(flo_last_error());
+        for (int slots : {8, 64, 128}) {
+            flo_options invalid_draft{};
+            invalid_draft.context_tokens = 32; invalid_draft.memory_ceiling_bytes = 5500000000ULL;
+            invalid_draft.experimental_dflash = true; invalid_draft.additional_reserve_bytes = 800000000ULL;
+            invalid_draft.prefill_slots = slots;
+            auto * invalid_context = flo_open(fd, dir.c_str(), invalid_draft, nullptr, nullptr);
+            if (invalid_context) { flo_close(invalid_context); throw std::runtime_error("Unsupported draft physical batch admitted"); }
+            if (std::string(flo_last_error()).find("physical batch four") == std::string::npos || flo_snapshot(nullptr).live_contexts)
+                throw std::runtime_error("Draft geometry failed after allocation or retained an owner");
+        }
         uint64_t prefix_bytes = 0;
         {
             flo_options options{};
@@ -383,6 +393,7 @@ int main(int argc, char ** argv) {
             {"residentCPUReference", true}, {"cpuStreamingMaximumAbsoluteError", error},
             {"recurrentOnlyPrefixCheckpointBitwiseReplay", true}, {"prefixCheckpointBytes", prefix_bytes},
             {"greedyBlockRollbackBranches", 4}, {"trainedDFlashGraphExecuted", false},
+            {"unsupportedDraftPhysicalBatchRejectedBeforeLoad", true},
             {"cpuFlashAttentionMaximumAbsoluteError", flash_error}, {"phoneFlashAttentionExecuted", false},
             {"cpuFlashAttentionRelativeL2Error", flash_relative}, {"cpuFlashAttentionResidentStreamingMaximumAbsoluteError", flash_streaming_error},
             {"cpuFlashAttentionSameGreedy", flash_greedy}, {"cpuFlashAttentionRoutingIdentical", flash_routing},
