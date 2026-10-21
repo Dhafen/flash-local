@@ -145,7 +145,7 @@ struct OrnithLESChatPage: View {
                 HStack { ProgressView(); Spacer(); Button("Stoppa", role: .cancel) { model.stop() } }
             } else if !model.chatReady {
                 Button("Aktivera snabbchatten") { activate() }.buttonStyle(.borderedProminent).disabled(!model.canStart)
-                Text("Första starten kontrollerar numeriken mot originalvikterna. Ingen modell hämtas.")
+                Text("Första starten i en ny appversion kontrollerar numeriken mot originalvikterna. Godkänd kontroll återanvänds vid följande starter om modell, motor och iOS är oförändrade. Ingen modell hämtas.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             OrnithPromptControls(model: model)
@@ -541,6 +541,9 @@ struct OrnithAgentConnectionControls: View {
                     .font(.caption).foregroundStyle(.secondary)
             }.frame(maxWidth: .infinity, alignment: .leading)
         }.accessibilityIdentifier("ornith-agent-connection")
+        .onChange(of: client) { _, _ in copied = nil }
+        .onChange(of: computer) { _, _ in copied = nil }
+        .onChange(of: selectedURL) { _, _ in copied = nil }
     }
     private func copy(_ value: String, label: String) {
         #if os(iOS)

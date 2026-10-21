@@ -236,7 +236,8 @@ private actor LESAppWorker {
         guard let artifact, let prepared else { throw CancellationError() }
         // An explicit comparison is always fresh; a later failure must not
         // leave a previously admitted startup receipt behind.
-        try? FileManager.default.removeItem(at: prepared.appendingPathComponent("chat-admission-v1.json"))
+        let receipt = prepared.appendingPathComponent("chat-admission-v1.json")
+        if FileManager.default.fileExists(atPath: receipt.path) { try FileManager.default.removeItem(at: receipt) }
         // Every explicit run performs its own check and memory sampling.
         // Re-exporting a cached failed check must not look like another run
         // with zero measured RAM. The verified file/preparation may be reused.
