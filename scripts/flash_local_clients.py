@@ -19,6 +19,14 @@ class ClientSetupError(ValueError):
     """Only fixed, credential-free operator instructions belong in this error."""
 
 
+def request_timeout_seconds(live):
+    """Match the phone's admitted-window deadline; never an infinite request."""
+    context = live['context']
+    if type(context) is not int or context not in {8192,16384,32768,65536}:
+        raise ValueError('Unknown active context deadline')
+    return min(10800, max(1800, context // 8192 * 1800))
+
+
 def environment():
     env = dict(os.environ)
     for key in list(env):
@@ -72,7 +80,10 @@ def run_hermes(client, live, root, project=None):
     # JSON is a YAML subset; no YAML dependency or credential interpolation needed.
     write_private(profile / 'config.yaml', json.dumps(hermes_configuration(client, live), indent=2))
     env = environment()
-    env.update(HERMES_HOME=str(profile), OPENAI_BASE_URL=client.base, OPENAI_API_KEY=client.key)
+    seconds = str(request_timeout_seconds(live))
+    env.update(HERMES_HOME=str(profile), OPENAI_BASE_URL=client.base, OPENAI_API_KEY=client.key,
+               HERMES_API_TIMEOUT=seconds, HERMES_STREAM_READ_TIMEOUT=seconds,
+               HERMES_STREAM_STALE_TIMEOUT=seconds)
     print('Hermes local profile (sessions retained): ' + str(profile), flush=True)
     return subprocess.run([executable, 'chat', '--provider', 'custom', '--model', live['model'],
                            '--toolsets', 'terminal,file', '--reasoning', 'medium'],
@@ -91,7 +102,7 @@ def codex_arguments(live, base, project=None):
         'model_providers.flashlocal.supports_websockets': False,
         'model_providers.flashlocal.request_max_retries': 0,
         'model_providers.flashlocal.stream_max_retries': 0,
-        'model_providers.flashlocal.stream_idle_timeout_ms': 10800000,
+        'model_providers.flashlocal.stream_idle_timeout_ms': request_timeout_seconds(live) * 1000,
         'features.apps': False, 'features.plugins': False, 'features.multi_agent': False,
         'features.multi_agent_v2': False, 'features.goals': False, 'features.tool_suggest': False}
     # Disable configured MCP servers for this invocation only. Read section names,

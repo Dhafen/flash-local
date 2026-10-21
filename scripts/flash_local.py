@@ -11,7 +11,7 @@ import sys
 import tempfile
 
 from flash_local_agent import LocalClient, MODEL, strict_json
-from flash_local_clients import ClientSetupError
+from flash_local_clients import ClientSetupError, request_timeout_seconds
 
 
 def settings_path():
@@ -59,6 +59,7 @@ def discover(client, requested=None):
 
 def opencode_configuration(client, live):
     model = live['model']
+    timeout = request_timeout_seconds(live) * 1000
     return {
         '$schema': 'https://opencode.ai/config.json',
         'enabled_providers': ['flashlocal'],
@@ -66,7 +67,8 @@ def opencode_configuration(client, live):
         'share': 'disabled', 'autoupdate': False,
         'permission': {'*': 'ask', 'bash': 'deny', 'webfetch': 'deny', 'external_directory': 'deny'},
         'provider': {'flashlocal': {'name': 'Flash Local iPhone', 'npm': '@ai-sdk/openai-compatible',
-            'options': {'baseURL': client.base, 'apiKey': '{env:FLASH_LOCAL_API_KEY}'},
+            'options': {'baseURL': client.base, 'apiKey': '{env:FLASH_LOCAL_API_KEY}',
+                'timeout': timeout, 'headerTimeout': timeout, 'chunkTimeout': timeout},
             'models': {model: {'name': 'Flash Local / ' + model, 'tool_call': True,
                 'limit': {'context': live['context'], 'output': live['output']}}}}}}
 
@@ -127,6 +129,7 @@ def main(argv=None):
         key = os.environ.get('FLASH_LOCAL_API_KEY') or getpass.getpass('Phone API key (not saved): ')
         client = LocalClient(base, key, timeout=10800 if getattr(args, 'long_context', False) else 1800)
         live = discover(client, args.model or saved.get('model'))
+        client.timeout = request_timeout_seconds(live)
         if args.command == 'connect':
             save_connection(path, client.base, live['model'])
         if args.command in {'connect', 'status'}:

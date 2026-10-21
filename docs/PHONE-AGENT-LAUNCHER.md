@@ -109,10 +109,14 @@ Reports checkpoint after each case and never overwrite an existing output file.
 
 Long prefill can take a long time. The API's bounded authenticated-request
 deadline scales with the admitted context, up to three hours for the largest
-experiment. No client or allocation test establishes 16K/32K/65K reliability
+experiment. The launcher, OpenCode request/header/chunk limits and Hermes/Codex
+profiles use that same bounded deadline, rather than cloud-oriented short
+timeouts. PentAGI's installed version still needs a real compatibility test.
+No client or allocation test establishes 16K/32K/65K reliability
 without the actual phone report. No new phone benchmark has been fabricated.
 
 Implementation references: [OpenCode providers](https://opencode.ai/docs/providers/),
+[OpenCode request timeouts](https://opencode.ai/docs/config/#models),
 [Hermes configuration](https://hermes-agent.nousresearch.com/docs/user-guide/configuration),
 [Codex configuration](https://developers.openai.com/codex/config-reference/),
 [Responses events](https://developers.openai.com/api/reference/resources/responses/streaming-events),

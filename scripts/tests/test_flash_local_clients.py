@@ -138,6 +138,11 @@ class AdapterTests(unittest.TestCase):
 
 
 class ProfileTests(unittest.TestCase):
+    def test_client_deadlines_follow_the_active_window_and_remain_bounded(self):
+        self.assertEqual([clients.request_timeout_seconds({'context':n}) for n in [8192,16384,32768,65536]],
+                         [1800,3600,7200,10800])
+        for value in [True,0,12345,'65536']:
+            with self.assertRaises(ValueError): clients.request_timeout_seconds({'context':value})
     def test_hermes_does_not_lie_about_context_to_bypass_its_64k_floor(self):
         with patch('flash_local_clients.subprocess.run') as run:
             with self.assertRaisesRegex(clients.ClientSetupError, '64,000'):
