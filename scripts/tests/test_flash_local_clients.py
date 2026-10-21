@@ -22,6 +22,18 @@ LIVE = {'model': MODEL, 'context': 16384, 'output': 4096,
 
 
 class AdapterTests(unittest.TestCase):
+    def test_usage_preserves_measured_cache_and_never_invents_zero_measurements(self):
+        stop = {'choices':[{'delta':{'content':'fixture'},'finish_reason':'stop'}]}
+        self.assertIsNone(list(bridge.response_events([stop], LIVE, set()))[-1]['response']['usage'])
+        usage = {'prompt_tokens':100,'completion_tokens':20,'total_tokens':120,
+                 'completion_tokens_details':{'reasoning_tokens':7},'flash_local':{'reused_prompt_tokens':77}}
+        response = list(bridge.response_events([stop,{'choices':[],'usage':usage}], LIVE, set()))[-1]['response']
+        self.assertEqual(response['usage']['input_tokens_details']['cached_tokens'],77)
+        self.assertEqual(response['usage']['output_tokens_details']['reasoning_tokens'],7)
+        self.assertEqual(response['flash_local'],usage['flash_local'])
+        with self.assertRaises(ValueError):
+            list(bridge.response_events([stop,{'choices':[],'usage':{**usage,'total_tokens':121}}], LIVE, set()))
+
     def test_pre_header_phone_request_is_closed_on_cancel(self):
         reserved, disconnected = threading.Event(), threading.Event()
         class PreparingPhone(BaseHTTPRequestHandler):

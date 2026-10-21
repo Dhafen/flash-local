@@ -207,9 +207,27 @@ def response_events(chunks, live, custom):
     response['status'] = 'incomplete' if finish == 'length' else 'completed'
     if finish == 'length':
         response['incomplete_details'] = {'reason': 'max_output_tokens'}
-    response['usage'] = {'input_tokens': usage.get('prompt_tokens', 0), 'output_tokens': usage.get('completion_tokens', 0),
-        'total_tokens': usage.get('total_tokens', 0), 'input_tokens_details': {'cached_tokens': 0},
-        'output_tokens_details': {'reasoning_tokens': usage.get('completion_tokens_details', {}).get('reasoning_tokens', 0)}}
+    # Missing measurements are unknown, never fabricated zero-token inference.
+    response['usage'] = None
+    if usage:
+        for field in ['prompt_tokens','completion_tokens','total_tokens']:
+            if type(usage.get(field)) is not int or usage[field] < 0:
+                raise ValueError('Invalid phone usage counts')
+        if usage['total_tokens'] != usage['prompt_tokens'] + usage['completion_tokens']:
+            raise ValueError('Inconsistent phone usage counts')
+        response['usage'] = {'input_tokens': usage['prompt_tokens'], 'output_tokens': usage['completion_tokens'],
+                             'total_tokens': usage['total_tokens']}
+        metrics = usage.get('flash_local', {})
+        cached = usage.get('prompt_tokens_details', {}).get('cached_tokens', metrics.get('reused_prompt_tokens'))
+        reasoning = usage.get('completion_tokens_details', {}).get('reasoning_tokens')
+        for count, maximum, group, key in [(cached, usage['prompt_tokens'], 'input_tokens_details', 'cached_tokens'),
+                (reasoning, usage['completion_tokens'], 'output_tokens_details', 'reasoning_tokens')]:
+            if count is not None:
+                if type(count) is not int or not 0 <= count <= maximum:
+                    raise ValueError('Invalid phone usage details')
+                response['usage'][group] = {key: count}
+        if metrics:
+            response['flash_local'] = metrics
     yield {'type': 'response.' + response['status'], 'response': response}
 
 
