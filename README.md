@@ -9,12 +9,15 @@ Current target: the official 21.7 GB Ornith 1.5 35B-A3B Q4_K_M GGUF, a total pro
 The isolated [security-agent server integration](docs/SECURITY-AI-SERVER.md)
 adds validated OpenAI function calls and matched tool-result history using the
 installed Ornith GGUF's original template, configurable device-Keychain API
-credentials, native API measurements and a scoped Kali client. New Swift,
-native, app and iOS checks are pending; no new phone result or TestFlight
-delivery is claimed. Existing inference backends and installed data remain.
-The last independently confirmed private delivery is **0.1.0 (148)**,
-source `a90b052c839d111cf8bb9b29b00d84be4e57deef`,
-[delivery run](https://github.com/Dhafen/flash-local/actions/runs/39401960146).
+credentials, native API measurements and a scoped Kali client. Native LES,
+QPack, app/package tests, iOS builds, signing and private delivery pass.
+The latest independently confirmed private delivery is **0.1.0 (180)**,
+source `e8d25318510262568b3b81fbc8100e36751ee383`,
+[delivery run](https://github.com/Dhafen/flash-local/actions/runs/39481746775).
+Actual phone tool-call round trips and LAN interoperability remain unverified.
+Existing inference backends and installed data remain. A subsequent display
+fix reuses the existing Markdown renderer in quick-chat answers; its build and
+visual review are pending.
 Current source configures 8,192 total context tokens; trained 8K reliability
 and additional model runners remain unverified. See the integration guide for
 the real phone test and candidate-model comparison still required.

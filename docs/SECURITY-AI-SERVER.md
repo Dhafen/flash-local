@@ -23,8 +23,33 @@ The fixture now supplies the same ordered tools to the independent original
 template and explicitly checks the adapter's serialized bytes. Exact rendered
 text and token-ID assertions remain for all four cases and both thinking modes;
 the client fixture keeps its different key order. Runtime code, model mathematics
-and delivery configuration are unchanged. The repaired full delivery must pass
-before any new TestFlight availability is claimed.
+and delivery configuration are unchanged. The repaired [delivery 180](https://github.com/Dhafen/flash-local/actions/runs/39481746775)
+passes all full-app gates and independent Apple availability verification.
+
+## Delivered checkpoint: 0.1.0 (180)
+
+Source `e8d25318510262568b3b81fbc8100e36751ee383` passes 585 app controls,
+487 package controls (nine environment skips), 321 streaming controls,
+18 reference-adapter controls and 38 selected native/chat/tokenizer controls.
+All 22 actual TCP/Keychain API controls pass with a synthetic generation
+provider. LES/QPack and the iOS build pass; 64 real host/Simulator captures were
+reviewed in both appearances. The original-template token comparison now passes.
+These are host controls, not trained-model phone/tool or long-context evidence.
+
+Archive, Apple signature and private upload match that exact source. A fresh
+read-only Apple audit confirms `VALID`, `INTERNAL_ONLY`, `IN_BETA_TESTING`,
+nonexpired, the unchanged private group and sole owner. The IPA SHA256 is
+`7241567009bc3eebec3ad98c8dc860b275c0bdc281d63ce3568520816d10ac8e`.
+The user reports installing the update. A short phone screenshot reports
+5.54 decode token/s, 6.50 prompt token/s and 145 reused prompt tokens; it does
+not establish sustained throughput or actual use of the full 8K context.
+
+The next display-only correction reuses the existing assistant Markdown
+renderer in the shared GGUF/LES message row. Bold text, lists and code blocks
+render while the raw model response and API payload stay intact. User messages
+remain literal. Its updated preview contains only public synthetic sample text;
+new app/iOS and visual checks are pending. Model-generated spelling or factual
+errors are separate from Markdown formatting and are not silently rewritten.
 
 ## Protocol and execution boundary
 

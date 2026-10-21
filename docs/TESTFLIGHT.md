@@ -1,6 +1,22 @@
 # Private internal TestFlight delivery
 
-## Current build 126: prompt batches and work profiles
+## Current build 180: structured agent API
+
+Private **0.1.0 (180)** is independently confirmed available to the unchanged
+own-tester group, source `e8d25318510262568b3b81fbc8100e36751ee383`.
+[Delivery and verified gates](SECURITY-AI-SERVER.md#delivered-checkpoint-010-180)
+include native LES/QPack, 585 app controls, 487 package controls (nine skips),
+22 real TCP/Keychain API controls, iOS compilation, 64 reviewed captures,
+archive inspection and Apple signing. Protocol generation controls are synthetic.
+
+The API supports declared function calls, matched tool results, JSON/SSE and a
+configurable Keychain credential. The first real iPhone/Kali round trip still
+needs the [physical acceptance test](SECURITY-AI-SERVER.md#first-phone-acceptance-test).
+The 8,192-token configured limit is not proof of trained 8K reliability.
+Keep the installed app/model. The subsequent Markdown display fix has not yet
+been delivered.
+
+## Previous build 126: prompt batches and work profiles
 
 Private **0.1.0 (126)** is available to the existing internal group, runtime source
 `6c1084c87b35c749a5152c140c4828e9dde84126`. [Delivery run 39250964590](https://github.com/Dhafen/flash-local/actions/runs/39250964590) passes 32 selected native/chat/tokenizer

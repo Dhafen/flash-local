@@ -208,8 +208,13 @@ struct REAMMessageRow: View {
                 .onChange(of: thinking, initial: true) { _, active in showsReasoning = active }
             }
             if !message.text.isEmpty {
-                Text(message.text.trimmingCharacters(in: .whitespacesAndNewlines))
-                    .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                if message.role == .assistant {
+                    AnswerText(source: message.text.trimmingCharacters(in: .whitespacesAndNewlines))
+                        .textSelection(.enabled)
+                } else {
+                    Text(verbatim: message.text.trimmingCharacters(in: .whitespacesAndNewlines))
+                        .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                }
             } else if isGenerating && !thinking && !hasReasoning {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)

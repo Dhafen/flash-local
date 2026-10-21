@@ -325,7 +325,7 @@ final class OrnithLESAppModel {
         model.status = thinking ? "Tänker lokalt…" : "Förhandsvisning av snabbchatten – ingen modell körs."
         model.chatMessages = [.init(role: .user, text: "Hur testar jag en cache?")]
         model.chatMessages.append(.init(role: .assistant,
-            text: thinking ? "" : "Testa träffar, missar och att den äldsta posten byts ut när cachen är full.",
+            text: thinking ? "" : "**Cachetest:**\n\n- Testa träffar och missar.\n- Kontrollera att `oldest` byts ut när cachen är full.\n\n```swift\nassert(cache.count <= capacity)\n```",
             reasoning: "Jag börjar med cachens gränser och vilka egenskaper testet behöver kontrollera.", isThinking: thinking))
         return model
     }
