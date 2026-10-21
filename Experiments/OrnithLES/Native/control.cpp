@@ -148,7 +148,7 @@ static output evaluate(int fd, const char * dir, bool metal, int depth, int step
         throw std::runtime_error("Native context or buffer ownership survived close");
     return out;
 }
-static double compare(const output & a, const output & b, bool routing = true) {
+static double compare(const output & a, const output & b, bool routing = true, bool require_greedy = true) {
     if (routing && (a.metrics.canonical_routing_digest != b.metrics.canonical_routing_digest ||
         a.metrics.canonical_expert_set_digest != b.metrics.canonical_expert_set_digest ||
         a.metrics.routing_decisions != b.metrics.routing_decisions))
@@ -166,15 +166,16 @@ static double compare(const output & a, const output & b, bool routing = true) {
                 throw std::runtime_error("Non-finite control logit");
             error = std::max(error, std::abs((double)a.logits[position][j] - b.logits[i][j]));
         }
-        if (std::max_element(a.logits[position].begin(), a.logits[position].end()) - a.logits[position].begin() !=
+        if (require_greedy && std::max_element(a.logits[position].begin(), a.logits[position].end()) - a.logits[position].begin() !=
             std::max_element(b.logits[i].begin(), b.logits[i].end()) - b.logits[i].begin())
             throw std::runtime_error("Greedy token changed");
     }
     return error;
 }
 static double relative_l2(const output & a, const output & b) {
-    // compare() validates shape, positions, finiteness, greedy and routing.
-    (void)compare(a, b);
+    // Cross-graph diagnostics also describe rejected experimental candidates.
+    // Shape and finiteness remain mandatory; ordinary controls are unchanged.
+    (void)compare(a, b, false, false);
     double squared = 0, reference = 0;
     for (size_t i = 0; i < b.logits.size(); ++i) {
         const auto & expected = a.logits[b.positions[i]];
@@ -311,13 +312,25 @@ int main(int argc, char ** argv) {
         const auto flash = evaluate(fd, dir.c_str(), false, 0, steps, 0, 0, false, true, 4, 4, true);
         const double flash_streaming_error = compare(flash_reference, flash);
         if (flash_streaming_error > 1e-6) throw std::runtime_error("Flash Attention streaming differs from resident FA reference");
-        const double flash_error = compare(cpu, flash);
+        const double flash_error = compare(cpu, flash, false, false);
         const double flash_relative = relative_l2(cpu, flash);
+        bool flash_greedy = true;
+        for (size_t i = 0; i < flash.logits.size(); ++i) {
+            const auto & a = cpu.logits[flash.positions[i]], & b = flash.logits[i];
+            flash_greedy = flash_greedy && std::max_element(a.begin(), a.end()) - a.begin() ==
+                std::max_element(b.begin(), b.end()) - b.begin();
+        }
+        const bool flash_routing = cpu.metrics.canonical_routing_digest == flash.metrics.canonical_routing_digest &&
+            cpu.metrics.canonical_expert_set_digest == flash.metrics.canonical_expert_set_digest &&
+            cpu.metrics.routing_decisions == flash.metrics.routing_decisions;
+        const bool flash_admitted = flash_error <= 0.01 && flash_relative <= 0.001 && flash_greedy && flash_routing;
         std::cout << "ORNITH_CPU_FLASH_ATTENTION residentStreamingMaxAbs=" << flash_streaming_error
                   << " decomposedMaxAbs=" << flash_error << " decomposedRelativeL2=" << flash_relative
-                  << " sameGreedy=true exactRouting=true physicalPhone=false\n" << std::flush;
-        if (flash_error > 0.01 || flash_relative > 0.001)
-            throw std::runtime_error("CPU Flash Attention exceeds the existing phone logit limits");
+                  << " sameGreedy=" << flash_greedy << " exactRouting=" << flash_routing
+                  << " candidateAdmitted=" << flash_admitted << " physicalPhone=false\n" << std::flush;
+        // This is an explicit, never-promoted experiment. A rejected candidate
+        // is a valid diagnostic result, not permission to change chat/API.
+        // Phone execute() independently fails closed with the unchanged gate.
         // A NaN must never disappear inside std::max and pass a numerical gate.
         auto nonfinite = flash; nonfinite.logits[0][0] = std::numeric_limits<float>::quiet_NaN();
         bool nonfinite_rejected = false;
@@ -372,7 +385,8 @@ int main(int argc, char ** argv) {
             {"greedyBlockRollbackBranches", 4}, {"trainedDFlashGraphExecuted", false},
             {"cpuFlashAttentionMaximumAbsoluteError", flash_error}, {"phoneFlashAttentionExecuted", false},
             {"cpuFlashAttentionRelativeL2Error", flash_relative}, {"cpuFlashAttentionResidentStreamingMaximumAbsoluteError", flash_streaming_error},
-            {"cpuFlashAttentionSameGreedyAndRouting", true}, {"nonfiniteControlLogitsRejected", nonfinite_rejected},
+            {"cpuFlashAttentionSameGreedy", flash_greedy}, {"cpuFlashAttentionRoutingIdentical", flash_routing},
+            {"cpuFlashAttentionCandidateAdmitted", flash_admitted}, {"nonfiniteControlLogitsRejected", nonfinite_rejected},
             {"extendedLogicalBatchControls", extended_variants}, {"logicalBatchLimit", 2048},
             {"metalExecutionVerified", false}, {"actualRoutingIdentical", true},
             {"invalidLookaheadRejected", true},

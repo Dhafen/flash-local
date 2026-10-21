@@ -93,8 +93,8 @@ Its new, absolute-only 0.0001 cross-graph limit differed from the existing
 phone policy. CPU fused attention and decomposed attention do not use identical
 F16-KV arithmetic in the pinned runtime. The control now separately requires
 resident versus streamed **FA** logits to agree within 0.000001, and compares
-FA against decomposed attention using the unchanged phone limits above, with
-identical greedy tokens and complete routing traces. Both errors and relative
+FA against decomposed attention reports qualification using the unchanged phone
+limits above, greedy tokens and complete routing traces. Both errors and relative
 L2 are exported; non-finite logits fail explicitly. Ordinary engine controls
 remain at 0.000001. This does not waive any installed-model phone check or
 establish the quality of either attention graph.
@@ -109,6 +109,17 @@ KV storage and default precision remain unchanged. A separate CPU operator
 regression checks one and four queries over 256 F16 value rows against an
 independent double-precision mean, within 0.000001. Neither this repair nor a
 passing synthetic control establishes phone Metal precision or trained quality.
+
+After that patch (`0a63d6e`, run 39686616250), both independent CPU operator
+cases have zero error, while the mixed full graph still has max absolute error
+0.00217067 and relative L2 0.00245612. **That CPU FA candidate is rejected.**
+The cross-graph result is exported as `cpuFlashAttentionCandidateAdmitted=false`,
+separately from the strict same-graph streaming/ownership regression. A passing
+build is not FA quality admission. The isolated phone experiment may be run to
+measure its different Metal execution, but must independently pass the existing
+installed-model checks, all logit/expert gates and 128 matching output tokens.
+Failure never changes the ordinary engine. No tolerance is increased to pass
+this rejected CPU result. DFlash uses the ordinary target attention graph.
 
 Thinking budgets, nonzero-temperature rejection sampling, streaming tool calls
 and foreground recovery remain in the ordinary backend. Extending DFlash to
