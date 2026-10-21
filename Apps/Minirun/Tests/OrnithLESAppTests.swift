@@ -3,10 +3,31 @@ import Foundation
 import XCTest
 import MinirunKit
 import OrnithLES
+import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 @testable import MinirunApp
 
 @MainActor
 final class OrnithLESAppTests: XCTestCase {
+    #if os(macOS)
+    func testLESRootDoesNotPrepareTheInvisibleLegacyModelOwner() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("inactive-legacy-" + UUID().uuidString)
+        let legacy = REAMAppModel(root: root)
+        let host = NSHostingView(rootView: REAMRootView(model: legacy))
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 430, height: 900),
+            styleMask: .borderless, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false; window.contentView = host; window.orderFront(nil)
+        defer { window.close(); try? FileManager.default.removeItem(at: root) }
+        host.layoutSubtreeIfNeeded()
+        // Give the real .task lifecycle an opportunity to run. The old root
+        // creates this directory and starts verification even though hidden.
+        try await Task.sleep(for: .milliseconds(250))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+        XCTAssertFalse(legacy.isBusy); XCTAssertNil(legacy.error)
+    }
+    #endif
     func testSamplingSurvivesReasoningToggleAndClosingReopeningTheModel() throws {
         let suite = "OrnithSampling-" + UUID().uuidString
         let preferences = try XCTUnwrap(UserDefaults(suiteName: suite))

@@ -30,11 +30,17 @@ struct REAMRootView: View {
                 .navigationTitle("Flash Local")
             #endif
         }
+        // LES owns verification and lifecycle when it is the root experience.
+        // Starting the invisible legacy owner hashes the same large GGUF a
+        // second time and cannot share its artifact (it was never paused as an
+        // alternate runner). The ordinary root retains its existing lifecycle.
+        #if !canImport(OrnithLES)
         .task { model.prepare() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .background { model.releaseInferenceResources() }
             else if phase == .active { model.refreshStorage() }
         }
+        #endif
     }
 }
 
