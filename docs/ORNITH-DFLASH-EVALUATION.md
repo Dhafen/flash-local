@@ -103,6 +103,13 @@ This estimate does not establish that every possible streaming draft design
 fails. Draft-only quantization, a smaller adaptive block or file-backed draft
 weights are separate experiments; retain the target's original quantization.
 
+Compare two rollback designs in the prototype: native per-position recurrent
+snapshots, or one bounded block-start snapshot followed by re-evaluation of the
+accepted prefix after a rejection. The second design can reduce memory but adds
+target work on rejection. It needs a separate slot from the conversation
+checkpoint and a combined byte cap; it is not implemented by the current single
+checkpoint ABI. Measure both instead of assuming per-position copies are free.
+
 The inspected Python MLX implementation retains all eight target feature
 streams during prefill when any draft layer is full attention. At 65K those
 features alone occupy **2–4 GiB** for two/four-byte activations. A literal port
@@ -138,3 +145,16 @@ Next isolated prototype gates, in order:
 No extrapolated 10–15 token/s target is claimed. DFlash accelerates decode only
 when accepted tokens amortize draft, verify and rollback work; it does not
 remove long-prompt prefill or increase context capacity by itself.
+
+## Related cache regression found during the audit
+
+The ordinary installed-model tokenizer was also checked independently, without
+inference. On a public fixture, the first generation prompt has 15 tokens with
+Thinking off and 13 with it on. Neither complete prompt remains a prefix when
+the answer is rendered as history without reasoning. The eight-token history
+boundary before the assistant's generation suffix remains exact in both cases.
+The new runner captures there and verifies token-suffix equality; it does not
+edit the original chat template. Matching Swift canonical-tokenizer and cache
+policy regressions were added. This establishes the tokenizer cause, not an
+on-phone cache speedup; the pending full app gate and physical warm/fresh test
+are still required.
