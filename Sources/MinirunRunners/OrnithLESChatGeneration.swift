@@ -43,7 +43,7 @@ public final class OrnithLESChatGeneration {
     private var stateTokens: [Int] = []
     private var stateLogits: [Float] = []
     private var running = false
-    public let contextTokens = 8192
+    public let contextTokens: Int
 
     static func validatedPrefill(_ check: LESNumericalCheck, modelSHA256: String, nativeRevision: String) throws -> Int {
         guard check.modelSHA256 == modelSHA256, check.nativeRevision == nativeRevision,
@@ -71,14 +71,16 @@ public final class OrnithLESChatGeneration {
     }
     public init(artifact: VerifiedGGUFArtifact, prepared: URL, check: LESNumericalCheck, control: LESControl,
                 prefillConfiguration: LESPrefillConfiguration = .init(), prefillCheck: LESPrefillCheck? = nil,
+                contextProfile: LocalContextProfile = .standard,
                 onAdmission: (LESMemoryAdmission) -> Void = { _ in }) throws {
         let batch = try Self.validatedBatch(prefillConfiguration, proof: prefillCheck, baseline: check, modelSHA256: artifact.manifest.sha256,
             nativeRevision: LESContext.revision)
         batchSize = batch.0; physicalBatchSize = batch.1
         self.prefillConfiguration = prefillConfiguration; self.prefillCheck = prefillCheck
         self.artifact = artifact; self.control = control
+        contextTokens = contextProfile.rawValue
         tokenizer = try CanonicalQwen35Tokenizer(artifact: artifact)
-        let plan = try LESBenchmark.plan(artifact, context: 8192, depth: 0, pageCache: true,
+        let plan = try LESBenchmark.plan(artifact, context: contextProfile.rawValue, depth: 0, pageCache: true,
             phase: "chat.omniPageCache", physicalBatchTokens: batch.1, onAdmission: onAdmission)
         native = try LESContext(artifact: artifact, prepared: prepared, plan: plan, control: control)
         guard native.vocabularySize == tokenizer.vocabularySize else {

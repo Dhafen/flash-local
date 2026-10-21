@@ -72,7 +72,7 @@ private struct LESAppReport: Encodable {
     let originalExpertCachePolicy = "Existing TileReader F_NOCACHE=1 advisory; original backend preserved"
     let fullModelNumericsVerified = false
     let promptID = LESBenchmark.promptID
-    let contextCapacityTokens = 8192
+    let contextCapacityTokens = 4096
     let numericalCheck: LESNumericalCheck?
     let measurements: [LESRunExport]
     let memoryAdmissions: [LESMemoryAdmission]
@@ -112,6 +112,7 @@ private actor LESAppWorker {
     }
     func prepareChat(modelsRoot: URL, privateRoot: URL, existing: VerifiedGGUFArtifact?, control: LESControl,
                      configuration: LESPrefillConfiguration = .init(),
+                     contextProfile: LocalContextProfile = .standard,
                      progress: @Sendable (String) -> Void,
                      onCheck: @Sendable (LESNumericalCheck) -> Void) throws -> LESNumericalCheck {
         chat?.close(); chat = nil
@@ -137,6 +138,7 @@ private actor LESAppWorker {
         }
         chat = try OrnithLESChatGeneration(artifact: artifact, prepared: prepared, check: check,
             control: control, prefillConfiguration: configuration, prefillCheck: prefillCheck,
+            contextProfile: contextProfile,
             onAdmission: { self.admissions.append($0) })
         return check
     }
@@ -228,7 +230,7 @@ final class OrnithLESAppModel {
     private(set) var prefillBenchmark: OrnithPrefillBenchmark.Report?
     private(set) var prefillBenchmarkFailure: String?
     private(set) var prefillBenchmarkURL: URL?
-    var batchSettingsChanged: Bool { chatReady && activeBatchConfiguration != batchConfiguration }
+    var batchSettingsChanged: Bool { chatReady && (activeBatchConfiguration != batchConfiguration || activeContextProfile != contextProfile) }
     var systemPrompt = "" {
         didSet {
             if persistOptions, systemPrompt.utf8.count <= 32768 {
@@ -240,7 +242,9 @@ final class OrnithLESAppModel {
         guard canStart, !isAPIRunning else { return }
         systemPrompt = profile.systemPrompt
     }
-    let contextCapacityTokens = 8192
+    var contextProfile: LocalContextProfile = .standard
+    private(set) var activeContextProfile: LocalContextProfile = .standard
+    var contextCapacityTokens: Int { activeContextProfile.rawValue }
     var chatOptions = LocalGenerationOptions() {
         didSet {
             if persistOptions {
@@ -383,6 +387,7 @@ final class OrnithLESAppModel {
         guard canStart, !isAPIRunning, (!chatReady || batchSettingsChanged) else { return }
         do { try batchConfiguration.validate() } catch { self.error = error.localizedDescription; return }
         let requestedBatch = batchConfiguration
+        let requestedContext = contextProfile
         chatReady = false; activePrefillCheck = nil
         let flag = LESControl(), id = UUID()
         activeID = id; control = flag; chatControl = flag; isBusy = true; error = nil
@@ -392,7 +397,7 @@ final class OrnithLESAppModel {
             defer { if activeID == id { activeID = nil; control = nil; isBusy = false; operation = nil } }
             do {
                 let check = try await worker.prepareChat(modelsRoot: modelsRoot, privateRoot: privateRoot, existing: existing,
-                    control: flag, configuration: requestedBatch, progress: { [weak self] value in
+                    control: flag, configuration: requestedBatch, contextProfile: requestedContext, progress: { [weak self] value in
                         Task { @MainActor in guard let self, self.activeID == id else { return }; self.status = value }
                     }, onCheck: { [weak self] value in
                         Task { @MainActor in guard let self, self.activeID == id else { return }; self.numericalCheck = value }
@@ -405,6 +410,7 @@ final class OrnithLESAppModel {
                 }
                 if flag.isCancellationRequested { throw CancellationError() }
                 activeBatchConfiguration = requestedBatch
+                activeContextProfile = requestedContext
                 if requestedBatch == LESPrefillConfiguration() { activePrefillCheck = nil }
                 else { activePrefillCheck = await worker.prefillAdmission() }
                 chatReady = true; status = "Snabbchatten är redo · samma Ornith-GGUF · OS-cache."
@@ -548,7 +554,8 @@ final class OrnithLESAppModel {
             guard systemPrompt.utf8.count <= 32768 else { throw LocalAPIError.invalid("system", "Systemprompt får vara högst 32 KiB.") }
             apiAccessKey = key; apiKeyDraft = ""; apiID = id; apiSystemPrompt = systemPrompt
             apiStatus = "Startar lokalt API…"; error = nil
-            apiServer = try LocalModelAPIServer(key: key, port: UInt16(apiPort), defaults: chatOptions, handler: { [weak self] request in
+            apiServer = try LocalModelAPIServer(key: key, port: UInt16(apiPort), defaults: chatOptions,
+                capabilities: .init(context: activeContextProfile), handler: { [weak self] request in
                 guard let self else { throw LocalAPIError(status: 503, message: "Phone service is closed") }
                 return try await self.openAPIRequest(request)
             }, onState: { [weak self] state in
@@ -584,7 +591,8 @@ final class OrnithLESAppModel {
         let recovery = LESControl(); control = recovery
         do {
             let check = try await worker.prepareChat(modelsRoot: modelsRoot, privateRoot: privateRoot, existing: nil,
-                control: recovery, configuration: activeBatchConfiguration ?? .init(), progress: { _ in }, onCheck: { _ in })
+                control: recovery, configuration: activeBatchConfiguration ?? .init(), contextProfile: activeContextProfile,
+                progress: { _ in }, onCheck: { _ in })
             guard check.nativeBenchmarkAdmitted, !recovery.isCancellationRequested else { throw CancellationError() }
             numericalCheck = check; chatControl = recovery; chatReady = true; status = "API redo för nästa anrop."
         } catch { await worker.closeChat(); status = "Aktivera snabbchatten igen för att återuppta API:t." }

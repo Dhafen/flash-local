@@ -53,6 +53,12 @@ errors are separate from Markdown formatting and are not silently rewritten.
 
 ## Protocol and execution boundary
 
+The next context/client work is documented in
+[Phone agent launcher](PHONE-AGENT-LAUNCHER.md): live session capacities,
+experimental context profiles, acceptance harness and launch configurations
+for OpenCode, Codex, Hermes and PentAGI. Its new Swift/iOS checks and real-phone
+acceptance remain separate from the verified build-180 checkpoint above.
+
 The foreground server implements authenticated `/v1/models`,
 `/v1/chat/completions`, JSON and SSE. Function definitions, `tool_choice`
 (`auto`, `none`, `required`, named), `parallel_tool_calls`, assistant

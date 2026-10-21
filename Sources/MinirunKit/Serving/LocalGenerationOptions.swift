@@ -1,5 +1,25 @@
 import Foundation
 
+/// Total session window, including template, tools, prompt and generated tokens.
+/// Selecting a larger window requests a memory admission, not a quality claim.
+public enum LocalContextProfile: Int, Codable, CaseIterable, Identifiable, Sendable {
+    case standard = 8192, test16K = 16384, test32K = 32768, test65K = 65536
+    public var id: Int { rawValue }
+    public var title: String {
+        self == .standard ? "8K" : "\(rawValue / 1024)K · test"
+    }
+}
+
+public struct LocalModelCapabilities: Sendable {
+    public let context: LocalContextProfile
+    public init(context: LocalContextProfile = .standard) { self.context = context }
+    var json: [String: Any] {
+        ["context_capacity_tokens": context.rawValue, "max_output_tokens": 4096,
+         "reasoning_presets": ["off", "small", "medium", "ultra"],
+         "tool_calls": true, "context_quality_verified": false]
+    }
+}
+
 /// Generation controls shared by the local UI and the authenticated LAN API.
 /// Routing, weights and native graph mathematics are unaffected.
 public struct LocalGenerationOptions: Codable, Equatable, Sendable {

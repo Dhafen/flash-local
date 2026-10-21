@@ -276,9 +276,9 @@ final class LocalModelAPITests: XCTestCase {
         }
         for (count, expected) in zip(counts, [0.1, 0.3, 0.6]) { XCTAssertEqual(Double(count) / 10000, expected, accuracy: 0.02) }
     }
-    private func listen(handler: @escaping LocalModelAPIServer.Handler) async throws -> (LocalModelAPIServer, URL) {
+    private func listen(capabilities: LocalModelCapabilities = .init(), handler: @escaping LocalModelAPIServer.Handler) async throws -> (LocalModelAPIServer, URL) {
         let ready = expectation(description: "real TCP listener ready"), port = APITestBox()
-        let server = try LocalModelAPIServer(key: key, port: 0, loopbackOnly: true, handler: handler) { state in
+        let server = try LocalModelAPIServer(key: key, port: 0, loopbackOnly: true, capabilities: capabilities, handler: handler) { state in
             if case .ready(let value, _) = state { port.set(Int(value)); ready.fulfill() }
         }
         await fulfillment(of: [ready], timeout: 10)
@@ -290,6 +290,26 @@ final class LocalModelAPITests: XCTestCase {
         if authorized { request.setValue("Bearer " + key, forHTTPHeaderField: "Authorization") }
         if json != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
         return request
+    }
+    func testRealTCPAdvertisesTheActiveContextWithoutClaimingLongContextQuality() async throws {
+        XCTAssertEqual(LocalContextProfile.allCases.map(\.rawValue), [8192, 16384, 32768, 65536])
+        XCTAssertThrowsError(try JSONDecoder().decode(LocalContextProfile.self, from: Data("12345".utf8)))
+        let calls = APITestBox()
+        let (server, base) = try await listen(capabilities: .init(context: .test16K)) { _ in
+            calls.increment(); throw LocalAPIError(status: 503, message: "No model in this control")
+        }
+        defer { server.stop() }
+        let session = URLSession(configuration: .ephemeral); defer { session.invalidateAndCancel() }
+        let (data, response) = try await session.data(for: request(base.appendingPathComponent("v1/models")))
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let model = try XCTUnwrap((json["data"] as? [[String: Any]])?.first)
+        let capabilities = try XCTUnwrap(model["flash_local"] as? [String: Any])
+        XCTAssertEqual(capabilities["context_capacity_tokens"] as? Int, 16384)
+        XCTAssertEqual(capabilities["max_output_tokens"] as? Int, 4096)
+        XCTAssertEqual(capabilities["context_quality_verified"] as? Bool, false)
+        XCTAssertEqual(calls.get(), 0)
+        print("LOCAL_API_CAPACITY actualSessionWindow=true default8K=true largerExperimental=true noModelLoaded=true")
     }
     func testRealTCPModelsAuthJSONAndSSE() async throws {
         let calls = APITestBox(), cancelled = APITestBox()

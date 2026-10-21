@@ -14,6 +14,7 @@ public final class LocalModelAPIServer: @unchecked Sendable {
     private let onState: @Sendable (State) -> Void
     private let loopbackOnly: Bool
     private let defaults: LocalGenerationOptions
+    private let capabilities: LocalModelCapabilities
     private var listener: NWListener?
     private var sessions: [UUID: LocalAPISession] = [:]
     private var stopped = false
@@ -26,10 +27,12 @@ public final class LocalModelAPIServer: @unchecked Sendable {
         return bytes.map { String(format: "%02x", $0) }.joined()
     }
     public init(key: String, port: UInt16 = 8080, loopbackOnly: Bool = false, defaults: LocalGenerationOptions = .init(),
+                capabilities: LocalModelCapabilities = .init(),
                 handler: @escaping Handler, onState: @escaping @Sendable (State) -> Void) throws {
         try LocalAPIKeyStore.validate(key)
         try defaults.validate()
         self.key = key; self.handler = handler; self.onState = onState; self.loopbackOnly = loopbackOnly; self.defaults = defaults
+        self.capabilities = capabilities
         let parameters = NWParameters.tcp
         parameters.prohibitedInterfaceTypes = [.cellular]
         parameters.includePeerToPeer = false
@@ -56,7 +59,7 @@ public final class LocalModelAPIServer: @unchecked Sendable {
                 connection.cancel(); return
             }
             let id = UUID()
-            let session = LocalAPISession(connection: connection, queue: self.queue, key: self.key, defaults: self.defaults, handler: self.handler) { [weak self] in
+            let session = LocalAPISession(connection: connection, queue: self.queue, key: self.key, defaults: self.defaults, capabilities: self.capabilities, handler: self.handler) { [weak self] in
                 self?.sessions.removeValue(forKey: id)
             }
             self.sessions[id] = session; session.start()
@@ -111,15 +114,17 @@ private final class LocalAPISession: @unchecked Sendable {
     private let connection: NWConnection, queue: DispatchQueue, key: String
     private let handler: LocalModelAPIServer.Handler
     private let defaults: LocalGenerationOptions
+    private let capabilities: LocalModelCapabilities
     private let onClose: () -> Void
     private var parser = LocalHTTPParser()
     private var finished = false
     private var timer: DispatchWorkItem?
     private var generation: LocalChatGeneration?
     private var task: Task<Void, Never>?
-    init(connection: NWConnection, queue: DispatchQueue, key: String, defaults: LocalGenerationOptions,
+    init(connection: NWConnection, queue: DispatchQueue, key: String, defaults: LocalGenerationOptions, capabilities: LocalModelCapabilities,
          handler: @escaping LocalModelAPIServer.Handler, onClose: @escaping () -> Void) {
         self.connection = connection; self.queue = queue; self.key = key; self.defaults = defaults; self.handler = handler; self.onClose = onClose
+        self.capabilities = capabilities
     }
     func start() {
         connection.stateUpdateHandler = { [weak self] state in
@@ -138,7 +143,8 @@ private final class LocalAPISession: @unchecked Sendable {
                 if let request = try self.parser.append(data ?? Data()) {
                     self.timer?.cancel()
                     let timeout = DispatchWorkItem { [weak self] in self?.finish() }; self.timer = timeout
-                    self.queue.asyncAfter(deadline: .now() + 1800, execute: timeout)
+                    let seconds = min(10800, max(1800, self.capabilities.context.rawValue / 8192 * 1800))
+                    self.queue.asyncAfter(deadline: .now() + .seconds(seconds), execute: timeout)
                     self.respond(request)
                     // A closed or pipelined client must not leave inference running.
                     self.connection.receive(minimumIncompleteLength: 1, maximumLength: 1) { [weak self] data, _, complete, error in
@@ -158,7 +164,7 @@ private final class LocalAPISession: @unchecked Sendable {
         }
         if request.method == "GET", request.path == "/v1/models" || request.path == "/health" {
             let object: [String: Any] = request.path == "/health" ? ["status": "ok", "inference": "local", "model": LocalChatRequest.modelID] :
-                ["object": "list", "data": [["id": LocalChatRequest.modelID, "object": "model", "created": 0, "owned_by": "local"]]]
+                ["object": "list", "data": [["id": LocalChatRequest.modelID, "object": "model", "created": 0, "owned_by": "local", "flash_local": capabilities.json]]]
             task = Task { [weak self] in
                 guard let self else { return }
                 do { try await self.sendJSON(object) } catch { }
