@@ -90,6 +90,7 @@ class LauncherTests(unittest.TestCase):
             self.assertEqual(args[0], ['/fixture/opencode', '--standalone'])
             self.assertNotIn(KEY, str(args))
             config = json.loads(kwargs['env']['OPENCODE_CONFIG_CONTENT'])
+            self.assertEqual(config['agents']['title'], {'disabled': True})
             self.assertEqual(config['model'], 'flashlocal/' + MODEL)
             self.assertEqual(config['enabled_providers'], ['flashlocal'])
             self.assertTrue(Path(kwargs['env']['OPENCODE_CONFIG_DIR']).is_dir())

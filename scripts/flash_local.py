@@ -74,6 +74,9 @@ def opencode_configuration(client, live, major=1):
             'models': {model: {'name': 'Flash Local / ' + model, 'tool_call': True,
                 'limit': {'context': live['context'], 'output': live['output']}}}}}}
     if major == 2:
+        # A background title request would replace the single phone KV session
+        # between an assistant tool call and its result. Keep that context warm.
+        config['agents'] = {'title': {'disabled': True}}
         # v2 renamed execution/delegation tools. Keep the existing ask/deny
         # policy instead of accidentally granting a newly named executor.
         config['permissions'] = [{'action': name, 'resource': '*', 'effect': 'deny'}
