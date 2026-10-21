@@ -190,6 +190,30 @@ final class LESPolicyTests: XCTestCase {
             print("ORNITH_LONG_CONTEXT_PLAN context=\(context) dense=\(plan.denseBytes) KV=\(plan.kvBytes) SSM=\(plan.ssmBytes) admitted=\(plan.admittedProcessBytes) ropeBase=\(config.ropeBase) metadataOnly=true physicalQualityVerified=false")
         }
     }
+    func testAccelerationDraftHasAnExplicitBoundAndNeverExtendsContext() throws {
+        XCTAssertEqual(LESAccelerationBenchmark.draftManifest.fileByteCount, 782_819_680)
+        XCTAssertEqual(LESAccelerationBenchmark.draftManifest.sha256,
+            "abb048837823d068b71cea4d162076e5e2be62f504dc79bf08ac80d78c8bb732")
+        XCTAssertEqual(try LESAccelerationBenchmark.additionalMemory(context: 32768, candidate: .dflash), 1_068_032_352)
+        XCTAssertEqual(try LESAccelerationBenchmark.additionalMemory(context: 8192, candidate: .dflash), 967_369_056)
+        XCTAssertEqual(try LESAccelerationBenchmark.additionalMemory(context: 65536, candidate: .flashAttention), 0)
+        XCTAssertThrowsError(try LESAccelerationBenchmark.additionalMemory(context: 65536, candidate: .dflash))
+        XCTAssertThrowsError(try LESAccelerationBenchmark.additionalMemory(context: Int.max, candidate: .dflash))
+        let idx = try index()
+        let footprint = ProcessFootprint(footprintBytes: 100_000_000, peakFootprintBytes: 100_000_000, availableBytes: nil)
+        let ordinary = try LESMemoryPlan(index: idx, contextTokens: 32, footprint: footprint, pageCacheOnly: true)
+        let experiment = try LESMemoryPlan(index: idx, contextTokens: 32, footprint: footprint, pageCacheOnly: true,
+            experimentReserveBytes: 1_068_032_352)
+        XCTAssertEqual(experiment.kvBytes, ordinary.kvBytes)
+        XCTAssertEqual(experiment.admittedProcessBytes, ordinary.admittedProcessBytes + 1_068_032_352)
+        XCTAssertThrowsError(try LESMemoryPlan(index: idx, contextTokens: 32, footprint: footprint,
+            experimentReserveBytes: UInt64.max))
+        let report = LESAccelerationBenchmark.Report(candidate: .dflash, contextCapacityTokens: 32768,
+            targetSHA256: GGUFModelManifest.primaryOrnith.sha256,
+            draftSHA256: LESAccelerationBenchmark.draftManifest.sha256, runs: [], failure: nil)
+        XCTAssertFalse(report.comparable)
+        XCTAssertFalse(report.fullModelNumericsVerified); XCTAssertFalse(report.fullContextQualityVerified)
+    }
     func testLargerPhysicalBatchesBudgetTheCompleteExpertUnion() throws {
         let idx = try index()
         let original = try LESMemoryPlan(index: idx, contextTokens: 32, footprint: footprint, pageCacheOnly: true)

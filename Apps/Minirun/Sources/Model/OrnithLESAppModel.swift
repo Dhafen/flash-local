@@ -254,6 +254,44 @@ private actor LESAppWorker {
         return check
     }
     func prefillAdmission() -> LESPrefillCheck? { prefillCheck }
+    func downloadAccelerationDraft(privateRoot: URL, control: LESControl,
+                                   progress: @Sendable (String) -> Void) async throws {
+        chat?.close(); chat = nil
+        let root = privateRoot.appendingPathComponent("DFlash", isDirectory: true)
+        try LocalModelStorage.prepare(root: root)
+        if FileManager.default.fileExists(atPath: root.appendingPathComponent(LESAccelerationBenchmark.draftManifest.fileName).path) {
+            progress("Verifierar befintlig DFlash-draft…")
+            _ = try VerifiedGGUFArtifact.verify(insideRoot: root, manifest: LESAccelerationBenchmark.draftManifest,
+                cancellationRequested: { control.shouldAbort() })
+            return
+        }
+        _ = try await GGUFModelTransfer().download(insideRoot: root, source: LESAccelerationBenchmark.draftDownload,
+            cancellationRequested: { control.shouldAbort() }, onProgress: { value in
+                progress("DFlash \(value.phase.rawValue) · \(value.completedBytes.formatted()) / \(value.totalBytes.formatted()) byte")
+            })
+    }
+    func benchmarkAcceleration(modelsRoot: URL, privateRoot: URL, candidate: LESAccelerationBenchmark.Candidate,
+                               context: LocalContextProfile, control: LESControl,
+                               progress: @Sendable (String) -> Void) throws -> LESAccelerationBenchmark.Report {
+        _ = try LESAccelerationBenchmark.additionalMemory(context: context.rawValue, candidate: candidate)
+        chat?.close(); chat = nil
+        let draft: VerifiedGGUFArtifact?
+        if candidate == .dflash {
+            progress("Verifierar DFlash-filens SHA256 och tensorindex…")
+            draft = try VerifiedGGUFArtifact.verify(insideRoot: privateRoot.appendingPathComponent("DFlash"),
+                manifest: LESAccelerationBenchmark.draftManifest, cancellationRequested: { control.shouldAbort() })
+        } else { draft = nil }
+        // Preserve the existing independent original-weight gate. The new
+        // accelerator is never admitted to the shared chat/API owner here.
+        let baseline = try prepareChat(modelsRoot: modelsRoot, privateRoot: privateRoot, existing: nil,
+            control: control, contextProfile: context, progress: progress, onCheck: { _ in })
+        chat?.close(); chat = nil
+        guard baseline.nativeBenchmarkAdmitted, baseline.arithmeticCheck?.batchedPrefillPassed == true,
+              let artifact, let prepared else { throw LESChatPresentationError.numericalCheck }
+        return try LESAccelerationBenchmark.execute(artifact: artifact, prepared: prepared, draft: draft,
+            candidate: candidate, contextTokens: context.rawValue, control: control, progress: progress,
+            onAdmission: { self.admissions.append($0) })
+    }
     func benchmarkCache(modelsRoot: URL, privateRoot: URL, control: LESControl,
                         configuration: LESPrefillConfiguration, context: LocalContextProfile,
                         enableThinking: Bool,
@@ -444,6 +482,10 @@ final class OrnithLESAppModel {
     private(set) var prefillBenchmarkURL: URL?
     private(set) var cacheBenchmark: OrnithCacheBenchmark.Report?
     private(set) var cacheBenchmarkURL: URL?
+    private(set) var accelerationReport: LESAccelerationBenchmark.Report?
+    private(set) var accelerationReportURL: URL?
+    var accelerationCandidate: LESAccelerationBenchmark.Candidate = .flashAttention
+    private(set) var accelerationDraftPresent = false
     private(set) var batchOptimizationRows: [OrnithPrefillBenchmark.Measurement] = []
     private(set) var batchOptimizationURL: URL?
     var batchSettingsChanged: Bool { chatReady && (activeBatchConfiguration != batchConfiguration || activeContextProfile != contextProfile || activeAutomaticBatch != automaticBatch) }
@@ -862,6 +904,61 @@ final class OrnithLESAppModel {
                 status = report.cacheVerified ? "Cachetest klart · identiska svar med och utan återanvändning." :
                     "Cachetest klart · återanvändning eller svar avvek. Se rapporten."
             } catch { self.error = error.localizedDescription; status = "Cachetestet stoppades."; await worker.closeChat() }
+        }
+    }
+    func refreshAccelerationDraftPresence() {
+        accelerationDraftPresent = FileManager.default.fileExists(atPath:
+            privateRoot.appendingPathComponent("DFlash").appendingPathComponent(LESAccelerationBenchmark.draftManifest.fileName).path)
+    }
+    func downloadAccelerationDraft() {
+        guard canBenchmark, sceneIsActive else { return }
+        let flag = LESControl(), id = UUID()
+        activeID = id; control = flag; isBusy = true; chatReady = false; chatControl = nil; error = nil
+        status = "Hämtar separat DFlash-draft till privat lagring…"
+        operation = Task { [weak self] in
+            guard let self else { return }
+            defer { if activeID == id { activeID = nil; control = nil; isBusy = false; operation = nil; refreshAccelerationDraftPresence() } }
+            do {
+                try await worker.downloadAccelerationDraft(privateRoot: privateRoot, control: flag, progress: { [weak self] value in
+                    Task { @MainActor in guard let self, self.activeID == id else { return }; self.status = value }
+                })
+                status = "DFlash-filen är verifierad. Den används bara i det separata testet."
+            } catch { self.error = error.localizedDescription; status = "DFlash-hämtningen stoppades; verifierade delar kan återupptas." }
+        }
+    }
+    func startAccelerationBenchmark() {
+        guard canBenchmark, sceneIsActive else { return }
+        let flag = LESControl(), id = UUID(), candidate = accelerationCandidate, context = contextProfile
+        activeID = id; control = flag; isBusy = true; chatReady = false; chatControl = nil; error = nil
+        accelerationReport = nil; accelerationReportURL = nil
+        status = "Förbereder separat acceleratortest…"
+        operation = Task { [weak self] in
+            guard let self else { return }
+            defer { if activeID == id { activeID = nil; control = nil; isBusy = false; operation = nil } }
+            do {
+                let report = try await worker.benchmarkAcceleration(modelsRoot: modelsRoot, privateRoot: privateRoot,
+                    candidate: candidate, context: context, control: flag, progress: { [weak self] value in
+                        Task { @MainActor in guard let self, self.activeID == id else { return }; self.status = value }
+                    })
+                accelerationReport = report
+                struct Export: Encodable {
+                    let sourceRevision, appBuild, device, operatingSystem: String
+                    let timestamp: Date
+                    let report: LESAccelerationBenchmark.Report
+                    let memoryAdmissions: [LESMemoryAdmission]
+                }
+                let folder = documents.appendingPathComponent("Diagnostics")
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                let url = folder.appendingPathComponent("ornith-acceleration-" + UUID().uuidString + ".json")
+                let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]; encoder.dateEncodingStrategy = .iso8601
+                let export = Export(sourceRevision: BuildInfo.gitRevision,
+                    appBuild: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown",
+                    device: Sysctl.string("hw.machine") ?? "unknown", operatingSystem: ProcessInfo.processInfo.operatingSystemVersionString,
+                    timestamp: Date(), report: report, memoryAdmissions: await worker.memoryAdmissionReport())
+                try encoder.encode(export).write(to: url, options: .atomic); accelerationReportURL = url
+                status = report.comparable ? "Acceleratortest klart · 128 identiska token i alla fyra körningar." : "Acceleratortest klart utan godkänt jämförelseresultat."
+                if let failure = report.failure { error = failure }
+            } catch { self.error = error.localizedDescription; status = "Acceleratortestet stoppades."; await worker.closeChat() }
         }
     }
     func startBatchOptimization() {

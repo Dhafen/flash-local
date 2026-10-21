@@ -99,7 +99,8 @@ struct layer_trace {
     }
 };
 static output evaluate(int fd, const char * dir, bool metal, int depth, int steps, int cache = 8, int prefill = 0,
-                       bool trace_layers = false, bool trace_routing = true, int physical = 4, int evaluation = 4) {
+                       bool trace_layers = false, bool trace_routing = true, int physical = 4, int evaluation = 4,
+                       bool flash_attention = false) {
     if (trace_layers && prefill) throw std::runtime_error("Layer controls use single-token forwards");
     layer_trace trace;
     flo_options options{};
@@ -107,6 +108,7 @@ static output evaluate(int fd, const char * dir, bool metal, int depth, int step
     options.cache_slots_per_layer = cache;
     options.lookahead_depth = depth; options.io_threads = 2; options.cpu_threads = 2;
     options.metal = metal; options.trace_routing = trace_routing; options.memory_ceiling_bytes = 5500000000ULL;
+    options.flash_attention = flash_attention;
     if (trace_layers) { options.checkpoint = layer_trace::capture; options.checkpoint_user = &trace; }
     flo_context * context = flo_open(fd, dir, options, nullptr, nullptr);
     if (!context) throw std::runtime_error(flo_last_error());
@@ -126,6 +128,7 @@ static output evaluate(int fd, const char * dir, bool metal, int depth, int step
             first += count; out.positions.push_back(first - 1);
         }
         out.metrics = flo_snapshot(context);
+        if (out.metrics.flash_attention_active != flash_attention) throw std::runtime_error("Requested attention graph was not used");
         if (trace_routing && !out.metrics.routing_decisions) throw std::runtime_error("Routing trace was not executed");
         if (!trace_routing && !trace_layers && (out.metrics.routing_decisions || out.metrics.canonical_routing_digest || out.metrics.canonical_expert_set_digest ||
                 out.metrics.probe_samples)) throw std::runtime_error("Callback-free execution unexpectedly observed tensors");
@@ -224,6 +227,31 @@ int main(int argc, char ** argv) {
                 flo_reset(context);
                 decode(prefix, 4, expected); decode(new_suffix, 2, expected);
                 if (actual != expected) throw std::runtime_error("Restored hybrid state differs from fresh exact-prefix replay");
+                // Exercise all accepted-prefix lengths against actual hybrid
+                // GDN/conv + attention state, without a trained draft model.
+                flo_reset(context); decode(prefix, 4, actual);
+                std::vector<int32_t> greedy;
+                std::vector<std::vector<float>> rows;
+                for (int i = 0; i < 5; ++i) {
+                    const int32_t id = int32_t(std::max_element(actual.begin(), actual.end()) - actual.begin());
+                    greedy.push_back(id); decode(&greedy.back(), 1, actual); rows.push_back(actual);
+                }
+                for (int rejected = 1; rejected <= 4; ++rejected) {
+                    flo_reset(context); decode(prefix, 4, actual);
+                    std::vector<int32_t> block(greedy.begin(), greedy.begin() + 4);
+                    if (rejected < 4) block[rejected] = (block[rejected] + 1) % int32_t(actual.size());
+                    const int accepted = flo_verify_greedy(context, block.data(), 4, actual.data(), int32_t(actual.size()));
+                    if (accepted != rejected) throw std::runtime_error("Wrong greedy accepted prefix");
+                    for (size_t i = 0; i < actual.size(); ++i)
+                        if (std::abs(actual[i] - rows[accepted - 1][i]) > 1e-6)
+                            throw std::runtime_error("Speculative rollback differs from ordinary target logits");
+                    decode(&greedy[accepted], 1, actual);
+                    for (size_t i = 0; i < actual.size(); ++i)
+                        if (std::abs(actual[i] - rows[accepted][i]) > 1e-6)
+                            throw std::runtime_error("Continuation after speculative rollback differs");
+                }
+                std::cout << "ORNITH_GREEDY_ROLLBACK branches=4 fullVocabulary=true recurrentAndAttention=true continuation=true trainedDraft=false\n";
+                flo_reset(context);
                 // Reset invalidates the snapshot rather than resurrecting history.
                 if (flo_restore_prefix(context) == 0) throw std::runtime_error("Cleared chat restored a stale snapshot");
             } catch (...) { flo_close(context); throw; }
@@ -259,6 +287,9 @@ int main(int argc, char ** argv) {
         const auto streamed = evaluate(fd, dir.c_str(), false, 0, steps);
         const auto ahead = evaluate(fd, dir.c_str(), false, 2, steps);
         const auto page = evaluate(fd, dir.c_str(), false, 0, steps, 0);
+        const auto flash = evaluate(fd, dir.c_str(), false, 0, steps, 0, 0, false, false, 4, 4, true);
+        const double flash_error = compare(cpu, flash, false);
+        if (flash_error > 1e-4) throw std::runtime_error("CPU Flash Attention control changed logits");
         const double error = std::max({compare(cpu, streamed), compare(cpu, ahead), compare(cpu, page)});
         if (error > 1e-6 || !ahead.metrics.io_calls || !ahead.metrics.io_bytes)
             throw std::runtime_error("LES correctness/instrumentation gate failed");
@@ -305,6 +336,8 @@ int main(int argc, char ** argv) {
         json report{{"syntheticOnly", true}, {"physicalPhone", false}, {"revision", flo_revision()},
             {"residentCPUReference", true}, {"cpuStreamingMaximumAbsoluteError", error},
             {"recurrentOnlyPrefixCheckpointBitwiseReplay", true}, {"prefixCheckpointBytes", prefix_bytes},
+            {"greedyBlockRollbackBranches", 4}, {"trainedDFlashGraphExecuted", false},
+            {"cpuFlashAttentionMaximumAbsoluteError", flash_error}, {"phoneFlashAttentionExecuted", false},
             {"extendedLogicalBatchControls", extended_variants}, {"logicalBatchLimit", 2048},
             {"metalExecutionVerified", false}, {"actualRoutingIdentical", true},
             {"invalidLookaheadRejected", true},

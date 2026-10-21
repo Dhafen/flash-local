@@ -1,7 +1,11 @@
 # Ornith DFlash evaluation
 
-Source inspection: 2026-10-21. **No draft weights downloaded, no DFlash model
-inference executed and no phone speedup measured. DFlash is not enabled.**
+Initial source inspection: 2026-10-21. **No DFlash model inference executed
+and no phone speedup measured. DFlash is not enabled in chat or the API.**
+An [isolated benchmark](ORNITH-ACCELERATION-TEST.md) is now implemented for
+build/test validation. Initial Safetensors inspection fetched only its header.
+Later community-GGUF inspection fetched an 11,007,328-byte bounded prefix,
+including 60,416 tensor bytes; no complete draft or target was downloaded.
 The installed 21,713,463,040-byte Q4_K_M GGUF and existing app remain unchanged.
 Target SHA256: `42739874cc2ccfdb8523b23fbe52e29b2a7555c8176737ca9ca0b5d59859d41f`.
 

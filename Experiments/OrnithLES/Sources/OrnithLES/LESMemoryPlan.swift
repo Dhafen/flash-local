@@ -12,6 +12,7 @@ public struct LESMemoryPlan: Codable, Sendable, Equatable {
     public let kvBytes: UInt64
     public let ssmBytes: UInt64
     public let runtimeReserveBytes: UInt64
+    public let experimentReserveBytes: UInt64?
     public let batchScratchReserveBytes: UInt64?
     public let prefillSlots: Int
     public let cacheSlotsPerLayer: Int
@@ -24,11 +25,12 @@ public struct LESMemoryPlan: Codable, Sendable, Equatable {
 
     public init(index: GGUFIndex, contextTokens: Int, footprint: ProcessFootprint,
                 lookaheadDepth: Int = 4, pageCacheOnly: Bool = false,
-                preferredExpertBytes: UInt64 = 2_000_000_000, physicalBatchTokens: Int = 4) throws {
+                preferredExpertBytes: UInt64 = 2_000_000_000, physicalBatchTokens: Int = 4,
+                experimentReserveBytes: UInt64 = 0) throws {
         let config = try Qwen35MoEConfig(index: index)
         guard (32...65536).contains(contextTokens), contextTokens <= config.contextLimit,
               (0...16).contains(lookaheadDepth), config.expertsPerToken <= 8,
-              [1, 4, 8, 16].contains(physicalBatchTokens) else {
+              [1, 4, 8, 16].contains(physicalBatchTokens), experimentReserveBytes <= 1_500_000_000 else {
             throw GGUFError.unsupported("LES context or scheduling geometry")
         }
         let ceiling: UInt64 = 5_500_000_000
@@ -40,6 +42,7 @@ public struct LESMemoryPlan: Codable, Sendable, Equatable {
         baselineAvailableBytes = footprint.availableBytes
         self.contextTokens = contextTokens
         requestedLookaheadDepth = pageCacheOnly ? 0 : min(lookaheadDepth, config.experts)
+        self.experimentReserveBytes = experimentReserveBytes
         // A microbatch may choose eight different experts for every token.
         // Budget the complete union before increasing graph dimensions.
         let stagingSlots = physicalBatchTokens * 8
@@ -74,7 +77,7 @@ public struct LESMemoryPlan: Codable, Sendable, Equatable {
         batchScratchReserveBytes = extraScratch
         // One bounded recurrent-only prompt checkpoint; attention KV is retained
         // in place. Do not consume the existing 128 MiB emergency stop margin.
-        runtimeReserveBytes = (1 << 30) + (128 << 20) + (pageCacheOnly ? (128 << 20) : 0) + extraScratch
+        runtimeReserveBytes = (1 << 30) + (128 << 20) + (pageCacheOnly ? (128 << 20) : 0) + extraScratch + experimentReserveBytes
         let fixed = baselineFootprintBytes + denseBytes + kvBytes + ssmBytes + runtimeReserveBytes
         let staging = groups.values.reduce(UInt64(0)) { $0 + $1.bytes * UInt64(stagingSlots) }
         let perSlot = groups.values.reduce(UInt64(0)) { $0 + $1.bytes * $1.layers }

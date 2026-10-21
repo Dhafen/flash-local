@@ -24,12 +24,18 @@ typedef struct {
     uint64_t canonical_expert_set_digest;
     uint64_t configured_physical_batch_tokens, maximum_physical_batch_tokens;
     uint64_t skipped_intermediate_output_batches;
+    uint64_t target_tokens_evaluated, dflash_blocks, dflash_proposals, dflash_accepted, dflash_replays;
+    uint64_t dflash_feature_peak_bytes;
+    bool flash_attention_active;
 } flo_metrics;
 typedef struct {
     int32_t context_tokens, prefill_slots, cache_slots_per_layer;
     int32_t lookahead_depth, io_threads, cpu_threads;
     bool metal, bypass_page_cache, trace_routing;
     uint64_t memory_ceiling_bytes;
+    // Experimental benchmark contexts only. Ordinary chat defaults stay zero.
+    uint64_t additional_reserve_bytes;
+    bool flash_attention, experimental_dflash;
     // Opt-in fixed-test checkpoints; stage IDs match FlashLlamaReference.h.
     // Borrowed values live only during the callback. Never enabled for timing.
     flo_checkpoint checkpoint;
@@ -51,6 +57,15 @@ void flo_reset(flo_context *);
 // trimmed on restore. No model weights or full-context KV copy is made.
 uint64_t flo_capture_prefix(flo_context *);
 int flo_restore_prefix(flo_context *);
+// Benchmark-only greedy block verification. Reuses the sole recurrent snapshot;
+// must not be combined with a live conversation checkpoint. Returns committed
+// anchor + matching proposals; rejected suffix never escapes. Restores GDN/conv
+// and attention state before returning on rejection.
+int flo_verify_greedy(flo_context *, const int32_t * block, int32_t count,
+                      float * next_logits, int32_t vocabulary);
+int flo_attach_dflash(flo_context *, int verified_draft_fd);
+int flo_dflash_step(flo_context *, float * current_logits, int32_t vocabulary,
+                    int32_t * committed_tokens, int32_t maximum_tokens);
 flo_metrics flo_snapshot(const flo_context *);
 const char * flo_last_error(void);
 const char * flo_revision(void);

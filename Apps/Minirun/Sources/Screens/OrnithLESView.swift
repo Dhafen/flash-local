@@ -200,6 +200,7 @@ struct OrnithLESChatPage: View {
                     .font(.caption2).foregroundStyle(.secondary)
             }
             if let url = model.chatMeasurementURL { ShareLink("Dela chattmätning", item: url) }
+            OrnithAccelerationControls(model: model)
             DisclosureGroup("Kontrollera KV- och prefixcache") {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Tre riktiga körningar: första turen, följdfråga med varm kontext, sedan samma följdfråga med nollställd kontext. Fasta testprompter och 64 tänktoken; din chatt behålls. OS-filcachen är okontrollerad. Motorn behöver laddas efter testet.")
@@ -220,6 +221,56 @@ struct OrnithLESChatPage: View {
             Text("OS-filcache ingår inte i det redovisade appminnet. Återläsningar kan komma från cachen.")
                 .font(.caption2).foregroundStyle(.secondary)
         }
+    }
+}
+
+struct OrnithAccelerationControls: View {
+    @Bindable var model: OrnithLESAppModel
+    @State private var expanded: Bool
+    init(model: OrnithLESAppModel, expanded: Bool = false) {
+        self.model = model; self._expanded = State(initialValue: expanded)
+    }
+    var body: some View {
+        DisclosureGroup("Prova Flash Attention och DFlash", isExpanded: $expanded) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Separat experiment · din vanliga chatt och API-motor behålls")
+                    .font(.headline)
+                Picker("Testmotor", selection: $model.accelerationCandidate) {
+                    Text("Flash Attention").tag(LESAccelerationBenchmark.Candidate.flashAttention)
+                    Text("DFlash").tag(LESAccelerationBenchmark.Candidate.dflash)
+                }.pickerStyle(.segmented).disabled(!model.canBenchmark)
+                Text("Valt kontextfönster: \(model.contextProfile.rawValue.formatted()) token. Testet använder en kort fast prompt; det verifierar inte hela kontextfönstrets kvalitet.")
+                if model.accelerationCandidate == .dflash {
+                    Text("Kräver en separat BF16-draft på 783 MB. GGUF-konvertering från na0x2c6 av Orniths officiella draft; SHA256 verifieras före körning. Ingen ny huvudmodell behövs.")
+                    Button(model.accelerationDraftPresent ? "Verifiera hämtad DFlash-draft" : "Hämta DFlash-draft · 783 MB") {
+                        model.downloadAccelerationDraft()
+                    }.buttonStyle(.bordered).disabled(!model.canBenchmark)
+                    Text("DFlash testas med greedy sampling och högst fyra positioner per block. Den delar modellens embedding/output, men har egen KV-cache. Endast huvudmodellens verifierade tokens räknas.")
+                    if model.contextProfile.rawValue > 32768 {
+                        Text("Välj 8K, 16K eller 32K under Promptinläsning och batch. 65K stöds inte i detta DFlash-test.")
+                            .foregroundStyle(.red)
+                    }
+                } else {
+                    Text("Aktiverar Flash Attention i en separat modellkontext. Ingen extra modellfil hämtas. Motorn måste klara samma logit- och expertkontroll.")
+                }
+                Text("Fyra körningar: vanlig motor, testmotor, testmotor, vanlig motor. Fyra logitpositioner och expertval kontrolleras före varje mätning. Minst 128 identiska token krävs per körning. RAM, I/O, GPU-tid och termiskt tillstånd sparas. OS-cachen är okontrollerad.")
+                Button("Kör kontroll och jämförelse") { model.startAccelerationBenchmark() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!model.canBenchmark || (model.accelerationCandidate == .dflash &&
+                        (!model.accelerationDraftPresent || model.contextProfile.rawValue > 32768)))
+                Text("Håll appen öppen. Stoppa-knappen avbryter testet. Chatthistoriken behålls; ladda modellen igen efter testet. Inget testresultat aktiverar automatiskt en ny chattmotor.")
+                if let report = model.accelerationReport {
+                    Text(report.comparable ? "Jämförbara körningar · samma 128 token" : "Inte godkänt som jämförbart hastighetsresultat")
+                        .foregroundStyle(report.comparable ? Color.green : Color.orange)
+                    ForEach(report.runs) { run in
+                        Text(String(format: "%d · %@ · %.2f token/s · RAM %.2f GB", run.number + 1, run.mode,
+                            run.decodeTokensPerSecond ?? 0, Double(run.peakFootprintBytes) / 1e9))
+                    }
+                    if let failure = report.failure { Text(failure).foregroundStyle(.red) }
+                }
+                if let url = model.accelerationReportURL { ShareLink("Dela acceleratortest", item: url) }
+            }.font(.caption).padding(.top, 8)
+        }.onAppear { model.refreshAccelerationDraftPresence() }
     }
 }
 

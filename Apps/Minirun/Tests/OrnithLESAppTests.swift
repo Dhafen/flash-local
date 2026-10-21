@@ -11,6 +11,16 @@ import AppKit
 
 @MainActor
 final class OrnithLESAppTests: XCTestCase {
+    func testAccelerationPreviewCannotDownloadInferOrReplaceChat() {
+        let model = OrnithLESAppModel.reviewChatPreview(thinking: true)
+        let history = model.chatMessages.map(\.id)
+        model.accelerationCandidate = .dflash
+        model.downloadAccelerationDraft(); model.startAccelerationBenchmark()
+        XCTAssertFalse(model.isBusy); XCTAssertTrue(model.chatReady)
+        XCTAssertEqual(model.chatMessages.map(\.id), history)
+        XCTAssertNil(model.accelerationReport); XCTAssertNil(model.accelerationReportURL)
+        XCTAssertFalse(model.isAPIRunning)
+    }
     func testPausedListenerKeepsControlsLockedAndDoesNotClaimReadyServer() {
         let model = OrnithLESAppModel.reviewPausedAPIPreview()
         XCTAssertTrue(model.isAPIListening); XCTAssertFalse(model.isAPIRunning)

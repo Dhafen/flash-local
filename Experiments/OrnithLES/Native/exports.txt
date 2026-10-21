@@ -6,6 +6,9 @@ _flo_decode
 _flo_reset
 _flo_capture_prefix
 _flo_restore_prefix
+_flo_verify_greedy
+_flo_attach_dflash
+_flo_dflash_step
 _flo_snapshot
 _flo_last_error
 _flo_revision
