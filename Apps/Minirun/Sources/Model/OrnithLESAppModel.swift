@@ -100,8 +100,12 @@ private actor LESAppWorker {
     func closeChat() { chat?.close(); chat = nil }
     private func admissionIdentity(_ artifact: VerifiedGGUFArtifact, _ prepared: URL) throws -> [String: String] {
         try artifact.assertUnchanged()
+        guard let executable = Bundle.main.executableURL else { throw LESChatPresentationError.notReady }
         return ["model": artifact.manifest.sha256, "native": LESContext.revision,
             "reference": Qwen4ExpCPUReference.sourceRevision, "source": BuildInfo.gitRevision,
+            // Also bind the actual executable: a developer can rebuild a dirty
+            // checkout without changing either its commit label or build number.
+            "executable": try FileDigestComputer.digest(ofFileAt: executable, algorithm: .sha256).hex,
             "build": Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown",
             "device": Sysctl.string("hw.machine") ?? "unknown",
             "os": ProcessInfo.processInfo.operatingSystemVersionString,

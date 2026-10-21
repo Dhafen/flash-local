@@ -33,7 +33,7 @@ final class LocalModelAPITests: XCTestCase {
         XCTAssertNil(LocalSamplingInput.decimal("0", minimum: 0, maximum: 1, excludingMinimum: true))
     }
     func testNumericalAdmissionSealRejectsTamperingWrongDeviceKeyOrAnyIdentityChange() throws {
-        let identity = ["model": "sha", "source": "commit", "build": "1", "native": "runtime", "reference": "cpu",
+        let identity = ["model": "sha", "source": "commit", "build": "1", "executable": "binary", "native": "runtime", "reference": "cpu",
             "prepared": "digest", "device": "phone", "os": "version"]
         let payload = Data("synthetic admission only; no model loaded".utf8)
         let sealed = try LocalAdmissionSeal.seal(payload, identity: identity, key: key)

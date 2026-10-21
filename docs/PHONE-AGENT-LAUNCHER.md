@@ -12,7 +12,7 @@ an experimental 65K profile is not evidence that long context works.
 Temperature, top-p and seed now survive reopening the screen and changing a
 reasoning preset. Decimal entry accepts comma or point. After the first passed
 CPU comparison, normal activation may reuse a private device-key-authenticated
-receipt for the exact app build/source, native/reference revisions, model,
+receipt for the exact app executable/build/source, native/reference revisions, model,
 prepared-file seal, device and OS. Model and prepared-file integrity checks
 remain. A changed identity, invalid receipt or unavailable keychain performs a
 fresh comparison. Explicit comparison tests always run again. Reports include
