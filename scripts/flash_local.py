@@ -76,7 +76,7 @@ def opencode_configuration(client, live):
 def run_opencode(client, live, project=None):
     executable = shutil.which('opencode')
     if executable is None:
-        raise ValueError('OpenCode is not installed. Install its official CLI: https://opencode.ai/docs/')
+        raise ClientSetupError('OpenCode is not installed. Install its official CLI: https://opencode.ai/docs/')
     config = opencode_configuration(client, live)
     env = dict(os.environ)
     env['FLASH_LOCAL_API_KEY'] = client.key

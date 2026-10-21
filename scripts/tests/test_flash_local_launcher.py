@@ -20,6 +20,11 @@ KEY = 'public-fixture-key-' * 3
 
 
 class LauncherTests(unittest.TestCase):
+    def test_missing_opencode_reports_the_actual_installation_requirement(self):
+        with patch('flash_local.shutil.which', return_value=None):
+            with self.assertRaisesRegex(launcher.ClientSetupError, 'OpenCode is not installed'):
+                launcher.run_opencode(None, self.live())
+
     def live(self):
         return {'model': MODEL, 'context': 16384, 'output': 4096,
                 'capabilities': {'context_capacity_tokens': 16384, 'max_output_tokens': 4096}}
