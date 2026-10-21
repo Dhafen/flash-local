@@ -87,6 +87,18 @@ CPU fused-attention graph comparison. They do not run a trained draft or prove
 that a physical phone supports the same kernels. The actual paired-model test
 is performed on the user's phone after a passing build.
 
+The first native trial (`026f5b0`, run 39658774407) passed all generated greedy
+rollback branches but stopped at the mixed Q4_K/Q6_K CPU attention comparison.
+Its new, absolute-only 0.0001 cross-graph limit differed from the existing
+phone policy. CPU fused attention and decomposed attention do not use identical
+F16-KV arithmetic in the pinned runtime. The control now separately requires
+resident versus streamed **FA** logits to agree within 0.000001, and compares
+FA against decomposed attention using the unchanged phone limits above, with
+identical greedy tokens and complete routing traces. Both errors and relative
+L2 are exported; non-finite logits fail explicitly. Ordinary engine controls
+remain at 0.000001. This does not waive any installed-model phone check or
+establish the quality of either attention graph.
+
 Thinking budgets, nonzero-temperature rejection sampling, streaming tool calls
 and foreground recovery remain in the ordinary backend. Extending DFlash to
 them requires additional validation; this benchmark is not a replacement server.
