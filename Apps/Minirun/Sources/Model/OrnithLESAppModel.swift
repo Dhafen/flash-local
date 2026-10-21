@@ -256,7 +256,7 @@ private actor LESAppWorker {
     }
     func prefillAdmission() -> LESPrefillCheck? { prefillCheck }
     func downloadAccelerationDraft(privateRoot: URL, control: LESControl,
-                                   progress: @Sendable (String) -> Void) async throws {
+                                   progress: @escaping @Sendable (String) -> Void) async throws {
         chat?.close(); chat = nil
         let root = privateRoot.appendingPathComponent("DFlash", isDirectory: true)
         try LocalModelStorage.prepare(root: root)
