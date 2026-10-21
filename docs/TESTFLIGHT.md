@@ -1,20 +1,29 @@
 # Private internal TestFlight delivery
 
-## Current build 180: structured agent API
+## Current build 206: persistent settings and live agent commands
 
-Private **0.1.0 (180)** is independently confirmed available to the unchanged
-own-tester group, source `e8d25318510262568b3b81fbc8100e36751ee383`.
-[Delivery and verified gates](SECURITY-AI-SERVER.md#delivered-checkpoint-010-180)
-include native LES/QPack, 585 app controls, 487 package controls (nine skips),
-22 real TCP/Keychain API controls, iOS compilation, 64 reviewed captures,
+Private **0.1.0 (206)** is independently confirmed available to the unchanged
+own-tester group, source `73e5ed611f6dcb8d4c3e695ef701c8db3c5b2e98`.
+[Delivery and verified gates](SECURITY-AI-SERVER.md#delivered-checkpoint-010-206)
+include native LES/QPack, 588 app controls, 492 package controls (nine skips),
+27 real TCP/Keychain API controls, iOS compilation, 76 reviewed captures,
 archive inspection and Apple signing. Protocol generation controls are synthetic.
+
+Temperature, top-p and seed persist across reopening/reasoning-mode changes.
+The API page has copyable live-address commands for OpenCode, Codex, Hermes
+and PentAGI, with prerequisites and explicit client limitations. The first
+startup comparison in this version remains mandatory; subsequent unchanged
+activations may reuse a device-authenticated admission. File integrity and
+current memory checks remain. Duplicate hidden model verification is removed.
+[Connection and acceptance steps](PHONE-AGENT-LAUNCHER.md).
 
 The API supports declared function calls, matched tool results, JSON/SSE and a
 configurable Keychain credential. The first real iPhone/Kali round trip still
 needs the [physical acceptance test](SECURITY-AI-SERVER.md#first-phone-acceptance-test).
 The 8,192-token configured limit is not proof of trained 8K reliability.
-Keep the installed app/model. The subsequent Markdown display fix has not yet
-been delivered.
+Keep the installed app/model and update without reinstalling. Markdown display
+corrections are included. Startup improvement, physical client interoperability
+and trained tool-call quality need the phone acceptance report.
 
 ## Previous build 126: prompt batches and work profiles
 

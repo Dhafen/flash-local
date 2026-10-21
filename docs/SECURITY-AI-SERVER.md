@@ -26,18 +26,34 @@ the client fixture keeps its different key order. Runtime code, model mathematic
 and delivery configuration are unchanged. The repaired [delivery 180](https://github.com/Dhafen/flash-local/actions/runs/39481746775)
 passes all full-app gates and independent Apple availability verification.
 
-## Delivered checkpoint: 0.1.0 (185)
+## Delivered checkpoint: 0.1.0 (206)
 
-[Build 185](https://github.com/Dhafen/flash-local/actions/runs/39574507501),
-app source `ebd97a99665d6b6c5affd7324754c94ff7a5e990`, passes LES/QPack,
-585 app, 488 package (nine environment skips), 321 streaming and 18 reference
-controls, including 23 actual TCP/Keychain API functions and 38 native Swift
-controls. All 64 actual host/Simulator captures were reviewed in both
+[Build 206](https://github.com/Dhafen/flash-local/actions/runs/39607872384),
+app source `73e5ed611f6dcb8d4c3e695ef701c8db3c5b2e98`, passes LES/QPack,
+588 app, 492 package (nine environment skips), 321 streaming and 18 reference
+controls, including 27 actual TCP/Keychain API functions and 38 native Swift
+controls. All 76 actual host/Simulator captures were reviewed in both
 appearances. Narrow macOS control previews elide some explanatory copy;
 iPhone controls/help are visible. Archive, signature and source-bound upload
 pass. Independent Apple verification confirms `VALID`, `INTERNAL_ONLY`,
 `IN_BETA_TESTING`, nonexpired, with the unchanged private group and sole owner.
-IPA SHA256: `dfe16c0a2a3eef8ffe452379120461bd05bea2eb9d1ee7f473f0780c5825bda5`.
+IPA SHA256: `815a4768b5d1b36938718bfa593605f9efa6528a471030de727e1a43ebdf9a8a`.
+
+This update preserves sampling across app reopening/reasoning-mode changes,
+adds live-address client commands in the API screen and reuses only a private
+authenticated startup admission for the exact executable and model identity.
+Integrity and current memory checks remain; explicit comparisons always rerun.
+The inactive legacy root no longer performs duplicate model verification.
+The active owner still creates/protects the model directory on first install.
+Actual startup timing and physical phone client acceptance are pending.
+
+PR check [201](https://github.com/Dhafen/flash-local/actions/runs/39598293901)
+failed because concurrent Swift Testing progress split one KV-probe log marker
+from its payload. All three actual probe cases passed. The performance workflow
+now checks the exact three successful payloads independently of line
+interleaving, still requiring all equality flags, the three-case test result
+and `TEST SUCCEEDED`. Regression controls reject missing, duplicate, false or
+failed probes. Main delivery, signing and TestFlight configuration are unchanged.
 
 Client tools at `fe0a106` pass 125 Python controls. Installed OpenCode 1.19.3
 and Codex 0.160.0 complete text and actual owned file/echo-tool round trips

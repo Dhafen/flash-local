@@ -11,12 +11,19 @@ adds validated OpenAI function calls and matched tool-result history using the
 installed Ornith GGUF's original template, configurable device-Keychain API
 credentials, native API measurements and a scoped Kali client. Native LES,
 QPack, app/package tests, iOS builds, signing and private delivery pass.
-The latest independently confirmed private delivery is **0.1.0 (185)**,
-app source `ebd97a99665d6b6c5affd7324754c94ff7a5e990`,
-[delivery run](https://github.com/Dhafen/flash-local/actions/runs/39574507501).
+The latest independently confirmed private delivery is **0.1.0 (206)**,
+app source `73e5ed611f6dcb8d4c3e695ef701c8db3c5b2e98`,
+[delivery run](https://github.com/Dhafen/flash-local/actions/runs/39607872384).
 Actual phone tool-call round trips and LAN interoperability remain unverified.
 Existing inference backends and installed data remain. Assistant answers now
-render Markdown. All 64 host/Simulator captures were reviewed in light/dark.
+render Markdown. All 76 host/Simulator captures were reviewed in light/dark.
+Temperature, top-p and seed survive reopening and reasoning-mode changes.
+API controls generate client commands using the live phone address and model.
+An authenticated, executable-bound admission can reuse a prior passed startup
+comparison; file-integrity and current memory checks remain. The inactive
+legacy owner no longer verifies the same model in parallel. First activation
+after an app update still performs a fresh comparison. Phone startup timings
+for this change remain unmeasured.
 8,192 total context tokens remain the default; memory-admitted 16K/32K/65K
 profiles are experimental, with no trained long-context success claim.
 [Agent start scripts and acceptance tests](docs/PHONE-AGENT-LAUNCHER.md) support

@@ -1,6 +1,6 @@
 # Connect agent clients to the iPhone
 
-The next app update adds **API → Koppla datorn till telefonen**. Choose the
+Private TestFlight **0.1.0 (206)** adds **API → Koppla datorn till telefonen**. Choose the
 client and computer OS, copy the one-time helper installation, then copy its
 start command. The phone fills in its live LAN address, port and model ID.
 Enter the API key only at the computer's hidden prompt. No key is embedded in
@@ -19,9 +19,20 @@ fresh comparison. Explicit comparison tests always run again. Reports include
 `startupAdmissionReused` and actual `activationSeconds`; startup improvements
 still require a phone measurement. No model mathematics or routing changed.
 
-App support is delivered in private TestFlight **0.1.0 (185)**. Update without
+App support is delivered in private TestFlight **0.1.0 (206)**. Update without
 uninstalling or downloading the GGUF again. Real phone client/quality/context
 acceptance is still required; transport controls are not model benchmarks.
+
+For the first acceptance check, wait until activation finishes and stop the
+API before editing generation defaults. Set temperature to `0.7` (or `0,7`),
+change reasoning mode, then close and reopen the app. The value should remain.
+Complete the first activation in this version, close/reopen and activate again;
+save the chat measurement to inspect `startupAdmissionReused` and
+`activationSeconds`. A changed OS/app/model identity requires a fresh check.
+The API connection card appears after the server starts: choose OpenCode or
+Codex and the computer OS, run the one-time helper installation, then the
+copied start command. Supply the separately copied key at its hidden prompt.
+Keep both devices on the same trusted LAN and the phone app foreground.
 
 Python 3.11+ is required. The phone performs all model inference; the computer
 runs the selected client and its tools. No weights are downloaded to the
