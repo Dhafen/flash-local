@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+import StorageCore
 @testable import OrnithLES
 
 final class LESAccelerationJournalTests: XCTestCase {
