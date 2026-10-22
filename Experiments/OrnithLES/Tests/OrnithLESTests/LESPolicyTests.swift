@@ -194,8 +194,8 @@ final class LESPolicyTests: XCTestCase {
         XCTAssertEqual(LESAccelerationBenchmark.draftManifest.fileByteCount, 782_819_680)
         XCTAssertEqual(LESAccelerationBenchmark.draftManifest.sha256,
             "abb048837823d068b71cea4d162076e5e2be62f504dc79bf08ac80d78c8bb732")
-        XCTAssertEqual(try LESAccelerationBenchmark.additionalMemory(context: 32768, candidate: .dflash), 1_068_032_352)
-        XCTAssertEqual(try LESAccelerationBenchmark.additionalMemory(context: 8192, candidate: .dflash), 967_369_056)
+        XCTAssertEqual(try LESAccelerationBenchmark.additionalMemory(context: 32768, candidate: .dflash), 1_073_275_232)
+        XCTAssertEqual(try LESAccelerationBenchmark.additionalMemory(context: 8192, candidate: .dflash), 972_611_936)
         XCTAssertEqual(try LESAccelerationBenchmark.additionalMemory(context: 65536, candidate: .flashAttention), 0)
         XCTAssertThrowsError(try LESAccelerationBenchmark.additionalMemory(context: 65536, candidate: .dflash))
         XCTAssertThrowsError(try LESAccelerationBenchmark.additionalMemory(context: Int.max, candidate: .dflash))

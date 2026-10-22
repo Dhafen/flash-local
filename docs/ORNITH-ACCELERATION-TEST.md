@@ -59,6 +59,37 @@ That is tokenizer metadata evidence, not draft/target inference validation.
 
 ## Correctness and measurement contract
 
+### Build-236 termination investigation
+
+The owner reports process termination at 8K during the comparison (and while
+chatting with DFlash selected). DFlash selection does not replace the chat/API
+engine; only the explicit comparison attaches a draft. No Apple crash feedback
+was available at the first read-only audit. The terminating instruction and
+OS/jetsam cause are **not yet established**.
+
+A verified allocation mismatch was found: the native draft inherited
+`swa_full=true`, while admission budgeted five sliding caches. The experiment
+now explicitly sets `swa_full=false`. Its budget matches the pinned allocator:
+`ceil(min(context, 4096 + 4) / 256) * 256` sliding cells per layer. At 8K this
+uses 4,352 rather than 8,192 sliding cells; at 32K it uses 4,352 rather than
+32,768. This does not change the model's 4,096-token sliding attention mask.
+It is a memory fix, **not proof that the reported crash is resolved**.
+
+A bounded local phase journal is committed before native allocation, feature
+fusion, KV injection, proposal, verification and rollback during controls.
+It contains phase/time and real footprint/available-memory samples, no prompt
+or token payload. After an unclean process exit, reopening exposes the last
+phase and a shareable diagnostic using the existing report action. Recovery
+reports an interrupted test and does not invent a crash cause or auto-resume.
+Timed forward loops suppress detailed journal writes to avoid disk measurement
+bias; their prefill/decode phase is recorded before each timer begins.
+
+An additional untrained BF16 six-layer draft fixture executes the actual
+encoder, injection and proposal graphs with shared target embedding/head,
+five sliding layers, one full layer, rollback and 128 greedy output checks.
+It also checks actual native cache cell allocations. This is a host control;
+it is not a trained draft benchmark or iPhone crash reproduction.
+
 - Ordinary engine → candidate → candidate → ordinary engine (ABBA), fresh
   contexts and exactly the same public prompt and greedy target sampler.
 - Before each timed run, four full-vocabulary positions are compared with the

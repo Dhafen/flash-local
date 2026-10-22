@@ -6,6 +6,9 @@ extern "C" {
 #endif
 typedef struct flo_context flo_context;
 typedef bool (*flo_abort)(void *);
+// Optional phase-only diagnostics. No tensors, token IDs or paths cross this
+// callback. False stops before the next native operation. Disabled for timing.
+typedef bool (*flo_diagnostic)(int32_t phase, void *);
 typedef bool (*flo_checkpoint)(uint32_t stage, int32_t layer, const float * values, int32_t count, void *);
 typedef struct {
     uint64_t io_bytes, io_calls, misses, selected_experts;
@@ -40,6 +43,8 @@ typedef struct {
     // Borrowed values live only during the callback. Never enabled for timing.
     flo_checkpoint checkpoint;
     void * checkpoint_user;
+    flo_diagnostic diagnostic;
+    void * diagnostic_user;
 } flo_options;
 // Input is a caller-verified open regular file, not a path that can be replaced.
 // Writes only a small dense GGUF and a manifest. Routed weights stay in input.

@@ -581,6 +581,7 @@ final class OrnithLESAppModel {
             model.automaticBatch = preferences.bool(forKey: "FlashLocal.Ornith.AutomaticBatch.v1")
         }
         model.restoreHistory()
+        model.recoverAccelerationDiagnostics()
         model.persistOptions = true
         return model
     }
@@ -929,7 +930,15 @@ final class OrnithLESAppModel {
     }
     func startAccelerationBenchmark() {
         guard canBenchmark, sceneIsActive else { return }
-        let flag = LESControl(), id = UUID(), candidate = accelerationCandidate, context = contextProfile
+        let candidate = accelerationCandidate, context = contextProfile
+        let journal: LESAccelerationJournal
+        do {
+            journal = try LESAccelerationJournal(directory: documents.appendingPathComponent("Diagnostics"),
+                sourceRevision: BuildInfo.gitRevision,
+                appBuild: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown",
+                candidate: candidate, contextTokens: context.rawValue)
+        } catch { self.error = error.localizedDescription; status = "Kan inte spara diagnostik; testet startades inte."; return }
+        let flag = LESControl(journal: journal), id = UUID()
         activeID = id; control = flag; isBusy = true; chatReady = false; chatControl = nil; error = nil
         accelerationReport = nil; accelerationReportURL = nil
         status = "Förbereder separat acceleratortest…"
@@ -957,10 +966,26 @@ final class OrnithLESAppModel {
                     device: Sysctl.string("hw.machine") ?? "unknown", operatingSystem: ProcessInfo.processInfo.operatingSystemVersionString,
                     timestamp: Date(), report: report, memoryAdmissions: await worker.memoryAdmissionReport())
                 try encoder.encode(export).write(to: url, options: .atomic); accelerationReportURL = url
+                try journal.finish(failed: report.failure != nil)
                 status = report.comparable ? "Acceleratortest klart · 128 identiska token i alla fyra körningar." : "Acceleratortest klart utan godkänt jämförelseresultat."
                 if let failure = report.failure { error = failure }
-            } catch { self.error = error.localizedDescription; status = "Acceleratortestet stoppades."; await worker.closeChat() }
+            } catch {
+                self.error = error.localizedDescription; status = "Acceleratortestet stoppades."
+                await worker.closeChat()
+                try? journal.finish(failed: true)
+                accelerationReportURL = journal.url
+            }
         }
+    }
+    func recoverAccelerationDiagnostics() {
+        guard !isPreview, !isBusy else { return }
+        let folder = documents.appendingPathComponent("Diagnostics")
+        do {
+            guard let value = try LESAccelerationJournal.recoverInterrupted(directory: folder) else { return }
+            accelerationReportURL = folder.appendingPathComponent("ornith-acceleration-journal.json")
+            status = "Föregående acceleratortest avslutades oväntat."
+            error = "Senast sparade fas: \(value.lastPhase ?? "okänd"). Orsaken är inte fastställd. Dela acceleratortestets diagnostik; vanlig chatt kan laddas som tidigare."
+        } catch { /* A damaged diagnostic file must never block ordinary chat. */ }
     }
     func startBatchOptimization() {
         guard canBenchmark, sceneIsActive else { return }

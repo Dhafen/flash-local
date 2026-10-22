@@ -10,7 +10,18 @@ public final class LESControl: @unchecked Sendable {
     private let lock = NSLock()
     private var cancelled = false
     private var observedPeak: UInt64 = 0
-    public init() {}
+    private var nativeDiagnosticsEnabled = true
+    private let journal: LESAccelerationJournal?
+    public init(journal: LESAccelerationJournal? = nil) { self.journal = journal }
+    fileprivate var hasDiagnosticJournal: Bool { journal != nil }
+    public func setNativeDiagnosticsEnabled(_ enabled: Bool) {
+        lock.lock(); nativeDiagnosticsEnabled = enabled; lock.unlock()
+    }
+    public func recordDiagnosticPhase(_ phase: String) throws { try journal?.record(phase) }
+    func recordNativePhase(_ phase: Int32) -> Bool {
+        lock.lock(); let enabled = nativeDiagnosticsEnabled; lock.unlock()
+        return !enabled || journal?.recordNativePhase(phase) != false
+    }
     public func cancel() { lock.lock(); cancelled = true; lock.unlock() }
     public var isCancellationRequested: Bool { lock.lock(); defer { lock.unlock() }; return cancelled }
     public var maximumObservedFootprintBytes: UInt64 { lock.lock(); defer { lock.unlock() }; return observedPeak }
@@ -119,6 +130,13 @@ public final class LESContext {
         options.memory_ceiling_bytes = plan.processCeilingBytes
         options.additional_reserve_bytes = plan.experimentReserveBytes ?? 0
         options.flash_attention = flashAttention; options.experimental_dflash = experimentalDFlash
+        if control.hasDiagnosticJournal {
+            options.diagnostic = { phase, user in
+                guard let user else { return false }
+                return Unmanaged<LESControl>.fromOpaque(user).takeUnretainedValue().recordNativePhase(phase)
+            }
+            options.diagnostic_user = Unmanaged.passUnretained(control).toOpaque()
+        }
         if let checkpoints {
             options.checkpoint = { stage, layer, values, count, user in
                 guard let user else { return false }

@@ -23,7 +23,8 @@ public enum LESAccelerationBenchmark {
         // Actual converted BF16 file, one full + five sliding F16 KV layers,
         // bounded features/logits and draft scheduler reserve. The benchmark
         // reuses the sole existing recurrent checkpoint, never the chat's.
-        return draftManifest.fileByteCount + 4096 * UInt64(context + 5 * min(context, 4096)) + (64 << 20)
+        let slidingCells = ((min(context, 4096 + 4) + 255) / 256) * 256
+        return draftManifest.fileByteCount + 4096 * UInt64(context + 5 * slidingCells) + (64 << 20)
     }
     public struct Run: Codable, Sendable, Identifiable {
         public let number: Int
@@ -128,6 +129,9 @@ public enum LESAccelerationBenchmark {
         }
         for (number, name) in ["baseline", candidate.rawValue, candidate.rawValue, "baseline"].enumerated() {
             do {
+                control.setNativeDiagnosticsEnabled(true)
+                defer { control.setNativeDiagnosticsEnabled(true) }
+                try control.recordDiagnosticPhase("run.\(number + 1).\(name).controls")
                 control.beginBenchmarkFootprintWindow()
                 let result = try autoreleasepool { () throws -> (Run, Probe) in
                     let mode: Candidate? = name == "baseline" ? nil : candidate
@@ -181,9 +185,14 @@ public enum LESAccelerationBenchmark {
                         lowPower = lowPower || ProcessInfo.processInfo.isLowPowerModeEnabled
                     }
                     try sample()
+                    // No journal writes inside the timed forward loops. Detailed
+                    // native phases were recorded during the preceding probes.
+                    control.setNativeDiagnosticsEnabled(false)
+                    try control.recordDiagnosticPhase("run.\(number + 1).\(name).timed-prefill")
                     let before = engine.metrics, started = MonotonicClock.now()
                     var logits = try prefill(engine)
                     let prefillSeconds = MonotonicClock.seconds(since: started), afterPrefill = engine.metrics
+                    try control.recordDiagnosticPhase("run.\(number + 1).\(name).timed-decode")
                     let decodeStart = MonotonicClock.now()
                     var ids: [Int] = [], firstToken: Double?, ended = false
                     while ids.count < 128 && !ended {

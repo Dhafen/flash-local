@@ -11,6 +11,20 @@ import AppKit
 
 @MainActor
 final class OrnithLESAppTests: XCTestCase {
+    func testInterruptedAccelerationRecoversDiagnosticWithoutStartingAnyEngine() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("app-acceleration-recovery-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let journal = try LESAccelerationJournal(directory: root.appendingPathComponent("Diagnostics"),
+            sourceRevision: "test-source", appBuild: "test-build", candidate: .dflash, contextTokens: 8192)
+        XCTAssertTrue(journal.recordNativePhase(13))
+        let model = OrnithLESAppModel(modelsRoot: root, privateRoot: root, documents: root)
+        model.recoverAccelerationDiagnostics()
+        XCTAssertEqual(model.accelerationReportURL, journal.url)
+        XCTAssertTrue(model.error?.contains("draft.fusion") == true)
+        XCTAssertFalse(model.isBusy); XCTAssertFalse(model.chatReady); XCTAssertFalse(model.isAPIRunning)
+        XCTAssertTrue(model.chatMessages.isEmpty)
+        XCTAssertNil(model.accelerationReport)
+    }
     func testAccelerationPreviewCannotDownloadInferOrReplaceChat() {
         for thinking in [false, true] {
             let model = OrnithLESAppModel.reviewChatPreview(thinking: thinking)

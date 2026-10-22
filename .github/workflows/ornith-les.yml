@@ -68,6 +68,14 @@ jobs:
           grep 'ORNITH_REAL_HEADER.*metadataOnly=true.*inferenceExecuted=false' .work/les-real-header.log
       - name: Generate small untrained Ornith fixture
         run: python3 scripts/make_qwen4exp_test_model.py --ornith
+      - name: Execute the actual BF16 DFlash encoder, injection and proposal graphs (untrained only)
+        run: |
+          python3 scripts/make_dflash_test_model.py
+          .work/ornith-les-macos/bin/ornith-les-dflash-control \
+            .test-fixtures/synthetic-ornith.gguf .test-fixtures/synthetic-dflash.gguf .work/les-dflash-control \
+            > .work/les-dflash-control.log 2>&1
+          tail -8 .work/les-dflash-control.log
+          grep 'ORNITH_DFLASH_GRAPH encoder=true injection=true proposals=true targetVerification=true rollback=true greedyTokens=128 slidingCells=4352 baseCells=8192 bf16=true syntheticOnly=true physicalPhone=false' .work/les-dflash-control.log
       - name: Compare resident, streamed and lookahead execution with the CPU oracle
         run: |
           .work/ornith-les-macos/bin/ornith-les-control \
@@ -176,6 +184,7 @@ jobs:
             .work/ornith-les-runtime/build-manifest.json
             .work/les-controls.log
             .work/les-allocation-controls.log
+            .work/les-dflash-control.log
             .work/les-control-f32.json
             .work/les-mixed-controls.log
             .work/les-control-mixed.json

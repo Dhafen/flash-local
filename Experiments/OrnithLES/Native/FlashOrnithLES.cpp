@@ -169,6 +169,7 @@ struct flo_draft {
     std::vector<int32_t> layers;
     std::vector<float> features;
     bool mrope = false;
+    int32_t mask_token = -1;
     ~flo_draft() {
         if (context) { llama_synchronize(context); llama_free(context); }
         if (model) llama_model_free(model);
@@ -195,6 +196,8 @@ struct flo_context {
     bool poisoned = false, routing_failed = false;
     flo_checkpoint checkpoint = nullptr;
     void * checkpoint_user = nullptr;
+    flo_diagnostic diagnostic = nullptr;
+    void * diagnostic_user = nullptr;
     flash_local_projection_probe projection_probe;
     flash_local_routing_trace routing;
     explicit flo_context() { live_contexts.fetch_add(1, std::memory_order_relaxed); }
@@ -210,6 +213,12 @@ struct flo_context {
         live_contexts.fetch_sub(1, std::memory_order_relaxed);
     }
 };
+static void diagnostic_phase(flo_context * c, int32_t phase) {
+    if (c->diagnostic) {
+        require(c->diagnostic(phase, c->diagnostic_user), "Cannot persist accelerator diagnostics");
+        check_abort(c->abort, c->user);
+    }
+}
 static void environment(const char * name, int value) {
     require(setenv(name, std::to_string(value).c_str(), 1) == 0, "Cannot configure isolated LES runtime");
 }
@@ -228,6 +237,7 @@ flo_context * flo_open(int source, const char * directory, flo_options o, flo_ab
             "DFlash benchmark needs explicit additional memory, physical batch four and at most 32K context");
         result->experimental_dflash = o.experimental_dflash;
         result->additional_reserve = o.additional_reserve_bytes; result->metal = o.metal;
+        result->diagnostic = o.diagnostic; result->diagnostic_user = o.diagnostic_user;
         require(o.lookahead_depth >= 0 && o.lookahead_depth <= 16 && o.io_threads >= 1 && o.io_threads <= 8 &&
             o.cpu_threads >= 1 && o.cpu_threads <= 8, "Invalid scheduling options");
         const bool streaming = directory && *directory;
@@ -301,6 +311,7 @@ flo_context * flo_open(int source, const char * directory, flo_options o, flo_ab
         result->model_file = fdopen(model_fd, "rb");
         if (!result->model_file) { close(model_fd); throw std::runtime_error("Cannot retain LES model stream"); }
         require(fseek(result->model_file, 0, SEEK_SET) == 0, "Cannot rewind model stream");
+        diagnostic_phase(result.get(), 1);
         result->model = llama_model_load_from_file_ptr(result->model_file, mp);
         if (!result->model) throw std::runtime_error(loader_diagnostics.describe("LES model loading failed"));
         check_abort(abort, user);
@@ -344,6 +355,7 @@ flo_context * flo_open(int source, const char * directory, flo_options o, flo_ab
                 return valid;
             };
         }
+        diagnostic_phase(result.get(), 2);
         result->context = llama_init_from_model(result->model, cp);
         if (!result->context) throw std::runtime_error(loader_diagnostics.describe("LES context allocation failed"));
         result->vocabulary = llama_vocab_n_tokens(llama_model_get_vocab(result->model));
@@ -368,6 +380,7 @@ int flo_decode(flo_context * c, const int32_t * tokens, int32_t count, float * o
             int8_t no_output[16]{};
             const bool intermediate = first + n < count;
             if (intermediate) batch.logits = no_output;
+            diagnostic_phase(c, 19);
             require(llama_decode(c->context, batch) == 0, "LES forward failed");
             c->target_tokens += n;
             if (c->draft) draft_process(c, c->position, n);
@@ -456,6 +469,6 @@ flo_metrics flo_snapshot(const flo_context * c) {
     return out;
 }
 const char * flo_last_error() { return last_error.c_str(); }
-const char * flo_revision() { return "96bbf61710d44421ea54e63f5194f9b17c20d877+flash-local-experiments-v7"; }
+const char * flo_revision() { return "96bbf61710d44421ea54e63f5194f9b17c20d877+flash-local-experiments-v8"; }
 
 #include "DFlashBenchmark.inc"
