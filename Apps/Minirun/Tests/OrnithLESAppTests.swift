@@ -12,14 +12,22 @@ import AppKit
 @MainActor
 final class OrnithLESAppTests: XCTestCase {
     func testAccelerationPreviewCannotDownloadInferOrReplaceChat() {
-        let model = OrnithLESAppModel.reviewChatPreview(thinking: true)
-        let history = model.chatMessages.map(\.id)
-        model.accelerationCandidate = .dflash
-        model.downloadAccelerationDraft(); model.startAccelerationBenchmark()
-        XCTAssertFalse(model.isBusy); XCTAssertTrue(model.chatReady)
-        XCTAssertEqual(model.chatMessages.map(\.id), history)
-        XCTAssertNil(model.accelerationReport); XCTAssertNil(model.accelerationReportURL)
-        XCTAssertFalse(model.isAPIRunning)
+        for thinking in [false, true] {
+            let model = OrnithLESAppModel.reviewChatPreview(thinking: thinking)
+            let history = model.chatMessages.map(\.id), status = model.status
+            // The active-reasoning fixture deliberately draws a busy UI. A
+            // rejected action must preserve that state, not turn it idle.
+            XCTAssertEqual(model.isBusy, thinking)
+            XCTAssertFalse(model.canBenchmark); XCTAssertFalse(model.canStart)
+            model.accelerationCandidate = .dflash
+            model.downloadAccelerationDraft(); model.startAccelerationBenchmark()
+            XCTAssertEqual(model.isBusy, thinking); XCTAssertTrue(model.chatReady)
+            XCTAssertEqual(model.status, status)
+            XCTAssertEqual(model.chatMessages.map(\.id), history)
+            XCTAssertNil(model.accelerationReport); XCTAssertNil(model.accelerationReportURL)
+            XCTAssertFalse(model.accelerationDraftPresent); XCTAssertNil(model.error)
+            XCTAssertFalse(model.isAPIRunning)
+        }
     }
     func testPausedListenerKeepsControlsLockedAndDoesNotClaimReadyServer() {
         let model = OrnithLESAppModel.reviewPausedAPIPreview()
