@@ -27,8 +27,8 @@ int main(int argc, char ** argv) {
         {
             std::unique_ptr<flo_context> reference(flo_open(source.value, prepared.c_str(), o, nullptr, nullptr));
             require(bool(reference), flo_last_error());
-            const int32_t prompt[] = {1, 2, 3, 4}; std::vector<float> logits(reference->vocabulary);
-            require(flo_decode(reference.get(), prompt, 4, logits.data(), int(logits.size())) == 0, flo_last_error());
+            const int32_t prompt[] = {1, 2, 3, 4, 1, 2, 3, 4, 1}; std::vector<float> logits(reference->vocabulary);
+            require(flo_decode(reference.get(), prompt, 9, logits.data(), int(logits.size())) == 0, flo_last_error());
             for (int i = 0; i < 128; ++i) {
                 ids.push_back(flo_argmax(logits.data(), int(logits.size())));
                 require(flo_decode(reference.get(), &ids.back(), 1, logits.data(), int(logits.size())) == 0, flo_last_error());
@@ -51,8 +51,11 @@ int main(int argc, char ** argv) {
             require(draft_kv_bytes(8192) == 122683392 && draft_kv_bytes(32768) == 223346688,
                 "Production draft KV budget differs from the padded native allocation");
             c->draft = std::move(d);
-            const int32_t prompt[] = {1, 2, 3, 4}; std::vector<float> logits(c->vocabulary);
-            require(flo_decode(c.get(), prompt, 4, logits.data(), int(logits.size())) == 0, flo_last_error());
+            const int32_t prompt[] = {1, 2, 3, 4, 1, 2, 3, 4, 1}; std::vector<float> logits(c->vocabulary);
+            require(flo_ingest(c.get(), prompt, 4) == 0 && flo_ingest(c.get(), prompt + 4, 4) == 0, flo_last_error());
+            require(flo_decode(c.get(), prompt + 8, 1, logits.data(), int(logits.size())) == 0, flo_last_error());
+            require(flo_snapshot(c.get()).state_only_prefill_tokens == 8 &&
+                flo_snapshot(c.get()).state_only_prefill_calls == 2, "Draft state-only prefill was not executed");
             size_t offset = 0;
             while (offset < ids.size()) {
                 int32_t block[4];
@@ -68,6 +71,7 @@ int main(int argc, char ** argv) {
         require(live_contexts.load() == 0, "Control leaked context ownership");
         std::cout << "ORNITH_DFLASH_GRAPH encoder=true injection=true proposals=true targetVerification=true rollback=true "
             "greedyTokens=128 slidingCells=4352 baseCells=8192 bf16=true syntheticOnly=true physicalPhone=false\n";
+        std::cout << "ORNITH_DFLASH_PREFILL stateOnlyTokens=8 ordinaryReference=true greedyTokens=128 syntheticOnly=true physicalPhone=false\n";
         return 0;
     } catch (const std::exception & e) { std::cerr << e.what() << '\n'; return 1; }
 }

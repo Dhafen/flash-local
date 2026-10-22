@@ -89,6 +89,7 @@ private actor LESAppWorker {
         var automaticConfiguration: LESPrefillConfiguration? = nil
         var automaticContextTokens: Int? = nil
         var prefixCheckpointValidated: Bool? = nil
+        var stateOnlyPrefillValidated: Bool? = nil
         var prefixCheckpointContextTokens: Int? = nil
         var prefixCheckpointConfiguration: LESPrefillConfiguration? = nil
         var automaticScore: Double? = nil
@@ -105,6 +106,7 @@ private actor LESAppWorker {
     private var automaticContextTokens: Int?
     private var effectiveConfiguration = LESPrefillConfiguration()
     private var prefixCheckpointValidated = false
+    private var stateOnlyPrefillValidated = false
     private var prefixCheckpointContextTokens: Int?
     private var prefixCheckpointConfiguration: LESPrefillConfiguration?
     private var automaticScore: Double?
@@ -114,7 +116,7 @@ private actor LESAppWorker {
     private var admissions: [LESMemoryAdmission] = []
     func memoryAdmissionReport() -> [LESMemoryAdmission] { admissions }
     func admissionWasReused() -> Bool { reusedAdmission }
-    func release() { chat?.close(); chat = nil; chatCheck = nil; prefillCheck = nil; artifact = nil; prepared = nil; prefixCheckpointValidated = false }
+    func release() { chat?.close(); chat = nil; chatCheck = nil; prefillCheck = nil; artifact = nil; prepared = nil; prefixCheckpointValidated = false; stateOnlyPrefillValidated = false }
     func resetChat() { chat?.resetConversation() }
     func closeChat() { chat?.close(); chat = nil }
     private func admissionIdentity(_ artifact: VerifiedGGUFArtifact, _ prepared: URL) throws -> [String: String] {
@@ -152,7 +154,8 @@ private actor LESAppWorker {
             let key = try LocalAPIKeyStore(service: "com.dhafen.flashlocal.ornith-admission.v1").loadOrCreate()
             let data = try LocalAdmissionSeal.seal(JSONEncoder().encode(SavedAdmission(baseline: chatCheck, prefill: prefillCheck,
                 automaticConfiguration: automaticConfiguration, automaticContextTokens: automaticContextTokens,
-                prefixCheckpointValidated: prefixCheckpointValidated, prefixCheckpointContextTokens: prefixCheckpointContextTokens,
+                prefixCheckpointValidated: prefixCheckpointValidated, stateOnlyPrefillValidated: stateOnlyPrefillValidated,
+                prefixCheckpointContextTokens: prefixCheckpointContextTokens,
                 prefixCheckpointConfiguration: prefixCheckpointConfiguration,
                 automaticScore: automaticScore, automaticPrefillCheck: automaticPrefillCheck,
                 completedBatchMeasurements: completedBatchMeasurements)),
@@ -198,6 +201,7 @@ private actor LESAppWorker {
             chatCheck = saved.baseline; prefillCheck = saved.prefill
             automaticConfiguration = saved.automaticConfiguration; automaticContextTokens = saved.automaticContextTokens
             prefixCheckpointValidated = saved.prefixCheckpointValidated == true
+            stateOnlyPrefillValidated = saved.stateOnlyPrefillValidated == true
             prefixCheckpointContextTokens = saved.prefixCheckpointContextTokens
             prefixCheckpointConfiguration = saved.prefixCheckpointConfiguration
             automaticScore = saved.automaticScore; automaticPrefillCheck = saved.automaticPrefillCheck
@@ -220,6 +224,7 @@ private actor LESAppWorker {
         }
         prefixCheckpointValidated = prefixCheckpointValidated && prefixCheckpointContextTokens == contextProfile.rawValue &&
             prefixCheckpointConfiguration == configuration
+        stateOnlyPrefillValidated = stateOnlyPrefillValidated && prefixCheckpointValidated
         try configuration.validate()
         if configuration != LESPrefillConfiguration() {
             var effective = configuration
@@ -237,12 +242,13 @@ private actor LESAppWorker {
             try OrnithLESChatGeneration(artifact: artifact, prepared: prepared, check: check,
                 control: control, prefillConfiguration: value, prefillCheck: prefillCheck, contextProfile: contextProfile,
                 prefixCheckpointAdmitted: prefixCheckpointValidated,
+                stateOnlyPrefillAdmitted: stateOnlyPrefillValidated,
                 onAdmission: { self.admissions.append($0) })
         }
         do { chat = try open(configuration) }
         catch GGUFError.limit where preferAutomatic && configuration != LESPrefillConfiguration() {
             progress("Den större batchen ryms inte i aktuellt iOS-minne. Använder kontrollerad grundbatch.")
-            configuration = .init(); prefixCheckpointValidated = false; chat = try open(configuration)
+            configuration = .init(); prefixCheckpointValidated = false; stateOnlyPrefillValidated = false; chat = try open(configuration)
         }
         effectiveConfiguration = configuration
         if !prefixCheckpointValidated, let chat {
@@ -250,6 +256,8 @@ private actor LESAppWorker {
             try chat.validatePrefixCheckpoint()
             prefixCheckpointValidated = true; prefixCheckpointContextTokens = contextProfile.rawValue
             prefixCheckpointConfiguration = configuration
+            stateOnlyPrefillValidated = chat.stateOnlyPrefillAdmitted
+            if !stateOnlyPrefillValidated { progress("KV-kontrollen passerade. Behåller vanlig promptberäkning för denna konfiguration.") }
         }
         if !control.shouldAbort() { saveAdmission(artifact, prepared) }
         return check
@@ -316,7 +324,8 @@ private actor LESAppWorker {
         guard let artifact, let prepared else { throw CancellationError() }
         let report = try OrnithPrefillBenchmark.execute(artifact: artifact, prepared: prepared, baseline: baseline,
             candidate: configuration, check: prefillCheck, control: control, contextProfile: contextProfile,
-            prefixCheckpointAdmitted: prefixCheckpointValidated, minimumPromptTokens: minimumPromptTokens, progress: progress,
+            prefixCheckpointAdmitted: prefixCheckpointValidated, stateOnlyPrefillAdmitted: stateOnlyPrefillValidated,
+            minimumPromptTokens: minimumPromptTokens, progress: progress,
             onAdmission: { self.admissions.append($0) })
         let measurement = OrnithPrefillBenchmark.Measurement(configuration: configuration, contextTokens: contextProfile.rawValue, report: report)
         if report.comparable {

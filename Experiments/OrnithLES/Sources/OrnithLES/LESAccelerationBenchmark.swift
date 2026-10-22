@@ -146,15 +146,18 @@ public enum LESAccelerationBenchmark {
                         catch { engine.close(); throw error }
                         return engine
                     }
-                    func prefill(_ engine: LESContext) throws -> [Float] {
+                    func prefill(_ engine: LESContext, stateOnly: Bool = false) throws -> [Float] {
                         var row: [Float] = []
                         for first in stride(from: 0, to: prompt.count, by: 4) {
-                            row = try engine.logits(tokens: Array(prompt[first..<min(first + 4, prompt.count)]))
+                            let end = min(first + 4, prompt.count)
+                            let tokens = Array(prompt[first..<end])
+                            if stateOnly && end < prompt.count { try engine.ingest(tokens: tokens) }
+                            else { row = try engine.logits(tokens: tokens) }
                         }
                         return row
                     }
-                    func probe(_ engine: LESContext, forced: [Int]?) throws -> Probe {
-                        var row = try prefill(engine), rows = [row], tokens: [Int] = []
+                    func probe(_ engine: LESContext, forced: [Int]?, stateOnly: Bool = false) throws -> Probe {
+                        var row = try prefill(engine, stateOnly: stateOnly), rows = [row], tokens: [Int] = []
                         for i in 0..<3 {
                             let id = try forced?[i] ?? greedy(row); tokens.append(id)
                             row = try engine.logits(tokens: [id]); rows.append(row)
@@ -171,7 +174,9 @@ public enum LESAccelerationBenchmark {
                     let observedCheck = try comparison(expected, observed, routing: true)
                     guard observedCheck.passed else { throw GGUFError.invalid("Accelerator logit control failed") }
                     let engine = try open(observed: false); defer { engine.close() }
-                    let free = try probe(engine, forced: expected.forced)
+                    // Compare the timed, output-free prompt path with the
+                    // ordinary full-output reference, for every candidate.
+                    let free = try probe(engine, forced: expected.forced, stateOnly: true)
                     let freeCheck = try comparison(expected, free, routing: false)
                     guard freeCheck.passed else { throw GGUFError.invalid("Callback-free accelerator control failed") }
                     engine.reset()
@@ -190,7 +195,7 @@ public enum LESAccelerationBenchmark {
                     control.setNativeDiagnosticsEnabled(false)
                     try control.recordDiagnosticPhase("run.\(number + 1).\(name).timed-prefill")
                     let before = engine.metrics, started = MonotonicClock.now()
-                    var logits = try prefill(engine)
+                    var logits = try prefill(engine, stateOnly: true)
                     let prefillSeconds = MonotonicClock.seconds(since: started), afterPrefill = engine.metrics
                     try control.recordDiagnosticPhase("run.\(number + 1).\(name).timed-decode")
                     let decodeStart = MonotonicClock.now()

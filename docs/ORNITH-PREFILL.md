@@ -1,5 +1,37 @@
 # Ornith prompt batching and work profiles
 
+## Output-free intermediate prompt evaluation
+
+The current native wrapper also provides `flo_ingest`: all transformer layers,
+real top-eight expert choices, attention KV and recurrent state are evaluated,
+while unused vocabulary logits are omitted. It synchronizes completed target
+work before reporting progress. `flo_decode` still returns the complete final
+logit vector. The logical and physical batch limits are unchanged.
+
+Chat and API use this path only after the installed-model checkpoint admission
+also verifies its restored logits bit for bit against ordinary evaluation.
+This outcome is sealed separately with the existing source/device/context/batch
+admission. A numerical mismatch retains ordinary prompt evaluation and the
+independently passed KV-prefix restoration; it does not claim an optimization.
+Intermediate chunks clear their cached vocabulary row, so a later exact-length
+request cannot accidentally sample an old row. Exact token-prefix matching,
+chat template, tokenizer and checkpoint boundaries are unchanged.
+
+The isolated acceleration comparison checks the output-free path against its
+ordinary full-output control before timing it. Both baseline and candidate use
+the same prompt scheduling. The BF16 draft-graph control also runs output-free
+target chunks before its 128-token comparison. Generated untrained controls
+cover serial/batched, observed/callback-free, mixed quantization and actual
+top-eight routing, including fresh reset and recurrent checkpoint restore.
+
+Exports distinguish `stateOnlyPrefillTokens` and `stateOnlyPrefillCalls` from
+new/reused prompt tokens. Omitted vocabulary work is not KV-prefix reuse: every
+new prompt token is still evaluated. No phone throughput gain is established
+by these host controls. Compare prompt time, TTFT, new/reused token counts and
+the same prompt on the phone before attributing a speed improvement.
+
+## Retained build-126 checkpoint
+
 Built and privately delivered as **0.1.0 (126)** on the isolated
 `codex/ornith-prompt-controls` branch, runtime source `6c1084c87b35c749a5152c140c4828e9dde84126`.
 [Complete delivery run 39250964590](https://github.com/Dhafen/flash-local/actions/runs/39250964590) passes integration, archive/signing and

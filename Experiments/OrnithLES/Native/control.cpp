@@ -101,7 +101,7 @@ struct layer_trace {
 };
 static output evaluate(int fd, const char * dir, bool metal, int depth, int steps, int cache = 8, int prefill = 0,
                        bool trace_layers = false, bool trace_routing = true, int physical = 4, int evaluation = 4,
-                       bool flash_attention = false) {
+                       bool flash_attention = false, bool state_only_prefill = false) {
     if (trace_layers && prefill) throw std::runtime_error("Layer controls use single-token forwards");
     layer_trace trace;
     flo_options options{};
@@ -123,10 +123,13 @@ static output evaluate(int fd, const char * dir, bool metal, int depth, int step
             for (int i = 0; i < count; ++i) chunk[i] = tokens[(first + i) % 5];
             std::vector<float> row(flo_vocabulary_size(context));
             trace.reset();
-            if (flo_decode(context, chunk.data(), count, row.data(), (int)row.size())) throw std::runtime_error(flo_last_error());
+            const bool omit_output = state_only_prefill && first + count < prefill;
+            const int status = omit_output ? flo_ingest(context, chunk.data(), count) :
+                flo_decode(context, chunk.data(), count, row.data(), (int)row.size());
+            if (status) throw std::runtime_error(flo_last_error());
             if (trace_layers && trace.points != trace.expected) throw std::runtime_error("Incomplete native semantic layer trace");
-            out.logits.push_back(row);
-            first += count; out.positions.push_back(first - 1);
+            first += count;
+            if (!omit_output) { out.logits.push_back(row); out.positions.push_back(first - 1); }
         }
         out.metrics = flo_snapshot(context);
         if (out.metrics.flash_attention_active != flash_attention) throw std::runtime_error("Requested attention graph was not used");
@@ -134,13 +137,20 @@ static output evaluate(int fd, const char * dir, bool metal, int depth, int step
         if (!trace_routing && !trace_layers && (out.metrics.routing_decisions || out.metrics.canonical_routing_digest || out.metrics.canonical_expert_set_digest ||
                 out.metrics.probe_samples)) throw std::runtime_error("Callback-free execution unexpectedly observed tensors");
         flo_reset(context);
-        const int first_count = prefill > 0 ? std::min(evaluation, prefill) : 1;
+        const int first_count = state_only_prefill ? out.positions.front() + 1 :
+            (prefill > 0 ? std::min(evaluation, prefill) : 1);
         std::vector<int32_t> initial(first_count);
         for (int i = 0; i < first_count; ++i) initial[i] = tokens[i % 5];
         std::vector<float> replay(out.logits[0].size());
         trace.reset();
-        if (flo_decode(context, initial.data(), first_count, replay.data(), (int)replay.size()) || replay != out.logits[0])
-            throw std::runtime_error("Reset did not restore the complete recurrent/KV state");
+        for (int first = 0; first < first_count;) {
+            const int count = state_only_prefill ? std::min(evaluation, first_count - first) : first_count;
+            const int status = first + count < first_count ? flo_ingest(context, initial.data() + first, count) :
+                flo_decode(context, initial.data() + first, count, replay.data(), (int)replay.size());
+            if (status) throw std::runtime_error(flo_last_error());
+            first += count;
+        }
+        if (replay != out.logits[0]) throw std::runtime_error("Reset did not restore the complete recurrent/KV state");
         if (trace_layers && trace.points != trace.expected) throw std::runtime_error("Reset lost native semantic layer trace");
     } catch (...) { flo_close(context); throw; }
     flo_close(context);
@@ -423,7 +433,20 @@ int main(int argc, char ** argv) {
             if (compare(tuning_reference, tuned, observed) > 1e-6) throw std::runtime_error("Extended logical batch changed logits or routing");
             ++extended_variants;
         }
+        double state_only_error = 0; int state_only_variants = 0;
+        for (int physical : {1, 4, 8, 16}) for (int evaluation : {physical, 32}) for (bool observed : {true, false}) {
+            const auto tuned = evaluate(fd, dir.c_str(), false, 0, tuning_steps, 0, 33, false,
+                observed, physical, evaluation, false, true);
+            if (tuned.metrics.state_only_prefill_tokens != 32 || tuned.metrics.state_only_prefill_calls == 0 ||
+                tuned.metrics.target_tokens_evaluated != uint64_t(tuning_steps))
+                throw std::runtime_error("State-only prefill skipped tokens or failed to omit unused outputs");
+            state_only_error = std::max(state_only_error, compare(tuning_reference, tuned, observed));
+            ++state_only_variants;
+        }
+        if (state_only_error > 1e-6) throw std::runtime_error("State-only prefill changed final logits, routing or decode handoff");
         json report{{"syntheticOnly", true}, {"physicalPhone", false}, {"revision", flo_revision()},
+            {"stateOnlyPrefillVariants", state_only_variants}, {"stateOnlyPrefillMaximumAbsoluteError", state_only_error},
+            {"stateOnlyPrefillTokensPerVariant", 32},
             {"residentCPUReference", true}, {"cpuStreamingMaximumAbsoluteError", error},
             {"recurrentOnlyPrefixCheckpointBitwiseReplay", true}, {"prefixCheckpointBytes", prefix_bytes},
             {"greedyBlockRollbackBranches", 4}, {"trainedDFlashGraphExecuted", false},
@@ -461,6 +484,9 @@ int main(int argc, char ** argv) {
         std::cout << "ORNITH_PREFILL_TUNING variants=" << tuning_variants << " physical=1,4,8,16 evaluationThrough32=true"
                   << " actualDimensions=true fullVocabulary=true canonicalRouting=true callbackFree=true unneededHeadsSkipped=true maxAbs="
                   << tuning_error << " syntheticOnly=true physicalPhone=false\n";
+        std::cout << "ORNITH_STATE_ONLY_PREFILL variants=" << state_only_variants
+                  << " allTokensEvaluated=true skippedOutputTokens=32 fullVocabulary=true exactRouting=true reset=true maxAbs="
+                  << state_only_error << " syntheticOnly=true physicalPhone=false\n";
         return 0;
     } catch (const std::exception & e) { std::cerr << e.what() << '\n'; return 1; }
 }

@@ -190,6 +190,7 @@ struct flo_context {
     int vocabulary = 0, batch = 0, position = 0, capacity = 0;
     int maximum_physical_batch = 0;
     uint64_t skipped_intermediate_outputs = 0;
+    uint64_t state_only_prefill_tokens = 0, state_only_prefill_calls = 0;
     uint64_t target_tokens = 0, draft_blocks = 0, draft_proposals = 0, draft_accepted = 0, draft_replays = 0, feature_peak = 0;
     uint64_t additional_reserve = 0;
     bool experimental_dflash = false, metal = false;
@@ -366,9 +367,11 @@ flo_context * flo_open(int source, const char * directory, flo_options o, flo_ab
 void flo_close(flo_context * c) { delete c; }
 int32_t flo_vocabulary_size(const flo_context * c) { return c ? c->vocabulary : 0; }
 static void draft_process(flo_context *, int position, int count);
-int flo_decode(flo_context * c, const int32_t * tokens, int32_t count, float * output, int32_t capacity) {
+static int decode_tokens(flo_context * c, const int32_t * tokens, int32_t count,
+                         float * output, int32_t capacity, bool return_logits) {
     try {
-        require(c && !c->poisoned && tokens && output && count > 0 && count <= 2048 && capacity == c->vocabulary &&
+        require(c && !c->poisoned && tokens && count > 0 && count <= 2048 &&
+            (return_logits ? output && capacity == c->vocabulary : !output && capacity == 0) &&
             count <= c->capacity - c->position, "Invalid LES decode request");
         for (int i = 0; i < count; ++i) require(tokens[i] >= 0 && tokens[i] < c->vocabulary, "Token outside vocabulary");
         for (int first = 0; first < count; first += c->batch) {
@@ -378,7 +381,7 @@ int flo_decode(flo_context * c, const int32_t * tokens, int32_t count, float * o
             // Only the final microbatch's logits escape this API. The pinned
             // Qwen graph selects output rows after all transformer layers.
             int8_t no_output[16]{};
-            const bool intermediate = first + n < count;
+            const bool intermediate = !return_logits || first + n < count;
             if (intermediate) batch.logits = no_output;
             diagnostic_phase(c, 19);
             require(llama_decode(c->context, batch) == 0, "LES forward failed");
@@ -390,10 +393,25 @@ int flo_decode(flo_context * c, const int32_t * tokens, int32_t count, float * o
             // error status. Never export logits from an invalid trace.
             require(!c->routing_failed, "LES routing observation failed"); c->position += n;
         }
-        const float * logits = llama_get_logits_ith(c->context, -1); require(logits, "LES logits unavailable");
-        for (int i = 0; i < capacity; ++i) require(std::isfinite(logits[i]), "Non-finite LES logit");
-        std::copy(logits, logits + capacity, output); check_abort(c->abort, c->user); return 0;
+        if (return_logits) {
+            const float * logits = llama_get_logits_ith(c->context, -1); require(logits, "LES logits unavailable");
+            for (int i = 0; i < capacity; ++i) require(std::isfinite(logits[i]), "Non-finite LES logit");
+            std::copy(logits, logits + capacity, output);
+        } else {
+            // Match the completed-work boundary of the logits path. Do not
+            // publish progress with queued GPU work or retain borrowed inputs.
+            llama_synchronize(c->context);
+            c->state_only_prefill_tokens += count;
+            ++c->state_only_prefill_calls;
+        }
+        check_abort(c->abort, c->user); return 0;
     } catch (const std::exception & e) { if (c) c->poisoned = true; last_error = e.what(); return -1; }
+}
+int flo_decode(flo_context * c, const int32_t * tokens, int32_t count, float * output, int32_t capacity) {
+    return decode_tokens(c, tokens, count, output, capacity, true);
+}
+int flo_ingest(flo_context * c, const int32_t * tokens, int32_t count) {
+    return decode_tokens(c, tokens, count, nullptr, 0, false);
 }
 void flo_reset(flo_context * c) {
     if (c) { std::vector<uint8_t>().swap(c->prefix_state); c->prefix_position = 0; }
@@ -448,6 +466,8 @@ flo_metrics flo_snapshot(const flo_context * c) {
         out.dflash_proposals = c->draft_proposals; out.dflash_accepted = c->draft_accepted;
         out.dflash_replays = c->draft_replays; out.dflash_feature_peak_bytes = c->feature_peak;
         out.flash_attention_active = c->context && c->context->get_cparams().flash_attn;
+        out.state_only_prefill_tokens = c->state_only_prefill_tokens;
+        out.state_only_prefill_calls = c->state_only_prefill_calls;
         const auto & p = c->projection_probe;
         out.probe_samples = p.samples; out.probe_columns = p.columns;
         out.probe_weight_type = p.weight_type; out.probe_cpu_input_type = p.cpu_input_type;
@@ -469,6 +489,6 @@ flo_metrics flo_snapshot(const flo_context * c) {
     return out;
 }
 const char * flo_last_error() { return last_error.c_str(); }
-const char * flo_revision() { return "96bbf61710d44421ea54e63f5194f9b17c20d877+flash-local-experiments-v8"; }
+const char * flo_revision() { return "96bbf61710d44421ea54e63f5194f9b17c20d877+flash-local-experiments-v9"; }
 
 #include "DFlashBenchmark.inc"

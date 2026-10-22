@@ -3,6 +3,7 @@ _flo_open
 _flo_close
 _flo_vocabulary_size
 _flo_decode
+_flo_ingest
 _flo_reset
 _flo_capture_prefix
 _flo_restore_prefix

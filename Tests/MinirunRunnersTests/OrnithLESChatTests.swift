@@ -137,6 +137,10 @@ final class OrnithLESChatTests: XCTestCase {
         XCTAssertEqual(OrnithLESChatGeneration.reusablePrefix(previous: prompt, prompt: canonicalNext, hasLogits: true), 4)
         XCTAssertEqual(OrnithLESChatGeneration.reusablePrefix(previous: prompt, prompt: [1, 9, 3, 4, 10], hasLogits: true), 0)
         XCTAssertEqual(OrnithLESChatGeneration.reusablePrefix(previous: prompt, prompt: prompt, hasLogits: false), 0)
+        // A state-only stable checkpoint deliberately has no vocabulary row.
+        // A longer continuation evaluates its suffix; an exact-length request
+        // must not sample stale logits from an earlier prompt chunk.
+        XCTAssertEqual(OrnithLESChatGeneration.reusablePrefix(previous: prompt, prompt: canonicalNext, hasLogits: false), 4)
     }
     func testChatRejectsUnadmittedAndMismatchedModelOrRuntimeChecks() throws {
         let raw: [String: Any] = ["modelSHA256": "model", "referenceRevision": "reference", "nativeRevision": "native",

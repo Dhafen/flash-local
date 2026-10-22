@@ -52,6 +52,7 @@ public final class OrnithLESChatGeneration {
     private var prefixLogits: [Float] = []
     private var checkpointBytes: UInt64 = 0
     private var prefixRestorationAdmitted = false
+    public private(set) var stateOnlyPrefillAdmitted = false
     private var running = false
     public let contextTokens: Int
 
@@ -88,6 +89,7 @@ public final class OrnithLESChatGeneration {
                 prefillConfiguration: LESPrefillConfiguration = .init(), prefillCheck: LESPrefillCheck? = nil,
                 contextProfile: LocalContextProfile = .standard,
                 prefixCheckpointAdmitted: Bool = false,
+                stateOnlyPrefillAdmitted: Bool = false,
                 onAdmission: (LESMemoryAdmission) -> Void = { _ in }) throws {
         let batch = try Self.validatedBatch(prefillConfiguration, proof: prefillCheck, baseline: check, modelSHA256: artifact.manifest.sha256,
             nativeRevision: LESContext.revision)
@@ -95,6 +97,7 @@ public final class OrnithLESChatGeneration {
         self.prefillConfiguration = prefillConfiguration; self.prefillCheck = prefillCheck
         self.artifact = artifact; self.control = control
         prefixRestorationAdmitted = prefixCheckpointAdmitted
+        self.stateOnlyPrefillAdmitted = prefixCheckpointAdmitted && stateOnlyPrefillAdmitted
         contextTokens = contextProfile.rawValue
         tokenizer = try CanonicalQwen35Tokenizer(artifact: artifact)
         let plan = try LESBenchmark.plan(artifact, context: contextProfile.rawValue, depth: 0, pageCache: true,
@@ -129,6 +132,18 @@ public final class OrnithLESChatGeneration {
             throw GGUFError.invalid("Restored hybrid KV/SSM logits differ from fresh execution; prefix reuse was not enabled")
         }
         prefixRestorationAdmitted = true
+        // The same installed-model admission also checks the output-free
+        // prompt path, including a checkpoint with no cached vocabulary row.
+        native.reset()
+        try native.ingest(tokens: prefix)
+        guard native.capturePrefix() > 0 else { throw GGUFError.limit("State-only prefix checkpoint could not be captured") }
+        _ = try native.logits(tokens: oldSuffix)
+        try native.restorePrefix()
+        let withoutUnusedOutputs = try native.logits(tokens: newSuffix)
+        // A numerical mismatch keeps the ordinary full-output prompt path.
+        // It must not disable the independently passed KV-prefix restore.
+        stateOnlyPrefillAdmitted = withoutUnusedOutputs.count == fresh.count &&
+            zip(withoutUnusedOutputs, fresh).allSatisfy({ $0.0.bitPattern == $0.1.bitPattern })
     }
     deinit { close() }
 
@@ -207,7 +222,14 @@ public final class OrnithLESChatGeneration {
             if first < checkpointPosition { end = min(end, checkpointPosition) }
             let tokens = Array(prompt[first..<end])
             largestEvaluation = max(largestEvaluation, tokens.count)
-            stateLogits = try autoreleasepool { try native.logits(tokens: tokens) }
+            if stateOnlyPrefillAdmitted && end < prompt.count {
+                try autoreleasepool { try native.ingest(tokens: tokens) }
+                // Never associate a previous position's logits with this
+                // newer KV/SSM prefix. Continuations evaluate their suffix.
+                stateLogits.removeAll(keepingCapacity: true)
+            } else {
+                stateLogits = try autoreleasepool { try native.logits(tokens: tokens) }
+            }
             stateTokens.append(contentsOf: tokens)
             if end == checkpointPosition { captureStableBoundary() }
             try onEvent(.prefill(progress(end)))

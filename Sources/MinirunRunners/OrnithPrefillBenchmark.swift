@@ -79,6 +79,7 @@ public enum OrnithPrefillBenchmark {
                                candidate: LESPrefillConfiguration, check: LESPrefillCheck?, control: LESControl,
                                contextProfile: LocalContextProfile = .standard,
                                prefixCheckpointAdmitted: Bool = false,
+                               stateOnlyPrefillAdmitted: Bool = false,
                                minimumPromptTokens: Int = 0,
                                progress: @Sendable (String) -> Void,
                                onAdmission: (LESMemoryAdmission) -> Void) throws -> Report {
@@ -102,7 +103,8 @@ public enum OrnithPrefillBenchmark {
                 let engine = try OrnithLESChatGeneration(artifact: artifact, prepared: prepared, check: baseline,
                     control: control, prefillConfiguration: mode == "baseline" ? .init() : candidate,
                     prefillCheck: mode == "baseline" ? nil : check, contextProfile: contextProfile,
-                    prefixCheckpointAdmitted: prefixCheckpointAdmitted, onAdmission: onAdmission)
+                    prefixCheckpointAdmitted: prefixCheckpointAdmitted,
+                    stateOnlyPrefillAdmitted: stateOnlyPrefillAdmitted, onAdmission: onAdmission)
                 defer { engine.close() }
                 var options = LocalGenerationOptions(); options.maximumNewTokens = 129
                 return try engine.generate(messages: [.init(role: .user, content: prompt)], options: options) { event in

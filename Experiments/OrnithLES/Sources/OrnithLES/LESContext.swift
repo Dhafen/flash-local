@@ -52,6 +52,7 @@ public struct LESMetrics: Codable, Sendable, Equatable {
     public let targetTokensEvaluated, dflashBlocks, dflashProposals, dflashAccepted, dflashReplays: UInt64?
     public let dflashFeaturePeakBytes: UInt64?
     public let flashAttentionActive: Bool?
+    public let stateOnlyPrefillTokens, stateOnlyPrefillCalls: UInt64?
     init(_ value: flo_metrics) {
         ioBytes = value.io_bytes; ioCalls = value.io_calls; expertReads = value.misses
         selectedExpertUnion = value.selected_experts; predictions = value.predicted
@@ -70,6 +71,8 @@ public struct LESMetrics: Codable, Sendable, Equatable {
         dflashProposals = value.dflash_proposals; dflashAccepted = value.dflash_accepted
         dflashReplays = value.dflash_replays; dflashFeaturePeakBytes = value.dflash_feature_peak_bytes
         flashAttentionActive = value.flash_attention_active
+        stateOnlyPrefillTokens = value.state_only_prefill_tokens
+        stateOnlyPrefillCalls = value.state_only_prefill_calls
     }
 }
 
@@ -178,6 +181,19 @@ public final class LESContext {
         try artifact.assertUnchanged(); try draftArtifact?.assertUnchanged(); return output
     }
     public func reset() { flo_reset(handle) }
+    /// Retains all transformer, expert and recurrent/KV work. Only unused
+    /// vocabulary outputs are omitted; the caller must request final logits.
+    public func ingest(tokens: [Int]) throws {
+        try artifact.assertUnchanged(); try draftArtifact?.assertUnchanged()
+        guard let handle else { throw GGUFError.invalid("LES context is closed") }
+        guard !tokens.isEmpty, tokens.count <= 2048,
+              tokens.allSatisfy({ (0..<vocabularySize).contains($0) }),
+              !control.shouldAbort() else { throw CancellationError() }
+        let ids = tokens.map(Int32.init)
+        let status = ids.withUnsafeBufferPointer { flo_ingest(handle, $0.baseAddress, Int32($0.count)) }
+        guard status == 0 else { throw Self.failure() }
+        try artifact.assertUnchanged(); try draftArtifact?.assertUnchanged()
+    }
     public func capturePrefix() -> UInt64 { flo_capture_prefix(handle) }
     public func restorePrefix() throws {
         guard let handle, flo_restore_prefix(handle) == 0 else { throw Self.failure() }

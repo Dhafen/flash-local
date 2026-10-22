@@ -19,6 +19,37 @@ final class LESPolicyTests: XCTestCase {
         let artifact = try VerifiedGGUFArtifact.verify(insideRoot: root, manifest: manifest)
         try body(root, artifact, data)
     }
+    func testStateOnlyPrefillPreservesLogitsRoutingAndCheckpointWithoutStaleOutput() throws {
+        try withPreparationFixture { root, artifact, _ in
+            let control = LESControl()
+            let prepared = try LESPreparation.prepare(artifact: artifact,
+                privateRoot: root.appendingPathComponent("prepared"), control: control)
+            let plan = try LESMemoryPlan(index: artifact.index, contextTokens: 32,
+                footprint: XCTUnwrap(ProcessFootprint.current()))
+            let engine = try LESContext(artifact: artifact, prepared: prepared, plan: plan,
+                control: control, traceRouting: true, syntheticCPUControl: true)
+            defer { engine.close() }
+            _ = try engine.logits(tokens: [1, 2, 3, 4])
+            let expected = try engine.logits(tokens: [2])
+            let expectedExpertSets = engine.metrics.canonicalExpertSetDigest
+            engine.reset()
+            let before = engine.metrics
+            try engine.ingest(tokens: [1, 2])
+            try engine.ingest(tokens: [3, 4])
+            XCTAssertGreaterThan(engine.capturePrefix(), 0)
+            let actual = try engine.logits(tokens: [2])
+            XCTAssertEqual(actual.map(\.bitPattern), expected.map(\.bitPattern))
+            XCTAssertEqual(engine.metrics.canonicalExpertSetDigest, expectedExpertSets)
+            XCTAssertEqual(try XCTUnwrap(engine.metrics.stateOnlyPrefillTokens) - XCTUnwrap(before.stateOnlyPrefillTokens), 4)
+            XCTAssertEqual(try XCTUnwrap(engine.metrics.stateOnlyPrefillCalls) - XCTUnwrap(before.stateOnlyPrefillCalls), 2)
+            XCTAssertEqual(try XCTUnwrap(engine.metrics.targetTokensEvaluated) - XCTUnwrap(before.targetTokensEvaluated), 5)
+            _ = try engine.logits(tokens: [3])
+            try engine.restorePrefix()
+            let restored = try engine.logits(tokens: [2])
+            XCTAssertEqual(restored.map(\.bitPattern), expected.map(\.bitPattern))
+            print("ORNITH_STATE_ONLY_SWIFT allTokensEvaluated=true exactLogitBits=true exactExpertSets=true checkpointRestored=true noVocabularyOutputDuringIngest=true syntheticOnly=true physicalPhone=false")
+        }
+    }
     private func oldRuntimeSeal(_ prepared: URL) throws {
         let url = prepared.appendingPathComponent("seal.json")
         var seal = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
