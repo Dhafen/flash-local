@@ -67,6 +67,17 @@ engine; only the explicit comparison attaches a draft. No Apple crash feedback
 was available at the first read-only audit. The terminating instruction and
 OS/jetsam cause are **not yet established**.
 
+The new untrained draft integration control reproduced a fatal native abort in
+the first KV-injection pass on macOS: `GGML_ASSERT(buffer)` in
+`ggml_backend_buffer_is_host`, called by
+`llm_graph_input_attn_kv_iswa::set_input` → `set_input_kq_mask`.
+An injection-only graph prunes both unused attention-mask buffers. The pinned
+plain KV input already checks for allocated masks; the interleaved SWA input
+was missing those guards. The local pinned-source patch now checks both base
+and sliding mask allocations, including graph-reuse checks. Allocated masks
+are populated identically to before. This is a reproduced source defect; its
+relationship to the owner's phone termination still needs the phone log/test.
+
 A verified allocation mismatch was found: the native draft inherited
 `swa_full=true`, while admission budgeted five sliding caches. The experiment
 now explicitly sets `swa_full=false`. Its budget matches the pinned allocator:

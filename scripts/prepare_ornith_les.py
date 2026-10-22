@@ -5,6 +5,7 @@ adds a tensor-major source reader, aggregate instrumentation and an accessor.
 Q4_K decoding promotes the stored half scale before dividing by sixteen, so
 small scales retain the values represented by the original packed weights.
 CPU fused attention honors requested F32 value accumulation with F16 KV.
+Interleaved SWA KV injection skips unallocated, unused attention masks.
 The upstream checkout is an ignored build input, never the production runtime.
 """
 import argparse
@@ -123,6 +124,19 @@ def patched_files(source):
         throw std::runtime_error(format(""")
     replace("src/models/qwen35moe.cpp", "il + 1 < n_layer && model.layers[il + 1].ffn_gate_inp != nullptr",
             "il + 1 < n_transformer_layers && model.layers[il + 1].ffn_gate_inp != nullptr")
+    # DFlash KV injection writes K/V without performing attention. Its mask
+    # tensors are consequently pruned and have no buffer. The plain KV input
+    # already handles that case; the interleaved SWA input did not, aborting in
+    # ggml_backend_buffer_is_host(nullptr) on the very first injection pass.
+    # Keep all allocated-mask behavior (ordinary attention) exactly unchanged.
+    file = "src/llama-graph.cpp"
+    for suffix, cache in [("", "base"), ("_swa", "swa")]:
+        call = f"mctx->get_{cache}()->set_input_kq_mask(self_kq_mask{suffix}, ubatch, cparams.causal_attn);"
+        replace(file, "        " + call,
+                f"        if (self_kq_mask{suffix} && self_kq_mask{suffix}->buffer) {{\n            {call}\n        }}")
+        call = f"res &= can_reuse_kq_mask(self_kq_mask{suffix}, mctx->get_{cache}(), params.ubatch, params.cparams);"
+        replace(file, "        " + call,
+                f"        if (self_kq_mask{suffix} && self_kq_mask{suffix}->buffer) {{\n            {call}\n        }}")
     file = "ggml/src/ggml-metal/ggml-metal-context.m"
     replace(file, '#import <Metal/Metal.h>', '#import <Metal/Metal.h>\nextern void flash_omni_commit(id<MTLCommandBuffer>);')
     text = result[file]
@@ -212,7 +226,8 @@ def prepare(root, run=None):
         patchedSHA256={name: hashlib.sha256((source / name).read_bytes()).hexdigest() for name in files},
         changes=["tensor-major direct GGUF reads", "aggregate I/O and Metal telemetry", "exclude unused MTP prediction",
                  "Apple VM-backed page buffers with symmetric deallocation", "native buffer lifetime accounting",
-                 "Q4_K GPU nibble-scale adjustment in F32", "CPU Flash Attention requested F32 accumulation honored"],
+                 "Q4_K GPU nibble-scale adjustment in F32", "CPU Flash Attention requested F32 accumulation honored",
+                 "DFlash interleaved SWA KV injection skips unallocated attention masks"],
         routingChanged=False, quantizationChanged=False), indent=2) + "\n")
     return source
 
