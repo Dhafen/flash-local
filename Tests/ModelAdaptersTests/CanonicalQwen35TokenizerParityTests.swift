@@ -173,6 +173,11 @@ final class CanonicalQwen35TokenizerParityTests: XCTestCase {
         let artifact = try VerifiedGGUFArtifact.verify(insideRoot: folder, manifest: manifest)
         let tokenizer = try CanonicalQwen35Tokenizer(artifact: artifact)
         let user = Qwen35ChatMessage(role: .user, content: "Hello cache.")
+        // This suite runs against REAM in the integrated app gate and Ornith
+        // in the isolated LES gate. Their pinned templates differ in history.
+        let architecture = artifact.index.metadata["general.architecture"]?.text
+        XCTAssertTrue(["qwen4exp", "qwen35moe"].contains(architecture ?? ""))
+        let ornith = architecture == "qwen35moe"
         for enabled in [false, true] {
             let first = try tokenizer.chat([user], maximumTokens: 1024, enableThinking: enabled)
             let suffix = "<|im_start|>assistant\n" + (enabled ? "<think>\n" : "<think>\n\n</think>\n\n")
@@ -185,16 +190,16 @@ final class CanonicalQwen35TokenizerParityTests: XCTestCase {
             let next = try tokenizer.chat([user, .init(role: .assistant, content: "Fixture answer."),
                 .init(role: .user, content: "Continue.")], maximumTokens: 1024, enableThinking: enabled)
             XCTAssertTrue(next.tokenIDs.starts(with: stable))
-            // The installed GGUF template preserves the empty thinking block
-            // in history when thinking is off, unlike the HF config template.
-            // With thinking on the generation trailer changes. The stable
-            // boundary must remain reusable in both modes without editing it.
-            XCTAssertEqual(next.tokenIDs.starts(with: first.tokenIDs), !enabled,
-                "Original GGUF whole-prefill prefix behavior, thinking=\(enabled)")
+            // Ornith's original GGUF preserves the empty thinking block when
+            // thinking is off. REAM removes it in both modes. Only the shared
+            // stable boundary is reusable for every supported template/mode.
+            XCTAssertEqual(next.tokenIDs.starts(with: first.tokenIDs), ornith && !enabled,
+                "Original \(architecture ?? "unknown") GGUF whole-prefill prefix behavior, thinking=\(enabled)")
             let changed = try tokenizer.chat([.init(role: .user, content: "Changed instructions.")],
                 maximumTokens: 1024, enableThinking: enabled)
             XCTAssertFalse(changed.tokenIDs.starts(with: stable))
         }
+        print("CANONICAL_STABLE_PREFIX architecture=\(architecture ?? "unknown") modes=2 exactHistoryBoundary=true originalTemplateUnchanged=true")
         print("ORNITH_STABLE_PREFIX thinkingOnOff=true generationSuffixExcluded=true unchangedTokens=true changedHistoryRejected=true trainedInference=false")
     }
 
