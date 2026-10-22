@@ -187,10 +187,25 @@ public final class LESContext {
     public func attachDraft(_ draft: VerifiedGGUFArtifact) throws {
         try draft.assertUnchanged()
         guard let handle else { throw GGUFError.invalid("LES context is closed") }
+        try control.recordDiagnosticPhase("draft.headroom")
+        // The first admission ran before allocating the target. Recheck actual
+        // headroom now: a model loader may allocate its whole GPU buffer before
+        // its first progress/abort callback can stop it.
+        try Self.requireDraftHeadroom(ProcessFootprint.current(), reserve: plan.experimentReserveBytes ?? 0,
+            ceiling: plan.processCeilingBytes)
         let fd = try draft.duplicateForReading(); defer { Darwin.close(fd) }
         guard flo_attach_dflash(handle, fd) == 0 else { throw Self.failure() }
         try draft.assertUnchanged()
         draftArtifact = draft
+    }
+    static func requireDraftHeadroom(_ memory: ProcessFootprint?, reserve: UInt64, ceiling: UInt64) throws {
+        let margin: UInt64 = 128 << 20
+        guard let memory, reserve > 0, reserve <= 1_500_000_000,
+              memory.footprintBytes < ceiling, reserve <= ceiling - memory.footprintBytes,
+              margin <= ceiling - memory.footprintBytes - reserve,
+              memory.availableBytes.map({ $0 >= reserve + margin }) != false else {
+            throw GGUFError.limit("DFlash saknar aktuellt minnesutrymme för draft, KV-cache och säkerhetsmarginal. Testet stoppades före draftladdningen; vanlig chatt kan användas.")
+        }
     }
     public func dflashStep(logits: inout [Float], maximumTokens: Int) throws -> [Int] {
         try artifact.assertUnchanged(); try draftArtifact?.assertUnchanged()

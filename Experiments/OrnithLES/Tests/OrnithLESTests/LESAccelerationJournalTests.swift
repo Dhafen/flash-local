@@ -63,4 +63,15 @@ final class LESAccelerationJournalTests: XCTestCase {
             XCTAssertFalse(journal.recordNativePhase(10))
         }
     }
+    func testDraftAttachmentRechecksActualTargetFootprintAndOSHeadroom() throws {
+        func memory(_ footprint: UInt64, _ available: UInt64?) -> ProcessFootprint {
+            .init(footprintBytes: footprint, peakFootprintBytes: footprint, availableBytes: available)
+        }
+        let reserve: UInt64 = 972_611_936, ceiling: UInt64 = 5_500_000_000
+        XCTAssertNoThrow(try LESContext.requireDraftHeadroom(memory(3_700_000_000, 1_500_000_000), reserve: reserve, ceiling: ceiling))
+        XCTAssertThrowsError(try LESContext.requireDraftHeadroom(memory(4_800_000_000, 2_000_000_000), reserve: reserve, ceiling: ceiling))
+        XCTAssertThrowsError(try LESContext.requireDraftHeadroom(memory(3_700_000_000, 500_000_000), reserve: reserve, ceiling: ceiling))
+        XCTAssertThrowsError(try LESContext.requireDraftHeadroom(nil, reserve: reserve, ceiling: ceiling))
+        XCTAssertThrowsError(try LESContext.requireDraftHeadroom(memory(1, nil), reserve: UInt64.max, ceiling: ceiling))
+    }
 }

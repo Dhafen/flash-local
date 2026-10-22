@@ -74,6 +74,10 @@ now explicitly sets `swa_full=false`. Its budget matches the pinned allocator:
 uses 4,352 rather than 8,192 sliding cells; at 32K it uses 4,352 rather than
 32,768. This does not change the model's 4,096-token sliding attention mask.
 It is a memory fix, **not proof that the reported crash is resolved**.
+Immediately before attaching the draft, the app rechecks the target's actual
+current footprint and OS-reported available memory against the entire draft
+reserve plus 128 MiB. This avoids relying solely on the earlier plan or on a
+loader callback that may arrive after an entire GPU weight buffer is allocated.
 
 A bounded local phase journal is committed before native allocation, feature
 fusion, KV injection, proposal, verification and rollback during controls.
