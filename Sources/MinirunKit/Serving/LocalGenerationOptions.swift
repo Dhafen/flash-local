@@ -1,5 +1,25 @@
 import Foundation
 
+/// Total session window, including template, tools, prompt and generated tokens.
+/// Selecting a larger window requests a memory admission, not a quality claim.
+public enum LocalContextProfile: Int, Codable, CaseIterable, Identifiable, Sendable {
+    case standard = 8192, test16K = 16384, test32K = 32768, test65K = 65536
+    public var id: Int { rawValue }
+    public var title: String {
+        self == .standard ? "8K" : "\(rawValue / 1024)K · test"
+    }
+}
+
+public struct LocalModelCapabilities: Sendable {
+    public let context: LocalContextProfile
+    public init(context: LocalContextProfile = .standard) { self.context = context }
+    var json: [String: Any] {
+        ["context_capacity_tokens": context.rawValue, "max_output_tokens": 4096,
+         "reasoning_presets": ["off", "small", "medium", "ultra"],
+         "tool_calls": true, "context_quality_verified": false]
+    }
+}
+
 /// Generation controls shared by the local UI and the authenticated LAN API.
 /// Routing, weights and native graph mathematics are unaffected.
 public struct LocalGenerationOptions: Codable, Equatable, Sendable {
@@ -35,7 +55,7 @@ public enum OrnithThinkingPreset: String, CaseIterable, Identifiable, Sendable {
     public var id: String { rawValue }
     public var title: String {
         switch self {
-        case .off: "0"
+        case .off: "Off"
         case .small: "Small"
         case .medium: "Medium"
         case .ultra: "Ultra"
@@ -55,6 +75,18 @@ public enum OrnithThinkingPreset: String, CaseIterable, Identifiable, Sendable {
         }
         return value
     }
+    /// Reasoning controls must not reset independently selected sampling.
+    public func applying(to current: LocalGenerationOptions) -> LocalGenerationOptions {
+        var value = options
+        value.temperature = current.temperature
+        value.topP = current.topP
+        value.seed = current.seed
+        return value
+    }
+    public static func restoring(_ saved: LocalGenerationOptions) throws -> LocalGenerationOptions {
+        try saved.validate()
+        return (matching(saved) ?? (saved.enableThinking ? .medium : .off)).applying(to: saved)
+    }
     public static func matching(_ value: LocalGenerationOptions) -> Self? {
         allCases.first { preset in
             let expected = preset.options
@@ -62,6 +94,21 @@ public enum OrnithThinkingPreset: String, CaseIterable, Identifiable, Sendable {
                 && value.thinkingBudget == expected.thinkingBudget
                 && value.maximumNewTokens == expected.maximumNewTokens
         }
+    }
+}
+
+/// Editing accepts either keyboard decimal separator, without treating an empty
+/// or incomplete draft as zero. No grouping, exponent or silent range clamping.
+public enum LocalSamplingInput {
+    public static func decimal(_ text: String, minimum: Double, maximum: Double,
+                               excludingMinimum: Bool = false) -> Double? {
+        let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty, value.utf8.allSatisfy({ (48...57).contains($0) || $0 == 44 || $0 == 46 }),
+              value.filter({ $0 == "," || $0 == "." }).count <= 1,
+              value.last != ",", value.last != ".",
+              let number = Double(value.replacingOccurrences(of: ",", with: ".")), number.isFinite,
+              number >= minimum, number <= maximum, !excludingMinimum || number > minimum else { return nil }
+        return number
     }
 }
 

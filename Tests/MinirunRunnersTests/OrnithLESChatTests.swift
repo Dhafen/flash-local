@@ -7,6 +7,36 @@ import MinirunKit
 @testable import MinirunRunners
 
 final class OrnithLESChatTests: XCTestCase {
+    func testCheckpointExcludesGenerationSuffixThatChangesInHistoricalAssistantTurns() {
+        let history = [1, 2, 3, 4, 5, 6]
+        for trailer in [[100, 101, 102], [100, 101, 102, 103, 104]] {
+            let prompt = history + trailer
+            let boundary = OrnithLESChatGeneration.stableCheckpointPosition(prompt: prompt, generationSuffix: trailer)
+            XCTAssertEqual(boundary, history.count)
+            let canonicalNext = history + [100, 101, 500, 600, 700]
+            XCTAssertEqual(OrnithLESChatGeneration.reusablePrefix(previous: prompt, prompt: canonicalNext, hasLogits: true), 0)
+            XCTAssertEqual(OrnithLESChatGeneration.reusablePrefix(previous: Array(prompt.prefix(boundary)),
+                prompt: canonicalNext, hasLogits: true), history.count)
+            XCTAssertEqual(OrnithLESChatGeneration.reusablePrefix(previous: Array(prompt.prefix(boundary)),
+                prompt: [9] + Array(canonicalNext.dropFirst()), hasLogits: true), 0)
+        }
+        XCTAssertEqual(OrnithLESChatGeneration.stableCheckpointPosition(prompt: history, generationSuffix: [999]), 0)
+        XCTAssertEqual(OrnithLESChatGeneration.stableCheckpointPosition(prompt: history, generationSuffix: []), 0)
+    }
+    func testAutomaticBatchProfileRejectsNoiseDecodeRegressionAndUnavailableRates() {
+        func improves(_ prompt: Double, _ decode: Double) -> Bool {
+            OrnithPrefillBenchmark.Report.improves(promptBaseline: 10, promptCandidate: prompt,
+                decodeBaseline: 5, decodeCandidate: decode)
+        }
+        XCTAssertTrue(improves(11, 5)); XCTAssertTrue(improves(10.5, 4.75))
+        XCTAssertFalse(improves(10.49, 5)); XCTAssertFalse(improves(30, 4.7))
+        XCTAssertFalse(improves(.nan, 5)); XCTAssertFalse(improves(.infinity, 5))
+        XCTAssertFalse(improves(20, 0)); XCTAssertFalse(improves(0, 8))
+        let unsupported = OrnithPrefillBenchmark.Measurement(configuration: .init(), contextTokens: 65536,
+            failure: "not executed")
+        XCTAssertFalse(unsupported.comparable); XCTAssertNil(unsupported.promptTokensPerSecond)
+        XCTAssertNil(unsupported.peakMemoryBytes); XCTAssertNil(unsupported.maximumEvaluationBatchActuallySubmitted)
+    }
     func testBatchBenchmarkRejectsDifferentPartialOrMissingTokenOutputs() {
         let tokens = Array(0..<129)
         XCTAssertTrue(OrnithPrefillBenchmark.Report.same128TokenOutputs([tokens, tokens, tokens, tokens]))
@@ -98,6 +128,19 @@ final class OrnithLESChatTests: XCTestCase {
         XCTAssertEqual(reuse([], [1]), 0)
         // An interrupted state is discarded, never approximated by overlap.
         XCTAssertEqual(reuse([1, 9, 3], [1, 2, 3, 4]), 0)
+    }
+    func testCheckpointRequiresItsEntireExactPrefixDespiteChangedGeneratedSuffix() {
+        let prompt = [1, 2, 3, 4]
+        let generatedState = prompt + [10, 11, 12]
+        let canonicalNext = prompt + [10, 99, 5, 6]
+        XCTAssertEqual(OrnithLESChatGeneration.reusablePrefix(previous: generatedState, prompt: canonicalNext, hasLogits: true), 0)
+        XCTAssertEqual(OrnithLESChatGeneration.reusablePrefix(previous: prompt, prompt: canonicalNext, hasLogits: true), 4)
+        XCTAssertEqual(OrnithLESChatGeneration.reusablePrefix(previous: prompt, prompt: [1, 9, 3, 4, 10], hasLogits: true), 0)
+        XCTAssertEqual(OrnithLESChatGeneration.reusablePrefix(previous: prompt, prompt: prompt, hasLogits: false), 0)
+        // A state-only stable checkpoint deliberately has no vocabulary row.
+        // A longer continuation evaluates its suffix; an exact-length request
+        // must not sample stale logits from an earlier prompt chunk.
+        XCTAssertEqual(OrnithLESChatGeneration.reusablePrefix(previous: prompt, prompt: canonicalNext, hasLogits: false), 4)
     }
     func testChatRejectsUnadmittedAndMismatchedModelOrRuntimeChecks() throws {
         let raw: [String: Any] = ["modelSHA256": "model", "referenceRevision": "reference", "nativeRevision": "native",

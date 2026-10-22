@@ -14,7 +14,10 @@ final class OrnithLESRenderTests: XCTestCase {
     private enum Fixture: String, CaseIterable {
         case missing, preview, chatThinking = "chat-thinking", chatComplete = "chat-complete"
         case apiMissing = "api-missing", apiReady = "api-ready", generation
+        case loading, apiPaused = "api-paused"
+        case acceleration
         case prefill = "prefill-controls", profile = "prompt-profile"
+        case agentUnix = "agent-unix", agentWindows = "agent-windows", agentHermes = "agent-hermes"
     }
     func testMissingAndPreviewChatDrawInBothAppearances() throws {
         var captures: [ColorScheme: [Data]] = [:]
@@ -27,23 +30,34 @@ final class OrnithLESRenderTests: XCTestCase {
             case .chatComplete: model = .reviewChatPreview(thinking: false)
             case .apiMissing: model = .reviewPreview()
             case .apiReady: model = .reviewAPIPreview()
+            case .loading: model = .reviewLoadingPreview()
+            case .apiPaused: model = .reviewPausedAPIPreview()
             case .generation:
-                model = .reviewPreview(); model.chatOptions.thinkingBudget = 128
+                model = .reviewPreview(); model.chatOptions.temperature = 0.7; model.chatOptions.topP = 0.95
             case .prefill:
                 model = .reviewPreview(); model.batchConfiguration.evaluationTokens = 32; model.batchConfiguration.physicalTokens = 8
+            case .acceleration:
+                model = .reviewPreview(); model.accelerationCandidate = .dflash; model.contextProfile = .test32K
             case .profile:
                 model = .reviewPreview(); model.systemPrompt = LocalChatProfile.programming.systemPrompt
+            case .agentUnix, .agentWindows, .agentHermes: model = .reviewAPIPreview()
             }
             for scheme in [ColorScheme.light, .dark] {
                 // ImageRenderer omits ScrollView contents and replaces native
                 // text fields with yellow placeholders. Host real controls in
                 // a real window before capturing, so a PNG proves actual UI.
                 let content = Group {
-                    if fixture == .chatThinking || fixture == .chatComplete { OrnithLESChatPage(model: model) }
-                    else if fixture == .apiMissing || fixture == .apiReady { OrnithAPIPage(model: model) }
+                    if fixture == .chatThinking || fixture == .chatComplete || fixture == .loading { OrnithLESChatPage(model: model) }
+                    else if fixture == .apiMissing || fixture == .apiReady || fixture == .apiPaused { OrnithAPIPage(model: model) }
                     else if fixture == .generation { OrnithGenerationControls(options: .constant(model.chatOptions), expanded: true).padding(20) }
                     else if fixture == .prefill { OrnithPrefillControls(model: model, expanded: true).padding(20) }
+                    else if fixture == .acceleration { OrnithAccelerationControls(model: model, expanded: true).padding(20) }
                     else if fixture == .profile { OrnithPromptControls(model: model, expanded: true).padding(20) }
+                    else if fixture == .agentUnix || fixture == .agentWindows || fixture == .agentHermes {
+                        OrnithAgentConnectionControls(urls: model.apiURLs, contextTokens: 8192,
+                            initialClient: fixture == .agentHermes ? .hermes : .opencode,
+                            initialComputer: fixture == .agentWindows ? .windows : .unix).padding(20)
+                    }
                     else { OrnithLESPage(model: model) }
                 }.environment(\.colorScheme, scheme)
                 let data: Data

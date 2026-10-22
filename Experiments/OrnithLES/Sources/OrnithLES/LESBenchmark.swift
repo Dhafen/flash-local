@@ -138,6 +138,7 @@ public enum LESBenchmark {
     public static func plan(_ artifact: VerifiedGGUFArtifact, context: Int, depth: Int,
                              pageCache: Bool = false, phase: String,
                              physicalBatchTokens: Int = 4,
+                             experimentReserveBytes: UInt64 = 0,
                              onAdmission: (LESMemoryAdmission) -> Void) throws -> LESMemoryPlan {
         let samples = reclaimIdleBuffers()
         let nativeMemory = LESContext.runtimeMemory
@@ -147,7 +148,8 @@ public enum LESBenchmark {
             }
             guard let footprint = samples.1 else { throw GGUFError.limit("LES memory sample unavailable") }
             let result = try LESMemoryPlan(index: artifact.index, contextTokens: context, footprint: footprint,
-                lookaheadDepth: depth, pageCacheOnly: pageCache, physicalBatchTokens: physicalBatchTokens)
+                lookaheadDepth: depth, pageCacheOnly: pageCache, physicalBatchTokens: physicalBatchTokens,
+                experimentReserveBytes: experimentReserveBytes)
             onAdmission(.init(phase: phase, beforeReclaim: samples.0, afterReclaim: samples.1, plan: result, failure: nil,
                 nativeMemory: nativeMemory))
             return result

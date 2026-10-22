@@ -6,6 +6,7 @@
 #include "llama.h"
 #include "llama-context.h"
 #include "llama-model.h"
+#include "llama-ext.h"
 #include "llama-moe-slot.h"
 #include "gguf.h"
 #include <nlohmann/json.hpp>
@@ -16,6 +17,8 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <cstring>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -30,7 +33,16 @@ extern "C" void flash_omni_metal_snapshot(uint64_t *, uint64_t *, uint64_t *, ui
 extern "C" void flash_omni_memory_snapshot(uint64_t *, uint64_t *, uint64_t *, uint64_t *, bool *);
 static std::atomic<uint64_t> live_contexts{0};
 static thread_local std::string last_error;
-static std::mutex owner;
+static std::atomic_flag owner = ATOMIC_FLAG_INIT;
+// Swift actor calls are serial but may resume on different OS threads.
+// This is an instance lease, not a thread-affine mutex held across calls.
+struct context_lease {
+    const bool acquired = !owner.test_and_set(std::memory_order_acquire);
+    context_lease() = default;
+    context_lease(const context_lease &) = delete;
+    context_lease & operator=(const context_lease &) = delete;
+    ~context_lease() { if (acquired) owner.clear(std::memory_order_release); }
+};
 static std::once_flag initialized;
 static flash_local_loader_diagnostics loader_diagnostics;
 struct loader_log_scope {
@@ -149,8 +161,26 @@ int flo_prepare(int source, const char * directory, flo_abort abort, void * user
     } catch (const std::exception & e) { last_error = e.what(); return -1; }
 }
 
+struct flo_draft {
+    fd_owner source;
+    FILE * file = nullptr;
+    llama_model * model = nullptr;
+    llama_context * context = nullptr;
+    std::vector<int32_t> layers;
+    std::vector<float> features;
+    bool mrope = false;
+    int32_t mask_token = -1;
+    ~flo_draft() {
+        if (context) { llama_synchronize(context); llama_free(context); }
+        if (model) llama_model_free(model);
+        if (file) fclose(file);
+    }
+};
 struct flo_context {
-    std::unique_lock<std::mutex> exclusive;
+    context_lease exclusive; // first member: released after all other members
+    std::unique_ptr<flo_draft> draft;
+    std::vector<uint8_t> prefix_state;
+    int prefix_position = 0;
     fd_owner source;
     fs::path manifest;
     llama_model * model = nullptr;
@@ -160,13 +190,20 @@ struct flo_context {
     int vocabulary = 0, batch = 0, position = 0, capacity = 0;
     int maximum_physical_batch = 0;
     uint64_t skipped_intermediate_outputs = 0;
+    uint64_t state_only_prefill_tokens = 0, state_only_prefill_calls = 0;
+    uint64_t target_tokens = 0, draft_blocks = 0, draft_proposals = 0, draft_accepted = 0, draft_replays = 0, feature_peak = 0;
+    uint64_t additional_reserve = 0;
+    bool experimental_dflash = false, metal = false;
     bool poisoned = false, routing_failed = false;
     flo_checkpoint checkpoint = nullptr;
     void * checkpoint_user = nullptr;
+    flo_diagnostic diagnostic = nullptr;
+    void * diagnostic_user = nullptr;
     flash_local_projection_probe projection_probe;
     flash_local_routing_trace routing;
-    explicit flo_context() : exclusive(owner, std::try_to_lock) { live_contexts.fetch_add(1, std::memory_order_relaxed); }
+    explicit flo_context() { live_contexts.fetch_add(1, std::memory_order_relaxed); }
     ~flo_context() {
+        draft.reset(); // shared embedding/head must outlive the draft context
         // Complete queued GPU work before releasing recurrent state and model
         // buffers, including failed/cancelled forward paths.
         if (context) llama_synchronize(context);
@@ -177,18 +214,31 @@ struct flo_context {
         live_contexts.fetch_sub(1, std::memory_order_relaxed);
     }
 };
+static void diagnostic_phase(flo_context * c, int32_t phase) {
+    if (c->diagnostic) {
+        require(c->diagnostic(phase, c->diagnostic_user), "Cannot persist accelerator diagnostics");
+        check_abort(c->abort, c->user);
+    }
+}
 static void environment(const char * name, int value) {
     require(setenv(name, std::to_string(value).c_str(), 1) == 0, "Cannot configure isolated LES runtime");
 }
 flo_context * flo_open(int source, const char * directory, flo_options o, flo_abort abort, void * user) {
     try {
         last_error.clear(); auto result = std::make_unique<flo_context>();
-        require(result->exclusive.owns_lock(), "Only one LES context may own the engine");
+        require(result->exclusive.acquired, "Only one LES context may own the engine");
         loader_log_scope diagnostic_scope;
         result->source.value = dup(source); require(result->source.value >= 0, "Cannot retain verified descriptor");
         const auto size = file_size(result->source.value); check_abort(abort, user);
         require(o.context_tokens >= 32 && o.context_tokens <= 65536 && o.memory_ceiling_bytes > 0 &&
             o.memory_ceiling_bytes <= 5500000000ULL, "Invalid context or process ceiling");
+        require(o.additional_reserve_bytes <= 1500000000ULL &&
+            (!o.experimental_dflash || (o.context_tokens <= 32768 && o.additional_reserve_bytes >= 800000000ULL &&
+                o.prefill_slots == 32)),
+            "DFlash benchmark needs explicit additional memory, physical batch four and at most 32K context");
+        result->experimental_dflash = o.experimental_dflash;
+        result->additional_reserve = o.additional_reserve_bytes; result->metal = o.metal;
+        result->diagnostic = o.diagnostic; result->diagnostic_user = o.diagnostic_user;
         require(o.lookahead_depth >= 0 && o.lookahead_depth <= 16 && o.io_threads >= 1 && o.io_threads <= 8 &&
             o.cpu_threads >= 1 && o.cpu_threads <= 8, "Invalid scheduling options");
         const bool streaming = directory && *directory;
@@ -232,6 +282,7 @@ flo_context * flo_open(int source, const char * directory, flo_options o, flo_ab
             }
             uint64_t admitted = fs::file_size(fs::path(directory) / "dense.gguf") + (1ULL << 30)
                 + (uint64_t)o.context_tokens * 20480 + 64 * 1024 * 1024;
+            admitted += o.additional_reserve_bytes;
             admitted += uint64_t(std::max(0, std::min(16, o.prefill_slots / 8) - 4)) * (32ULL << 20);
             for (const auto & group : groups)
                 admitted += group.first.second * (o.prefill_slots + (o.cache_slots_per_layer > 0 ? group.second *
@@ -261,14 +312,18 @@ flo_context * flo_open(int source, const char * directory, flo_options o, flo_ab
         result->model_file = fdopen(model_fd, "rb");
         if (!result->model_file) { close(model_fd); throw std::runtime_error("Cannot retain LES model stream"); }
         require(fseek(result->model_file, 0, SEEK_SET) == 0, "Cannot rewind model stream");
+        diagnostic_phase(result.get(), 1);
         result->model = llama_model_load_from_file_ptr(result->model_file, mp);
         if (!result->model) throw std::runtime_error(loader_diagnostics.describe("LES model loading failed"));
         check_abort(abort, user);
         auto cp = llama_context_default_params();
-        cp.n_ctx = o.context_tokens; cp.n_batch = 32;
+        // Extracted target-layer buffers reserve n_batch rows, not just the
+        // current microbatch. Bound them in the DFlash-only context.
+        cp.n_ctx = o.context_tokens; cp.n_batch = o.experimental_dflash ? 16 : 2048;
         cp.n_ubatch = streaming ? std::max(1, std::min(16, o.prefill_slots / 8)) : 1;
         cp.n_threads = cp.n_threads_batch = o.cpu_threads; cp.n_seq_max = 1; cp.n_rs_seq = 0;
-        cp.type_k = cp.type_v = GGML_TYPE_F16; cp.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED;
+        cp.type_k = cp.type_v = GGML_TYPE_F16;
+        cp.flash_attn_type = o.flash_attention ? LLAMA_FLASH_ATTN_TYPE_ENABLED : LLAMA_FLASH_ATTN_TYPE_DISABLED;
         cp.no_perf = false; cp.abort_callback = abort; cp.abort_callback_data = user;
         result->checkpoint = o.checkpoint; result->checkpoint_user = o.checkpoint_user;
         if (o.trace_routing || o.checkpoint) {
@@ -301,6 +356,7 @@ flo_context * flo_open(int source, const char * directory, flo_options o, flo_ab
                 return valid;
             };
         }
+        diagnostic_phase(result.get(), 2);
         result->context = llama_init_from_model(result->model, cp);
         if (!result->context) throw std::runtime_error(loader_diagnostics.describe("LES context allocation failed"));
         result->vocabulary = llama_vocab_n_tokens(llama_model_get_vocab(result->model));
@@ -310,9 +366,12 @@ flo_context * flo_open(int source, const char * directory, flo_options o, flo_ab
 }
 void flo_close(flo_context * c) { delete c; }
 int32_t flo_vocabulary_size(const flo_context * c) { return c ? c->vocabulary : 0; }
-int flo_decode(flo_context * c, const int32_t * tokens, int32_t count, float * output, int32_t capacity) {
+static void draft_process(flo_context *, int position, int count);
+static int decode_tokens(flo_context * c, const int32_t * tokens, int32_t count,
+                         float * output, int32_t capacity, bool return_logits) {
     try {
-        require(c && !c->poisoned && tokens && output && count > 0 && count <= 32 && capacity == c->vocabulary &&
+        require(c && !c->poisoned && tokens && count > 0 && count <= 2048 &&
+            (return_logits ? output && capacity == c->vocabulary : !output && capacity == 0) &&
             count <= c->capacity - c->position, "Invalid LES decode request");
         for (int i = 0; i < count; ++i) require(tokens[i] >= 0 && tokens[i] < c->vocabulary, "Token outside vocabulary");
         for (int first = 0; first < count; first += c->batch) {
@@ -321,26 +380,78 @@ int flo_decode(flo_context * c, const int32_t * tokens, int32_t count, float * o
             // All recurrent/KV work and real expert choices are still evaluated.
             // Only the final microbatch's logits escape this API. The pinned
             // Qwen graph selects output rows after all transformer layers.
-            int8_t no_output[32]{};
-            const bool intermediate = first + n < count;
+            int8_t no_output[16]{};
+            const bool intermediate = !return_logits || first + n < count;
             if (intermediate) batch.logits = no_output;
+            diagnostic_phase(c, 19);
             require(llama_decode(c->context, batch) == 0, "LES forward failed");
+            c->target_tokens += n;
+            if (c->draft) draft_process(c, c->position, n);
             if (intermediate) ++c->skipped_intermediate_outputs;
             c->maximum_physical_batch = std::max(c->maximum_physical_batch, n);
             // ggml's evaluation callback can stop a split without returning an
             // error status. Never export logits from an invalid trace.
             require(!c->routing_failed, "LES routing observation failed"); c->position += n;
         }
-        const float * logits = llama_get_logits_ith(c->context, -1); require(logits, "LES logits unavailable");
-        for (int i = 0; i < capacity; ++i) require(std::isfinite(logits[i]), "Non-finite LES logit");
-        std::copy(logits, logits + capacity, output); check_abort(c->abort, c->user); return 0;
+        if (return_logits) {
+            const float * logits = llama_get_logits_ith(c->context, -1); require(logits, "LES logits unavailable");
+            for (int i = 0; i < capacity; ++i) require(std::isfinite(logits[i]), "Non-finite LES logit");
+            std::copy(logits, logits + capacity, output);
+        } else {
+            // Match the completed-work boundary of the logits path. Do not
+            // publish progress with queued GPU work or retain borrowed inputs.
+            llama_synchronize(c->context);
+            c->state_only_prefill_tokens += count;
+            ++c->state_only_prefill_calls;
+        }
+        check_abort(c->abort, c->user); return 0;
     } catch (const std::exception & e) { if (c) c->poisoned = true; last_error = e.what(); return -1; }
 }
+int flo_decode(flo_context * c, const int32_t * tokens, int32_t count, float * output, int32_t capacity) {
+    return decode_tokens(c, tokens, count, output, capacity, true);
+}
+int flo_ingest(flo_context * c, const int32_t * tokens, int32_t count) {
+    return decode_tokens(c, tokens, count, nullptr, 0, false);
+}
 void flo_reset(flo_context * c) {
+    if (c) { std::vector<uint8_t>().swap(c->prefix_state); c->prefix_position = 0; }
     if (c && !c->poisoned) {
         llama_memory_clear(llama_get_memory(c->context), true); c->position = 0;
+        if (c->draft) llama_memory_clear(llama_get_memory(c->draft->context), true);
         c->routing = {};
     }
+}
+uint64_t flo_capture_prefix(flo_context * c) {
+    try {
+        require(c && !c->poisoned && c->position > 0, "Invalid prefix checkpoint");
+        check_abort(c->abort, c->user);
+        c->prefix_state.clear(); c->prefix_position = 0;
+        const auto flags = LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY;
+        const size_t size = llama_state_seq_get_size_ext(c->context, 0, flags);
+        require(size > 0 && size <= (128ULL << 20), "Recurrent checkpoint exceeds 128 MiB");
+        c->prefix_state.resize(size);
+        require(llama_state_seq_get_data_ext(c->context, c->prefix_state.data(), size, 0, flags) == size,
+            "Incomplete recurrent checkpoint");
+        c->prefix_position = c->position;
+        return size;
+    } catch (const std::exception & e) {
+        if (c) { std::vector<uint8_t>().swap(c->prefix_state); c->prefix_position = 0; }
+        last_error = e.what(); return 0;
+    }
+}
+int flo_restore_prefix(flo_context * c) {
+    try {
+        require(c && !c->poisoned && c->prefix_position > 0 && !c->prefix_state.empty(), "No reusable prefix checkpoint");
+        check_abort(c->abort, c->user);
+        // The pinned hybrid implementation restores only recurrent state for
+        // PARTIAL_ONLY. Restore that first, then discard attention suffix cells;
+        // recurrent seq_rm now sees no state beyond the checkpoint position.
+        require(llama_state_seq_set_data_ext(c->context, c->prefix_state.data(), c->prefix_state.size(),
+            0, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY) == c->prefix_state.size(), "Prefix state restore failed");
+        require(llama_memory_seq_rm(llama_get_memory(c->context), 0, c->prefix_position, -1), "Prefix KV suffix trim failed");
+        c->position = c->prefix_position;
+        return 0;
+    } catch (const std::exception & e) { if (c) c->poisoned = true; last_error = e.what(); return -1; }
 }
 flo_metrics flo_snapshot(const flo_context * c) {
     flo_metrics out{};
@@ -351,6 +462,12 @@ flo_metrics flo_snapshot(const flo_context * c) {
         out.configured_physical_batch_tokens = c->batch;
         out.maximum_physical_batch_tokens = c->maximum_physical_batch;
         out.skipped_intermediate_output_batches = c->skipped_intermediate_outputs;
+        out.target_tokens_evaluated = c->target_tokens; out.dflash_blocks = c->draft_blocks;
+        out.dflash_proposals = c->draft_proposals; out.dflash_accepted = c->draft_accepted;
+        out.dflash_replays = c->draft_replays; out.dflash_feature_peak_bytes = c->feature_peak;
+        out.flash_attention_active = c->context && c->context->get_cparams().flash_attn;
+        out.state_only_prefill_tokens = c->state_only_prefill_tokens;
+        out.state_only_prefill_calls = c->state_only_prefill_calls;
         const auto & p = c->projection_probe;
         out.probe_samples = p.samples; out.probe_columns = p.columns;
         out.probe_weight_type = p.weight_type; out.probe_cpu_input_type = p.cpu_input_type;
@@ -372,4 +489,6 @@ flo_metrics flo_snapshot(const flo_context * c) {
     return out;
 }
 const char * flo_last_error() { return last_error.c_str(); }
-const char * flo_revision() { return "96bbf61710d44421ea54e63f5194f9b17c20d877+flash-local-batch-observation-v2"; }
+const char * flo_revision() { return "96bbf61710d44421ea54e63f5194f9b17c20d877+flash-local-experiments-v9"; }
+
+#include "DFlashBenchmark.inc"

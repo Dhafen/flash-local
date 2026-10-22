@@ -3,10 +3,159 @@ import Foundation
 import XCTest
 import MinirunKit
 import OrnithLES
+import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 @testable import MinirunApp
 
 @MainActor
 final class OrnithLESAppTests: XCTestCase {
+    func testInterruptedAccelerationRecoversDiagnosticWithoutStartingAnyEngine() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("app-acceleration-recovery-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let journal = try LESAccelerationJournal(directory: root.appendingPathComponent("Diagnostics"),
+            sourceRevision: "test-source", appBuild: "test-build", candidate: .dflash, contextTokens: 8192)
+        XCTAssertTrue(journal.recordNativePhase(13))
+        let model = OrnithLESAppModel(modelsRoot: root, privateRoot: root, documents: root)
+        model.recoverAccelerationDiagnostics()
+        XCTAssertEqual(model.accelerationReportURL, journal.url)
+        XCTAssertTrue(model.error?.contains("draft.fusion") == true)
+        XCTAssertFalse(model.isBusy); XCTAssertFalse(model.chatReady); XCTAssertFalse(model.isAPIRunning)
+        XCTAssertTrue(model.chatMessages.isEmpty)
+        XCTAssertNil(model.accelerationReport)
+    }
+    func testAccelerationPreviewCannotDownloadInferOrReplaceChat() {
+        for thinking in [false, true] {
+            let model = OrnithLESAppModel.reviewChatPreview(thinking: thinking)
+            let history = model.chatMessages.map(\.id), status = model.status
+            // The active-reasoning fixture deliberately draws a busy UI. A
+            // rejected action must preserve that state, not turn it idle.
+            XCTAssertEqual(model.isBusy, thinking)
+            XCTAssertFalse(model.canBenchmark); XCTAssertFalse(model.canStart)
+            model.accelerationCandidate = .dflash
+            model.downloadAccelerationDraft(); model.startAccelerationBenchmark()
+            XCTAssertEqual(model.isBusy, thinking); XCTAssertTrue(model.chatReady)
+            XCTAssertEqual(model.status, status)
+            XCTAssertEqual(model.chatMessages.map(\.id), history)
+            XCTAssertNil(model.accelerationReport); XCTAssertNil(model.accelerationReportURL)
+            XCTAssertFalse(model.accelerationDraftPresent); XCTAssertNil(model.error)
+            XCTAssertFalse(model.isAPIRunning)
+        }
+    }
+    func testPausedListenerKeepsControlsLockedAndDoesNotClaimReadyServer() {
+        let model = OrnithLESAppModel.reviewPausedAPIPreview()
+        XCTAssertTrue(model.isAPIListening); XCTAssertFalse(model.isAPIRunning)
+        XCTAssertTrue(model.chatReady); XCTAssertFalse(model.sceneIsActive)
+        XCTAssertEqual(model.loadState, "Redo")
+        model.stopAPI()
+        XCTAssertFalse(model.isAPIListening); XCTAssertTrue(model.chatReady)
+    }
+    func testIdleBackgroundAndForegroundPreserveLoadedModelAndConversation() async {
+        let model = OrnithLESAppModel.reviewChatPreview(thinking: false)
+        let messages = model.chatMessages.map(\.id)
+        XCTAssertTrue(model.chatReady)
+        model.prepareForInactivity()
+        XCTAssertFalse(model.sceneIsActive); XCTAssertTrue(model.chatReady)
+        await model.enterBackground()
+        XCTAssertTrue(model.chatReady); XCTAssertEqual(model.chatMessages.map(\.id), messages)
+        model.enterForeground()
+        XCTAssertTrue(model.sceneIsActive); XCTAssertTrue(model.chatReady)
+        await model.unloadModel()
+        XCTAssertFalse(model.chatReady); XCTAssertEqual(model.chatMessages.map(\.id), messages)
+        XCTAssertEqual(model.loadState, "Ej laddad")
+    }
+    func testRootOwnerRetainsSameSessionAcrossViewRecreation() {
+        let root = FileManager.default.temporaryDirectory
+        let owner = REAMAppModel(root: root)
+        let first = owner.ornithSession
+        _ = REAMRootView(model: owner); _ = REAMRootView(model: owner)
+        XCTAssertTrue(first === owner.ornithSession)
+    }
+    func testStoppingIdleAPIDoesNotUnloadModelOrDeleteConversation() {
+        let model = OrnithLESAppModel.reviewChatPreview(thinking: false)
+        let messages = model.chatMessages.map(\.id)
+        model.stopAPI()
+        XCTAssertTrue(model.chatReady); XCTAssertEqual(model.chatMessages.map(\.id), messages)
+        XCTAssertFalse(model.isAPIRunning)
+    }
+    func testRestoredPrivateHistoryDoesNotClaimWarmKVAfterProcessRestart() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let history = [REAMMessage(role: .user, text: "Synthetic cache test"),
+            REAMMessage(role: .assistant, text: "Fixture answer", reasoning: "Fixture reasoning", isThinking: true)]
+        try JSONEncoder().encode(history).write(to: root.appendingPathComponent("quick-chat-v1.json"))
+        let app = OrnithLESAppModel(modelsRoot: root, privateRoot: root, documents: root)
+        app.restoreHistory()
+        XCTAssertEqual(app.chatMessages.map(\.text), history.map(\.text))
+        XCTAssertEqual(app.chatMessages.last?.isThinking, false)
+        XCTAssertEqual(app.chatMessages.last?.interrupted, true)
+        XCTAssertFalse(app.chatReady); XCTAssertNil(app.chatSummary)
+        await app.unloadModel()
+        XCTAssertEqual(app.chatMessages.count, 2)
+    }
+    func testActiveOwnerBootstrapsModelStorageWithoutCreatingUnverifiedDerivedFiles() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("les-first-start-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let models = root.appendingPathComponent("Models"), privateRoot = root.appendingPathComponent("private")
+        let app = OrnithLESAppModel(modelsRoot: models, privateRoot: privateRoot, documents: root)
+        app.activateChat()
+        for _ in 0..<100 {
+            if !app.isBusy { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertFalse(app.isBusy)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: models.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: privateRoot.path))
+        XCTAssertFalse(app.chatReady); XCTAssertTrue(app.chatMessages.isEmpty)
+        await app.shutdown()
+    }
+    #if os(macOS)
+    func testLESRootDoesNotPrepareTheInvisibleLegacyModelOwner() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("inactive-legacy-" + UUID().uuidString)
+        let legacy = REAMAppModel(root: root)
+        let host = NSHostingView(rootView: REAMRootView(model: legacy))
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 430, height: 900),
+            styleMask: .borderless, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false; window.contentView = host; window.orderFront(nil)
+        defer { window.close(); try? FileManager.default.removeItem(at: root) }
+        host.layoutSubtreeIfNeeded()
+        // Give the real .task lifecycle an opportunity to run. The old root
+        // creates this directory and starts verification even though hidden.
+        try await Task.sleep(for: .milliseconds(250))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+        XCTAssertFalse(legacy.isBusy); XCTAssertNil(legacy.error)
+    }
+    #endif
+    func testSamplingSurvivesReasoningToggleAndClosingReopeningTheModel() throws {
+        let suite = "OrnithSampling-" + UUID().uuidString
+        let preferences = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { preferences.removePersistentDomain(forName: suite) }
+        var model: OrnithLESAppModel? = .live(preferences: preferences)
+        model?.chatOptions.temperature = 0.7; model?.chatOptions.topP = 0.93; model?.chatOptions.seed = 1234
+        model?.chatThinkingEnabled = false
+        XCTAssertEqual(model?.chatOptions.temperature, 0.7)
+        model = nil
+        let reopened = OrnithLESAppModel.live(preferences: preferences)
+        XCTAssertEqual(reopened.chatOptions.temperature, 0.7)
+        XCTAssertEqual(reopened.chatOptions.topP, 0.93); XCTAssertEqual(reopened.chatOptions.seed, 1234)
+        XCTAssertFalse(reopened.chatThinkingEnabled)
+        reopened.chatThinkingEnabled = true
+        XCTAssertEqual(reopened.chatOptions.temperature, 0.7)
+    }
+    func testChosenContextAndAutomaticBatchSurviveReopeningWithoutClaimingLoadedKV() throws {
+        let suite = "OrnithContext-" + UUID().uuidString
+        let preferences = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { preferences.removePersistentDomain(forName: suite) }
+        let first = OrnithLESAppModel.live(preferences: preferences)
+        first.contextProfile = try XCTUnwrap(LocalContextProfile(rawValue: 65536))
+        first.automaticBatch = false
+        let reopened = OrnithLESAppModel.live(preferences: preferences)
+        XCTAssertEqual(reopened.contextProfile.rawValue, 65536)
+        XCTAssertFalse(reopened.automaticBatch); XCTAssertFalse(reopened.chatReady)
+        XCTAssertNil(reopened.chatSummary)
+    }
     func testWorkProfilesOnlyChangeEditableSystemInstruction() {
         let root = FileManager.default.temporaryDirectory
         let model = OrnithLESAppModel(modelsRoot: root, privateRoot: root, documents: root)

@@ -9,10 +9,10 @@ public struct LESPrefillConfiguration: Codable, Equatable, Sendable {
     public var physicalTokens: Int = 0
     public init() {}
     public func validate() throws {
-        guard [1, 4, 8, 16, 32].contains(evaluationTokens),
+        guard [1, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048].contains(evaluationTokens),
               [0, 1, 4, 8, 16].contains(physicalTokens),
               physicalTokens == 0 || physicalTokens <= evaluationTokens else {
-            throw GGUFError.limit("Välj evaluation 1/4/8/16/32 och fysisk batch Auto/1/4/8/16, högst evaluation.")
+            throw GGUFError.limit("Evaluation stöder 1–2048 i fasta steg. Fysisk batch stöder Auto/1/4/8/16, högst evaluation; större fysiska grafer är ännu inte validerade.")
         }
     }
     public func physicalTokens(checkedDefault: Int) throws -> Int {

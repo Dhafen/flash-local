@@ -79,7 +79,7 @@ public final class CanonicalQwen35Tokenizer {
     }
 
     public func chat(_ messages: [Qwen35ChatMessage], maximumTokens: Int,
-                     enableThinking: Bool = false) throws -> ChatPrompt {
+                     enableThinking: Bool = false, tools: [LocalToolDefinition] = []) throws -> ChatPrompt {
         try artifact.assertUnchanged()
         let expectedTemplate = artifact.index.metadata["general.architecture"]?.text == "qwen35moe"
             ? Self.supportedOrnithTemplateSHA256 : Self.supportedTemplateSHA256
@@ -97,17 +97,23 @@ public final class CanonicalQwen35Tokenizer {
             }
             guard contentBytes <= 262144 else { throw GGUFError.limit("chat content exceeds 256 KiB") }
         }
-        let json = try JSONEncoder().encode(messages)
+        var json = try JSONEncoder().encode(messages)
+        let agent = !tools.isEmpty || messages.contains { $0.role == .tool || $0.toolCalls?.isEmpty == false }
+        if agent {
+            let raw = try JSONSerialization.jsonObject(with: json)
+            json = try JSONSerialization.data(withJSONObject: ["messages": raw, "tools": tools.map(\.json)], options: [.sortedKeys])
+        }
         guard json.count <= 1048576 else { throw GGUFError.limit("chat JSON exceeds 1 MiB") }
+        let render = agent ? flt_render_agent_chat : flt_render_chat_with_thinking
         let size = json.withUnsafeBytes {
-            flt_render_chat_with_thinking(handle, $0.bindMemory(to: CChar.self).baseAddress,
-                                         Int32(json.count), enableThinking, nil, 0)
+            render(handle, $0.bindMemory(to: CChar.self).baseAddress,
+                   Int32(json.count), enableThinking, nil, 0)
         }
         guard size < 0, size != Int32.min, -Int(size) <= 524288 else { throw Self.failure() }
         var rendered = [CChar](repeating: 0, count: -Int(size))
         let written = json.withUnsafeBytes { input in
             rendered.withUnsafeMutableBufferPointer { output in
-                flt_render_chat_with_thinking(handle, input.bindMemory(to: CChar.self).baseAddress,
+                render(handle, input.bindMemory(to: CChar.self).baseAddress,
                     Int32(json.count), enableThinking, output.baseAddress, Int32(output.count))
             }
         }

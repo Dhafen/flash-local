@@ -51,7 +51,9 @@ jobs:
           PY
           git -C .work/swiftlet-validation diff -- Tests > .work/swiftlet-validation/test-scheduling.patch
       - name: Bounded metadata inspection logic
-        run: python3 -m unittest discover -s scripts/tests -p 'test_ornith_mlx_metadata.py' -v
+        run: |
+          python3 -m unittest discover -s scripts/tests -p 'test_ornith_mlx_metadata.py' -v
+          python3 -m unittest discover -s scripts/tests -p 'test_qpack_validation_log.py' -v
       - name: Swiftlet correctness and KV placement controls (synthetic only)
         id: core
         continue-on-error: true
@@ -65,7 +67,7 @@ jobs:
             -skip-testing:SwiftletCoreTests/SwiftletSessionTests \
             -skip-testing:SwiftletCoreTests/TextGeneratorTests \
             -resultBundlePath swiftlet-tests.xcresult 2>&1 | tee swiftlet-tests.log | tail -70
-          test "$(grep -c 'ORNITH_KV_PLACEMENT model=' swiftlet-tests.log)" -eq 3
+          python3 ../../scripts/check_qpack_validation_log.py swiftlet-tests.log
           grep 'ORNITH_EXPERT_IO returnedBytesCounted=true hotHitsReadZero=true' swiftlet-tests.log
           test "$(grep -c 'GROUPED_QPACK topK=' swiftlet-tests.log)" -eq 2
           # Run the semaphore/deadline lifecycle probes without concurrent

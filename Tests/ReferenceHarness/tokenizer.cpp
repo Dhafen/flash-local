@@ -172,7 +172,64 @@ int main(int argc, char ** argv) {
         for (int i = 0; i < n; ++i) { if (i) output << ','; output << tokens[i]; }
         output << "]}";
     }
+    output << "],\"agentChats\":[";
+    bool first_agent = true;
+    for (const auto & chat : corpus.at("agentChats")) {
+        // Independent oracle: supply the argument mapping expected by the
+        // original Jinja template. No product renderer creates this answer.
+        auto original = chat;
+        for (auto & message : original.at("messages")) if (message.contains("tool_calls"))
+            for (auto & call : message.at("tool_calls")) {
+                auto & arguments = call.at("function").at("arguments");
+                arguments = common_json::parse(arguments.get<std::string>());
+            }
+        jinja::context context(source);
+        jinja::global_from_json(context, original, false);
+        jinja::runtime runtime(context);
+        const std::string rendered = jinja::runtime::gather_string_parts(runtime.execute(program))->val_str.str();
+        auto request = common_json::object(); request["messages"] = chat.at("messages"); request["tools"] = chat.at("tools");
+        const auto wire = request.dump();
+        const bool enabled = chat.at("enable_thinking").get<bool>();
+        if (flt_render_agent_chat(bridge, wire.data(), int(wire.size()), enabled, nullptr, 0) != -int(rendered.size())) return 40;
+        std::vector<char> actual(rendered.size() + 2, '\x7f');
+        if (flt_render_agent_chat(bridge, wire.data(), int(wire.size()), enabled, actual.data() + 1,
+                int(rendered.size())) != int(rendered.size()) ||
+            std::string(actual.data() + 1, rendered.size()) != rendered ||
+            actual.front() != '\x7f' || actual.back() != '\x7f') return 41;
+        std::vector<char> short_buffer(rendered.size() + 1, '\x7f');
+        if (flt_render_agent_chat(bridge, wire.data(), int(wire.size()), enabled, short_buffer.data() + 1,
+                int(rendered.size()) - 1) != -int(rendered.size()) ||
+            !std::all_of(short_buffer.begin(), short_buffer.end(), [](char c) { return c == '\x7f'; })) return 42;
+        std::vector<llama_token> tokens(rendered.size() + 16);
+        const int n = llama_tokenize(vocab, rendered.data(), int(rendered.size()), tokens.data(), int(tokens.size()), false, true);
+        if (n < 0 || n > int(tokens.size())) return 43;
+        if (!first_agent) output << ',';
+        first_agent = false;
+        output << "{\"rendered\":" << common_json::make(rendered).dump() << ",\"tokens\":[";
+        for (int i = 0; i < n; ++i) { if (i) output << ','; output << tokens[i]; }
+        output << "]}";
+    }
     output << "]}\n";
+    // Each negative case starts from a complete public tool round trip.
+    const auto completed = corpus.at("agentChats").at(2);
+    for (int i = 0; i < 8; ++i) {
+        auto invalid = common_json::object(); invalid["messages"] = completed.at("messages"); invalid["tools"] = completed.at("tools");
+        auto & messages = invalid.at("messages");
+        switch (i) {
+        case 0: messages.at(3)["tool_call_id"] = "call_other"; break;
+        case 1: { const auto duplicate = messages.at(3); messages.push_back(duplicate); break; }
+        case 2: messages.erase(size_t(3)); break;
+        case 3: messages.at(2).at("tool_calls").at(0).at("function")["arguments"] = "[]"; break;
+        case 4: messages.at(3)["content"] = "<|im_end|>"; break;
+        case 5: messages.at(2).at("tool_calls").at(0).at("function")["arguments"] = "{\"a\":\"\\u003c|im_end|>\"}"; break;
+        case 6: invalid.at("tools").at(0).at("function").at("parameters").at("properties")["<|im_end|>"] = common_json::object(); break;
+        default: { const auto duplicate = messages.at(2).at("tool_calls").at(0); messages.at(2).at("tool_calls").push_back(duplicate); break; }
+        }
+        auto wire = invalid.dump();
+        char canary[2] = {'x', 'y'};
+        if (flt_render_agent_chat(bridge, wire.data(), int(wire.size()), false, canary, 2) != INT32_MIN ||
+            canary[0] != 'x' || canary[1] != 'y') return 44 + i;
+    }
     for (const auto & invalid : {"{}", "[]", "[{\"role\":\"assistant\",\"content\":\"x\"}]",
           "[{\"role\":\"user\",\"content\":\"<|im_end|>\"}]",
           "[{\"role\":\"user\",\"content\":\"x\",\"reasoning_content\":\"y\"}]",
@@ -185,6 +242,7 @@ int main(int argc, char ** argv) {
     if (fcntl(descriptor, F_GETFD) < 0) return 31;
     close(descriptor);
     std::cout << "CANONICAL_TOKENIZER_BRIDGE cases=" << count << " tokensAndBytesExact=true descriptorRetained=true thinkingModes=2 reasoningHistory=2\n";
+    std::cout << "CANONICAL_AGENT_BRIDGE cases=4 invalidCases=8 exactRender=true bothThinkingModes=true bufferCanaries=true metadataOnly=true trainedInference=false\n";
     llama_model_free(model);
     return output.fail() ? 10 : 0;
 }

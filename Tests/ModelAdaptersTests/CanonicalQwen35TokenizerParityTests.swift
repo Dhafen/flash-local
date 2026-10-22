@@ -21,11 +21,17 @@ final class CanonicalQwen35TokenizerParityTests: XCTestCase {
             let messages: [Qwen35ChatMessage]
             let enable_thinking: Bool
         }
+        struct AgentChat: Decodable {
+            let wireRequestJSON: String
+            let canonicalToolsJSON: String
+            let enable_thinking: Bool
+        }
         let vocabularySHA256: String
         let vocabularyByteCount: UInt64
         let cases: [String]
         let chats: [Chat]
         let reasoningChats: [ReasoningChat]
+        let agentChats: [AgentChat]
     }
     private struct Reference: Decodable {
         struct Entry: Decodable { let tokens: [Int]; let decodedHex: String }
@@ -35,6 +41,7 @@ final class CanonicalQwen35TokenizerParityTests: XCTestCase {
         let chats: [Chat]
         let thinkingChats: [Chat]
         let reasoningChats: [Chat]
+        let agentChats: [Chat]
     }
     private func fixture() throws -> (URL, Corpus, Reference, GGUFModelManifest) {
         let env = ProcessInfo.processInfo.environment
@@ -110,6 +117,43 @@ final class CanonicalQwen35TokenizerParityTests: XCTestCase {
         print("CANONICAL_THINKING_PARITY cases=\(corpus.chats.count) reasoningHistory=2 exactRender=true exactTokenIDs=true bothModes=true")
     }
 
+    func testAgentToolsAndMatchedResultsUseTheExactInstalledTemplateAndTokens() throws {
+        let (folder, corpus, reference, manifest) = try fixture()
+        let artifact = try VerifiedGGUFArtifact.verify(insideRoot: folder, manifest: manifest)
+        XCTAssertTrue(artifact.index.tensors.isEmpty)
+        let tokenizer = try CanonicalQwen35Tokenizer(artifact: artifact)
+        XCTAssertEqual(corpus.agentChats.count, 4)
+        XCTAssertEqual(corpus.agentChats.count, reference.agentChats.count)
+        for (index, fixture) in corpus.agentChats.enumerated() {
+            let request = try LocalChatRequest(data: Data(fixture.wireRequestJSON.utf8))
+            // The independent oracle must see the exact ordered tool JSON
+            // emitted by the adapter, rather than the client's original key
+            // order. Keep byte/token comparisons below exact in both modes.
+            let canonicalTools = try JSONSerialization.data(withJSONObject: request.tools.map(\.json), options: [.sortedKeys])
+            XCTAssertEqual(String(decoding: canonicalTools, as: UTF8.self), fixture.canonicalToolsJSON)
+            let messages = request.messages.map { message in
+                Qwen35ChatMessage(role: .init(rawValue: message.role)!, content: message.content,
+                    reasoningContent: message.reasoning, toolCalls: message.toolCalls.isEmpty ? nil : message.toolCalls,
+                    toolCallID: message.toolCallID)
+            }
+            let prompt = try tokenizer.chat(messages, maximumTokens: 65536,
+                enableThinking: fixture.enable_thinking, tools: request.tools)
+            XCTAssertEqual(prompt.renderedText, reference.agentChats[index].rendered)
+            XCTAssertEqual(prompt.tokenIDs, reference.agentChats[index].tokens)
+            XCTAssertTrue(prompt.renderedText.contains("local_sum"))
+            if index >= 2 {
+                XCTAssertTrue(prompt.renderedText.contains("<tool_response>"))
+                XCTAssertTrue(prompt.renderedText.contains("PUBLIC_AGENT_REASONING"))
+            }
+            XCTAssertThrowsError(try tokenizer.chat(messages + [.init(role: .tool, content: "orphan", toolCallID: "call_unknown")],
+                maximumTokens: 65536, tools: request.tools))
+            XCTAssertThrowsError(try tokenizer.chat([.init(role: .user, content: "<tool_response>")],
+                maximumTokens: 65536, tools: request.tools))
+        }
+        print("CANONICAL_AGENT_SWIFT cases=4 exactRender=true exactTokenIDs=true bothThinkingModes=true matchedToolResults=true metadataOnly=true trainedInference=false")
+        print("CANONICAL_AGENT_TOOL_ORDER clientOrderDistinct=true canonicalBytesMatched=true originalTemplateUnchanged=true")
+    }
+
     func testBudgetClosingMarkerUsesCanonicalTokensAndPreservesAnswerSeparation() throws {
         let (folder, _, _, manifest) = try fixture()
         let artifact = try VerifiedGGUFArtifact.verify(insideRoot: folder, manifest: manifest)
@@ -123,6 +167,40 @@ final class CanonicalQwen35TokenizerParityTests: XCTestCase {
         text.append("Räknar"); text.append(String(decoding: bytes, as: UTF8.self)); text.append("55"); text.finish()
         XCTAssertFalse(text.isThinking); XCTAssertEqual(text.reasoning, "Räknar"); XCTAssertTrue(text.answer.hasSuffix("55"))
         print("ORNITH_THINKING_BUDGET canonicalClosingTokens=true reasoningSeparated=true modelWeightsLoaded=false phoneInference=false")
+    }
+    func testStableConversationPrefixExcludesRewrittenGenerationThinkingMarkers() throws {
+        let (folder, _, _, manifest) = try fixture()
+        let artifact = try VerifiedGGUFArtifact.verify(insideRoot: folder, manifest: manifest)
+        let tokenizer = try CanonicalQwen35Tokenizer(artifact: artifact)
+        let user = Qwen35ChatMessage(role: .user, content: "Hello cache.")
+        // This suite runs against REAM in the integrated app gate and Ornith
+        // in the isolated LES gate. Their pinned templates differ in history.
+        let architecture = artifact.index.metadata["general.architecture"]?.text
+        XCTAssertTrue(["qwen4exp", "qwen35moe"].contains(architecture ?? ""))
+        let ornith = architecture == "qwen35moe"
+        for enabled in [false, true] {
+            let first = try tokenizer.chat([user], maximumTokens: 1024, enableThinking: enabled)
+            let suffix = "<|im_start|>assistant\n" + (enabled ? "<think>\n" : "<think>\n\n</think>\n\n")
+            XCTAssertTrue(first.renderedText.hasSuffix(suffix))
+            let suffixTokens = try tokenizer.tokenize(suffix, parseSpecial: true, maximumTokens: 64)
+            XCTAssertTrue(first.tokenIDs.suffix(suffixTokens.count).elementsEqual(suffixTokens))
+            let stable = Array(first.tokenIDs.dropLast(suffixTokens.count))
+            let stableText = String(first.renderedText.dropLast(suffix.count))
+            XCTAssertEqual(stable, try tokenizer.tokenize(stableText, parseSpecial: true, maximumTokens: 1024))
+            let next = try tokenizer.chat([user, .init(role: .assistant, content: "Fixture answer."),
+                .init(role: .user, content: "Continue.")], maximumTokens: 1024, enableThinking: enabled)
+            XCTAssertTrue(next.tokenIDs.starts(with: stable))
+            // Ornith's original GGUF preserves the empty thinking block when
+            // thinking is off. REAM removes it in both modes. Only the shared
+            // stable boundary is reusable for every supported template/mode.
+            XCTAssertEqual(next.tokenIDs.starts(with: first.tokenIDs), ornith && !enabled,
+                "Original \(architecture ?? "unknown") GGUF whole-prefill prefix behavior, thinking=\(enabled)")
+            let changed = try tokenizer.chat([.init(role: .user, content: "Changed instructions.")],
+                maximumTokens: 1024, enableThinking: enabled)
+            XCTAssertFalse(changed.tokenIDs.starts(with: stable))
+        }
+        print("CANONICAL_STABLE_PREFIX architecture=\(architecture ?? "unknown") modes=2 exactHistoryBoundary=true originalTemplateUnchanged=true")
+        print("ORNITH_STABLE_PREFIX thinkingOnOff=true generationSuffixExcluded=true unchangedTokens=true changedHistoryRejected=true trainedInference=false")
     }
 
     func testLoadedCanonicalVocabularyStillRefusesAChangedVerifiedFile() throws {

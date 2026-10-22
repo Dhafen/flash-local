@@ -1,6 +1,31 @@
 # Private internal TestFlight delivery
 
-## Current build 126: prompt batches and work profiles
+## Current build 206: persistent settings and live agent commands
+
+Private **0.1.0 (206)** is independently confirmed available to the unchanged
+own-tester group, source `73e5ed611f6dcb8d4c3e695ef701c8db3c5b2e98`.
+[Delivery and verified gates](SECURITY-AI-SERVER.md#delivered-checkpoint-010-206)
+include native LES/QPack, 588 app controls, 492 package controls (nine skips),
+27 real TCP/Keychain API controls, iOS compilation, 76 reviewed captures,
+archive inspection and Apple signing. Protocol generation controls are synthetic.
+
+Temperature, top-p and seed persist across reopening/reasoning-mode changes.
+The API page has copyable live-address commands for OpenCode, Codex, Hermes
+and PentAGI, with prerequisites and explicit client limitations. The first
+startup comparison in this version remains mandatory; subsequent unchanged
+activations may reuse a device-authenticated admission. File integrity and
+current memory checks remain. Duplicate hidden model verification is removed.
+[Connection and acceptance steps](PHONE-AGENT-LAUNCHER.md).
+
+The API supports declared function calls, matched tool results, JSON/SSE and a
+configurable Keychain credential. The first real iPhone/Kali round trip still
+needs the [physical acceptance test](SECURITY-AI-SERVER.md#first-phone-acceptance-test).
+The 8,192-token configured limit is not proof of trained 8K reliability.
+Keep the installed app/model and update without reinstalling. Markdown display
+corrections are included. Startup improvement, physical client interoperability
+and trained tool-call quality need the phone acceptance report.
+
+## Previous build 126: prompt batches and work profiles
 
 Private **0.1.0 (126)** is available to the existing internal group, runtime source
 `6c1084c87b35c749a5152c140c4828e9dde84126`. [Delivery run 39250964590](https://github.com/Dhafen/flash-local/actions/runs/39250964590) passes 32 selected native/chat/tokenizer

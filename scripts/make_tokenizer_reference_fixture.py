@@ -118,6 +118,36 @@ def main(ornith=False):
                       {"role": "user", "content": "Continue"}],
          "enable_thinking": enabled, "preserve_thinking": True,
          "add_generation_prompt": True} for enabled in (False, True)]
+    # Public fixtures only. OpenAI carries arguments as JSON text; the pinned
+    # Jinja template expects a mapping. The independent C++ oracle converts
+    # that representation explicitly, without calling our product renderer.
+    # The Swift adapter serializes validated tool definitions with sortedKeys
+    # before rendering. Give the oracle that same ordered JSON, since Jinja's
+    # tojson preserves object-key order and otherwise produces different tokens.
+    # Keep the client request in its original order to exercise this boundary.
+    tool = {"type": "function", "function": {
+        "name": "local_sum", "description": "Add two public integers locally.",
+        "parameters": {"type": "object", "properties": {
+            "a": {"type": "integer"}, "b": {"type": "integer"}},
+            "required": ["a", "b"], "additionalProperties": False}, "strict": True}}
+    template_tools = json.loads(json.dumps([tool], sort_keys=True))
+    assert template_tools == [tool], "Ordering must not change tool names, schemas or values"
+    assert json.dumps(template_tools) != json.dumps([tool]), "Exercise distinct client/template key order"
+    first = [{"role": "system", "content": "Use a declared function when needed."},
+             {"role": "user", "content": "Calculate 50 plus 5."}]
+    result = first + [{"role": "assistant", "content": "",
+                      "reasoning_content": "PUBLIC_AGENT_REASONING",
+                      "tool_calls": [{"id": "call_public_sum", "type": "function",
+                                      "function": {"name": "local_sum", "arguments": '{"a":50,"b":5}'}}]},
+                     {"role": "tool", "tool_call_id": "call_public_sum", "content": '{"sum":55}'}]
+    manifest["agentChats"] = [
+        {"messages": messages, "tools": template_tools, "enable_thinking": enabled,
+         "preserve_thinking": messages is result, "add_generation_prompt": True}
+        for messages in (first, result) for enabled in (False, True)]
+    for chat in manifest["agentChats"]:
+        chat["canonicalToolsJSON"] = json.dumps(template_tools, separators=(",", ":"))
+        chat["wireRequestJSON"] = json.dumps({"model": "ornith-1.5-35b-a3b",
+                                              "messages": chat["messages"], "tools": [tool]})
     (folder / "qwen35-tokenizer-corpus.json").write_text(
         json.dumps(manifest, ensure_ascii=True), encoding="utf-8")
     binary = bytearray(struct.pack("<I", len(cases)))

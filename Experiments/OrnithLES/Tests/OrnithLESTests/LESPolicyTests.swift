@@ -19,6 +19,37 @@ final class LESPolicyTests: XCTestCase {
         let artifact = try VerifiedGGUFArtifact.verify(insideRoot: root, manifest: manifest)
         try body(root, artifact, data)
     }
+    func testStateOnlyPrefillPreservesLogitsRoutingAndCheckpointWithoutStaleOutput() throws {
+        try withPreparationFixture { root, artifact, _ in
+            let control = LESControl()
+            let prepared = try LESPreparation.prepare(artifact: artifact,
+                privateRoot: root.appendingPathComponent("prepared"), control: control)
+            let plan = try LESMemoryPlan(index: artifact.index, contextTokens: 32,
+                footprint: XCTUnwrap(ProcessFootprint.current()))
+            let engine = try LESContext(artifact: artifact, prepared: prepared, plan: plan,
+                control: control, traceRouting: true, syntheticCPUControl: true)
+            defer { engine.close() }
+            _ = try engine.logits(tokens: [1, 2, 3, 4])
+            let expected = try engine.logits(tokens: [2])
+            let expectedExpertSets = engine.metrics.canonicalExpertSetDigest
+            engine.reset()
+            let before = engine.metrics
+            try engine.ingest(tokens: [1, 2])
+            try engine.ingest(tokens: [3, 4])
+            XCTAssertGreaterThan(engine.capturePrefix(), 0)
+            let actual = try engine.logits(tokens: [2])
+            XCTAssertEqual(actual.map(\.bitPattern), expected.map(\.bitPattern))
+            XCTAssertEqual(engine.metrics.canonicalExpertSetDigest, expectedExpertSets)
+            XCTAssertEqual(try XCTUnwrap(engine.metrics.stateOnlyPrefillTokens) - XCTUnwrap(before.stateOnlyPrefillTokens), 4)
+            XCTAssertEqual(try XCTUnwrap(engine.metrics.stateOnlyPrefillCalls) - XCTUnwrap(before.stateOnlyPrefillCalls), 2)
+            XCTAssertEqual(try XCTUnwrap(engine.metrics.targetTokensEvaluated) - XCTUnwrap(before.targetTokensEvaluated), 5)
+            _ = try engine.logits(tokens: [3])
+            try engine.restorePrefix()
+            let restored = try engine.logits(tokens: [2])
+            XCTAssertEqual(restored.map(\.bitPattern), expected.map(\.bitPattern))
+            print("ORNITH_STATE_ONLY_SWIFT allTokensEvaluated=true exactLogitBits=true exactExpertSets=true checkpointRestored=true noVocabularyOutputDuringIngest=true syntheticOnly=true physicalPhone=false")
+        }
+    }
     private func oldRuntimeSeal(_ prepared: URL) throws {
         let url = prepared.appendingPathComponent("seal.json")
         var seal = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
@@ -164,6 +195,55 @@ final class LESPolicyTests: XCTestCase {
         options.evaluationTokens = 8; XCTAssertThrowsError(try options.validate())
         options.physicalTokens = 3; XCTAssertThrowsError(try options.validate())
         options.evaluationTokens = 4096; options.physicalTokens = 0; XCTAssertThrowsError(try options.validate())
+        for logical in [32, 64, 128, 256, 512, 1024, 2048] {
+            options.evaluationTokens = logical; options.physicalTokens = 4
+            XCTAssertNoThrow(try options.validate())
+        }
+        for physical in [128, 256, 512] {
+            options.evaluationTokens = 2048; options.physicalTokens = physical
+            XCTAssertThrowsError(try options.validate(), "Unsupported physical graphs must not be advertised as optimized")
+        }
+    }
+    func testPublished65KPlanKeepsOriginalRoPEAndIncludesRecurrentCheckpointReserve() throws {
+        let root = try XCTUnwrap(ProcessInfo.processInfo.environment["ORNITH_LES_FIXTURE_ROOT"])
+        let data = try Data(contentsOf: URL(fileURLWithPath: root).appendingPathComponent("ornith.header"))
+        let idx = try GGUFIndex.parse(header: data, fileByteCount: 21_713_463_040)
+        let config = try Qwen35MoEConfig(index: idx)
+        XCTAssertGreaterThanOrEqual(config.contextLimit, 65536)
+        XCTAssertEqual(config.layers, 40); XCTAssertEqual(config.expertsPerToken, 8)
+        for context in [32768, 65536] {
+            let plan = try LESMemoryPlan(index: idx, contextTokens: context,
+                footprint: .init(footprintBytes: 350_000_000, peakFootprintBytes: 350_000_000, availableBytes: nil),
+                pageCacheOnly: true, physicalBatchTokens: 4)
+            XCTAssertEqual(plan.kvBytes, UInt64(context) * 20480)
+            XCTAssertEqual(plan.runtimeReserveBytes, (1 << 30) + (256 << 20))
+            XCTAssertLessThanOrEqual(plan.admittedProcessBytes, 5_500_000_000)
+            print("ORNITH_LONG_CONTEXT_PLAN context=\(context) dense=\(plan.denseBytes) KV=\(plan.kvBytes) SSM=\(plan.ssmBytes) admitted=\(plan.admittedProcessBytes) ropeBase=\(config.ropeBase) metadataOnly=true physicalQualityVerified=false")
+        }
+    }
+    func testAccelerationDraftHasAnExplicitBoundAndNeverExtendsContext() throws {
+        XCTAssertEqual(LESAccelerationBenchmark.draftManifest.fileByteCount, 782_819_680)
+        XCTAssertEqual(LESAccelerationBenchmark.draftManifest.sha256,
+            "abb048837823d068b71cea4d162076e5e2be62f504dc79bf08ac80d78c8bb732")
+        XCTAssertEqual(try LESAccelerationBenchmark.additionalMemory(context: 32768, candidate: .dflash), 1_073_275_232)
+        XCTAssertEqual(try LESAccelerationBenchmark.additionalMemory(context: 8192, candidate: .dflash), 972_611_936)
+        XCTAssertEqual(try LESAccelerationBenchmark.additionalMemory(context: 65536, candidate: .flashAttention), 0)
+        XCTAssertThrowsError(try LESAccelerationBenchmark.additionalMemory(context: 65536, candidate: .dflash))
+        XCTAssertThrowsError(try LESAccelerationBenchmark.additionalMemory(context: Int.max, candidate: .dflash))
+        let idx = try index()
+        let footprint = ProcessFootprint(footprintBytes: 100_000_000, peakFootprintBytes: 100_000_000, availableBytes: nil)
+        let ordinary = try LESMemoryPlan(index: idx, contextTokens: 32, footprint: footprint, pageCacheOnly: true)
+        let experiment = try LESMemoryPlan(index: idx, contextTokens: 32, footprint: footprint, pageCacheOnly: true,
+            experimentReserveBytes: 1_068_032_352)
+        XCTAssertEqual(experiment.kvBytes, ordinary.kvBytes)
+        XCTAssertEqual(experiment.admittedProcessBytes, ordinary.admittedProcessBytes + 1_068_032_352)
+        XCTAssertThrowsError(try LESMemoryPlan(index: idx, contextTokens: 32, footprint: footprint,
+            experimentReserveBytes: UInt64.max))
+        let report = LESAccelerationBenchmark.Report(candidate: .dflash, contextCapacityTokens: 32768,
+            targetSHA256: GGUFModelManifest.primaryOrnith.sha256,
+            draftSHA256: LESAccelerationBenchmark.draftManifest.sha256, runs: [], failure: nil)
+        XCTAssertFalse(report.comparable)
+        XCTAssertFalse(report.fullModelNumericsVerified); XCTAssertFalse(report.fullContextQualityVerified)
     }
     func testLargerPhysicalBatchesBudgetTheCompleteExpertUnion() throws {
         let idx = try index()

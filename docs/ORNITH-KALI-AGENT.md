@@ -1,5 +1,10 @@
 # Ornith Kali assessment agent (early prototype)
 
+This older text-action prototype is preserved. The new typed function-call
+client, scope/approval/logging controls and phone acceptance command are in
+[Security AI Server](SECURITY-AI-SERVER.md). Neither document is evidence of
+an independently completed physical-phone assessment.
+
 This **bounded prototype** uses the iPhone Ornith OpenAI-compatible text API
 as a planning engine and executes only scoped TCP connection probes on Kali.
 It is **not** Pentagi, does not implement structured OpenAI tool calls,

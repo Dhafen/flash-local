@@ -14,6 +14,7 @@ public final class LocalModelAPIServer: @unchecked Sendable {
     private let onState: @Sendable (State) -> Void
     private let loopbackOnly: Bool
     private let defaults: LocalGenerationOptions
+    private let capabilities: LocalModelCapabilities
     private var listener: NWListener?
     private var sessions: [UUID: LocalAPISession] = [:]
     private var stopped = false
@@ -26,12 +27,12 @@ public final class LocalModelAPIServer: @unchecked Sendable {
         return bytes.map { String(format: "%02x", $0) }.joined()
     }
     public init(key: String, port: UInt16 = 8080, loopbackOnly: Bool = false, defaults: LocalGenerationOptions = .init(),
+                capabilities: LocalModelCapabilities = .init(),
                 handler: @escaping Handler, onState: @escaping @Sendable (State) -> Void) throws {
-        guard key.utf8.count >= 32, key.utf8.count <= 128, key.utf8.allSatisfy({ (33...126).contains($0) }) else {
-            throw LocalAPIError(status: 500, message: "Invalid local access key")
-        }
+        try LocalAPIKeyStore.validate(key)
         try defaults.validate()
         self.key = key; self.handler = handler; self.onState = onState; self.loopbackOnly = loopbackOnly; self.defaults = defaults
+        self.capabilities = capabilities
         let parameters = NWParameters.tcp
         parameters.prohibitedInterfaceTypes = [.cellular]
         parameters.includePeerToPeer = false
@@ -58,7 +59,7 @@ public final class LocalModelAPIServer: @unchecked Sendable {
                 connection.cancel(); return
             }
             let id = UUID()
-            let session = LocalAPISession(connection: connection, queue: self.queue, key: self.key, defaults: self.defaults, handler: self.handler) { [weak self] in
+            let session = LocalAPISession(connection: connection, queue: self.queue, key: self.key, defaults: self.defaults, capabilities: self.capabilities, handler: self.handler) { [weak self] in
                 self?.sessions.removeValue(forKey: id)
             }
             self.sessions[id] = session; session.start()
@@ -66,6 +67,16 @@ public final class LocalModelAPIServer: @unchecked Sendable {
         listener.start(queue: queue)
     }
     public func stop() { queue.async { self.stopOnQueue() } }
+    /// Re-evaluate actual listener state and current interface addresses after
+    /// suspension. Never report ready merely because a server object exists.
+    public func refreshState() {
+        queue.async { [weak self] in
+            guard let self, !self.stopped, let listener = self.listener else { return }
+            if case .ready = listener.state, let port = listener.port?.rawValue {
+                self.onState(.ready(port: port, addresses: Self.localIPv4Addresses(loopbackOnly: self.loopbackOnly)))
+            }
+        }
+    }
     private func stopOnQueue(notify: Bool = true) {
         guard !stopped else { return }; stopped = true
         listener?.cancel(); listener = nil
@@ -113,15 +124,17 @@ private final class LocalAPISession: @unchecked Sendable {
     private let connection: NWConnection, queue: DispatchQueue, key: String
     private let handler: LocalModelAPIServer.Handler
     private let defaults: LocalGenerationOptions
+    private let capabilities: LocalModelCapabilities
     private let onClose: () -> Void
     private var parser = LocalHTTPParser()
     private var finished = false
     private var timer: DispatchWorkItem?
     private var generation: LocalChatGeneration?
     private var task: Task<Void, Never>?
-    init(connection: NWConnection, queue: DispatchQueue, key: String, defaults: LocalGenerationOptions,
+    init(connection: NWConnection, queue: DispatchQueue, key: String, defaults: LocalGenerationOptions, capabilities: LocalModelCapabilities,
          handler: @escaping LocalModelAPIServer.Handler, onClose: @escaping () -> Void) {
         self.connection = connection; self.queue = queue; self.key = key; self.defaults = defaults; self.handler = handler; self.onClose = onClose
+        self.capabilities = capabilities
     }
     func start() {
         connection.stateUpdateHandler = { [weak self] state in
@@ -140,7 +153,8 @@ private final class LocalAPISession: @unchecked Sendable {
                 if let request = try self.parser.append(data ?? Data()) {
                     self.timer?.cancel()
                     let timeout = DispatchWorkItem { [weak self] in self?.finish() }; self.timer = timeout
-                    self.queue.asyncAfter(deadline: .now() + 1800, execute: timeout)
+                    let seconds = min(10800, max(1800, self.capabilities.context.rawValue / 8192 * 1800))
+                    self.queue.asyncAfter(deadline: .now() + .seconds(seconds), execute: timeout)
                     self.respond(request)
                     // A closed or pipelined client must not leave inference running.
                     self.connection.receive(minimumIncompleteLength: 1, maximumLength: 1) { [weak self] data, _, complete, error in
@@ -160,7 +174,7 @@ private final class LocalAPISession: @unchecked Sendable {
         }
         if request.method == "GET", request.path == "/v1/models" || request.path == "/health" {
             let object: [String: Any] = request.path == "/health" ? ["status": "ok", "inference": "local", "model": LocalChatRequest.modelID] :
-                ["object": "list", "data": [["id": LocalChatRequest.modelID, "object": "model", "created": 0, "owned_by": "local"]]]
+                ["object": "list", "data": [["id": LocalChatRequest.modelID, "object": "model", "created": 0, "owned_by": "local", "flash_local": capabilities.json]]]
             task = Task { [weak self] in
                 guard let self else { return }
                 do { try await self.sendJSON(object) } catch { }
@@ -206,7 +220,9 @@ private final class LocalAPISession: @unchecked Sendable {
                     guard answer.utf8.count + reasoning.utf8.count <= 4 << 20 else { throw LocalAPIError(status: 500, message: "Output limit exceeded") }
                     if request.stream {
                         var delta: [String: Any] = [:]
-                        if !content.isEmpty { delta["content"] = content }
+                        // Tool envelopes are withheld until the model finishes
+                        // and every argument validates. Reasoning still streams.
+                        if !content.isEmpty, !request.toolChoice.enabled { delta["content"] = content }
                         if !thought.isEmpty { delta["reasoning_content"] = thought }
                         if !delta.isEmpty { try await send(LocalAPIWire.chunk(id: id, created: created, delta: delta)) }
                     }
@@ -214,21 +230,37 @@ private final class LocalAPISession: @unchecked Sendable {
                 }
             }
             guard let usage else { throw LocalAPIError(status: 500, message: "Generation ended without usage") }
+            let result = try LocalToolOutput.parse(answer, tools: request.tools, choice: request.toolChoice,
+                parallel: request.parallelToolCalls)
+            guard result.calls.isEmpty || usage.finishReason == "stop" else {
+                throw LocalAPIError(status: 502, message: "Function generation reached its limit before a normal completion", parameter: "tool_calls")
+            }
+            let finish = result.calls.isEmpty ? usage.finishReason : "tool_calls"
             await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
                 queue.async { self.generation = nil; continuation.resume() }
             }
             if request.stream {
-                try await send(LocalAPIWire.chunk(id: id, created: created, delta: [:], finish: usage.finishReason))
+                if request.toolChoice.enabled, !result.content.isEmpty {
+                    try await send(LocalAPIWire.chunk(id: id, created: created, delta: ["content": result.content]))
+                }
+                if !result.calls.isEmpty {
+                    let calls = result.calls.enumerated().map { index, call -> [String: Any] in
+                        var value = call.json; value["index"] = index; return value
+                    }
+                    try await send(LocalAPIWire.chunk(id: id, created: created, delta: ["tool_calls": calls]))
+                }
+                try await send(LocalAPIWire.chunk(id: id, created: created, delta: [:], finish: finish))
                 if request.includeUsage {
                     try await send(LocalAPIWire.sse(["id": id, "object": "chat.completion.chunk", "created": created,
                         "model": LocalChatRequest.modelID, "choices": [], "usage": usage.json]))
                 }
                 try await send(Data("data: [DONE]\n\n".utf8))
             } else {
-                var message: [String: Any] = ["role": "assistant", "content": answer]
+                var message: [String: Any] = ["role": "assistant", "content": result.content.isEmpty && !result.calls.isEmpty ? NSNull() : result.content as Any]
+                if !result.calls.isEmpty { message["tool_calls"] = result.calls.map(\.json) }
                 if !reasoning.isEmpty { message["reasoning_content"] = reasoning }
                 try await sendJSON(["id": id, "object": "chat.completion", "created": created, "model": LocalChatRequest.modelID,
-                    "choices": [["index": 0, "message": message, "finish_reason": usage.finishReason]], "usage": usage.json])
+                    "choices": [["index": 0, "message": message, "finish_reason": finish]], "usage": usage.json])
             }
             queue.async { self.generation = nil; self.finish(cancelInference: false) }
         } catch {

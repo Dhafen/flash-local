@@ -10,10 +10,23 @@ public final class LESControl: @unchecked Sendable {
     private let lock = NSLock()
     private var cancelled = false
     private var observedPeak: UInt64 = 0
-    public init() {}
+    private var nativeDiagnosticsEnabled = true
+    private let journal: LESAccelerationJournal?
+    public init(journal: LESAccelerationJournal? = nil) { self.journal = journal }
+    fileprivate var hasDiagnosticJournal: Bool { journal != nil }
+    public func setNativeDiagnosticsEnabled(_ enabled: Bool) {
+        lock.lock(); nativeDiagnosticsEnabled = enabled; lock.unlock()
+    }
+    public func recordDiagnosticPhase(_ phase: String) throws { try journal?.record(phase) }
+    func recordNativePhase(_ phase: Int32) -> Bool {
+        lock.lock(); let enabled = nativeDiagnosticsEnabled; lock.unlock()
+        return !enabled || journal?.recordNativePhase(phase) != false
+    }
     public func cancel() { lock.lock(); cancelled = true; lock.unlock() }
     public var isCancellationRequested: Bool { lock.lock(); defer { lock.unlock() }; return cancelled }
     public var maximumObservedFootprintBytes: UInt64 { lock.lock(); defer { lock.unlock() }; return observedPeak }
+    /// Only between isolated benchmark runs, after the previous owner closes.
+    public func beginBenchmarkFootprintWindow() { lock.lock(); observedPeak = 0; lock.unlock() }
     public func shouldAbort() -> Bool {
         let sample = ProcessFootprint.current()
         lock.lock(); defer { lock.unlock() }
@@ -36,6 +49,10 @@ public struct LESMetrics: Codable, Sendable, Equatable {
     public let metalTimestampedCommandBuffers: UInt64
     public let configuredPhysicalBatchTokens, maximumPhysicalBatchTokens: Int?
     public let skippedIntermediateOutputBatches: UInt64?
+    public let targetTokensEvaluated, dflashBlocks, dflashProposals, dflashAccepted, dflashReplays: UInt64?
+    public let dflashFeaturePeakBytes: UInt64?
+    public let flashAttentionActive: Bool?
+    public let stateOnlyPrefillTokens, stateOnlyPrefillCalls: UInt64?
     init(_ value: flo_metrics) {
         ioBytes = value.io_bytes; ioCalls = value.io_calls; expertReads = value.misses
         selectedExpertUnion = value.selected_experts; predictions = value.predicted
@@ -50,6 +67,12 @@ public struct LESMetrics: Codable, Sendable, Equatable {
         configuredPhysicalBatchTokens = Int(value.configured_physical_batch_tokens)
         maximumPhysicalBatchTokens = Int(value.maximum_physical_batch_tokens)
         skippedIntermediateOutputBatches = value.skipped_intermediate_output_batches
+        targetTokensEvaluated = value.target_tokens_evaluated; dflashBlocks = value.dflash_blocks
+        dflashProposals = value.dflash_proposals; dflashAccepted = value.dflash_accepted
+        dflashReplays = value.dflash_replays; dflashFeaturePeakBytes = value.dflash_feature_peak_bytes
+        flashAttentionActive = value.flash_attention_active
+        stateOnlyPrefillTokens = value.state_only_prefill_tokens
+        stateOnlyPrefillCalls = value.state_only_prefill_calls
     }
 }
 
@@ -85,12 +108,14 @@ public final class LESContext {
     private let artifact: VerifiedGGUFArtifact
     private let control: LESControl
     private let checkpoints: GGUFCheckpointCollector?
+    private var draftArtifact: VerifiedGGUFArtifact?
     private var handle: OpaquePointer?
     public let vocabularySize: Int
     public let plan: LESMemoryPlan
     public init(artifact: VerifiedGGUFArtifact, prepared: URL, plan: LESMemoryPlan,
                 control: LESControl, traceRouting: Bool = false, bypassPageCache: Bool = false,
-                syntheticCPUControl: Bool = false, checkpoints: GGUFCheckpointCollector? = nil) throws {
+                syntheticCPUControl: Bool = false, checkpoints: GGUFCheckpointCollector? = nil,
+                flashAttention: Bool = false, experimentalDFlash: Bool = false) throws {
         try artifact.assertUnchanged()
         guard prepared.isFileURL, !control.shouldAbort() else { throw CancellationError() }
         self.artifact = artifact; self.control = control; self.plan = plan; self.checkpoints = checkpoints
@@ -106,6 +131,15 @@ public final class LESContext {
         options.io_threads = 4; options.cpu_threads = 4; options.metal = !syntheticCPUControl
         options.bypass_page_cache = bypassPageCache; options.trace_routing = traceRouting
         options.memory_ceiling_bytes = plan.processCeilingBytes
+        options.additional_reserve_bytes = plan.experimentReserveBytes ?? 0
+        options.flash_attention = flashAttention; options.experimental_dflash = experimentalDFlash
+        if control.hasDiagnosticJournal {
+            options.diagnostic = { phase, user in
+                guard let user else { return false }
+                return Unmanaged<LESControl>.fromOpaque(user).takeUnretainedValue().recordNativePhase(phase)
+            }
+            options.diagnostic_user = Unmanaged.passUnretained(control).toOpaque()
+        }
         if let checkpoints {
             options.checkpoint = { stage, layer, values, count, user in
                 guard let user else { return false }
@@ -129,12 +163,14 @@ public final class LESContext {
         guard let handle else { return }
         self.handle = nil
         flo_close(handle)
+        draftArtifact = nil
     }
     public static var runtimeMemory: LESRuntimeMemory { LESRuntimeMemory(flo_snapshot(nil)) }
     public func logits(tokens: [Int]) throws -> [Float] {
         try artifact.assertUnchanged()
+        try draftArtifact?.assertUnchanged()
         guard let handle else { throw GGUFError.invalid("LES context is closed") }
-        guard !tokens.isEmpty, tokens.count <= 32, tokens.allSatisfy({ (0..<vocabularySize).contains($0) }),
+        guard !tokens.isEmpty, tokens.count <= 2048, tokens.allSatisfy({ (0..<vocabularySize).contains($0) }),
               !control.shouldAbort() else { throw CancellationError() }
         let ids = tokens.map(Int32.init)
         var output = [Float](repeating: 0, count: vocabularySize)
@@ -142,9 +178,66 @@ public final class LESContext {
             output.withUnsafeMutableBufferPointer { flo_decode(handle, input.baseAddress, Int32(input.count), $0.baseAddress, Int32($0.count)) }
         }
         guard status == 0 else { throw Self.failure() }
-        try artifact.assertUnchanged(); return output
+        try artifact.assertUnchanged(); try draftArtifact?.assertUnchanged(); return output
     }
     public func reset() { flo_reset(handle) }
+    /// Retains all transformer, expert and recurrent/KV work. Only unused
+    /// vocabulary outputs are omitted; the caller must request final logits.
+    public func ingest(tokens: [Int]) throws {
+        try artifact.assertUnchanged(); try draftArtifact?.assertUnchanged()
+        guard let handle else { throw GGUFError.invalid("LES context is closed") }
+        guard !tokens.isEmpty, tokens.count <= 2048,
+              tokens.allSatisfy({ (0..<vocabularySize).contains($0) }),
+              !control.shouldAbort() else { throw CancellationError() }
+        let ids = tokens.map(Int32.init)
+        let status = ids.withUnsafeBufferPointer { flo_ingest(handle, $0.baseAddress, Int32($0.count)) }
+        guard status == 0 else { throw Self.failure() }
+        try artifact.assertUnchanged(); try draftArtifact?.assertUnchanged()
+    }
+    public func capturePrefix() -> UInt64 { flo_capture_prefix(handle) }
+    public func restorePrefix() throws {
+        guard let handle, flo_restore_prefix(handle) == 0 else { throw Self.failure() }
+    }
+    /// The isolated benchmark owns the sole recurrent checkpoint. Never attach
+    /// this to a live chat/API context that also keeps conversation snapshots.
+    public func attachDraft(_ draft: VerifiedGGUFArtifact) throws {
+        try draft.assertUnchanged()
+        guard let handle else { throw GGUFError.invalid("LES context is closed") }
+        try control.recordDiagnosticPhase("draft.headroom")
+        // The first admission ran before allocating the target. Recheck actual
+        // headroom now: a model loader may allocate its whole GPU buffer before
+        // its first progress/abort callback can stop it.
+        try Self.requireDraftHeadroom(ProcessFootprint.current(), reserve: plan.experimentReserveBytes ?? 0,
+            ceiling: plan.processCeilingBytes)
+        let fd = try draft.duplicateForReading(); defer { Darwin.close(fd) }
+        guard flo_attach_dflash(handle, fd) == 0 else { throw Self.failure() }
+        try draft.assertUnchanged()
+        draftArtifact = draft
+    }
+    static func requireDraftHeadroom(_ memory: ProcessFootprint?, reserve: UInt64, ceiling: UInt64) throws {
+        let margin: UInt64 = 128 << 20
+        guard let memory, reserve > 0, reserve <= 1_500_000_000,
+              memory.footprintBytes < ceiling, reserve <= ceiling - memory.footprintBytes,
+              margin <= ceiling - memory.footprintBytes - reserve,
+              memory.availableBytes.map({ $0 >= reserve + margin }) != false else {
+            throw GGUFError.limit("DFlash saknar aktuellt minnesutrymme för draft, KV-cache och säkerhetsmarginal. Testet stoppades före draftladdningen; vanlig chatt kan användas.")
+        }
+    }
+    public func dflashStep(logits: inout [Float], maximumTokens: Int) throws -> [Int] {
+        try artifact.assertUnchanged(); try draftArtifact?.assertUnchanged()
+        guard let handle, logits.count == vocabularySize, (1...4).contains(maximumTokens) else {
+            throw GGUFError.invalid("DFlash step dimensions")
+        }
+        var tokens = [Int32](repeating: 0, count: maximumTokens)
+        let count = logits.withUnsafeMutableBufferPointer { rows in
+            tokens.withUnsafeMutableBufferPointer { output in
+                flo_dflash_step(handle, rows.baseAddress, Int32(rows.count), output.baseAddress, Int32(maximumTokens))
+            }
+        }
+        guard count > 0, count <= maximumTokens else { throw Self.failure() }
+        try artifact.assertUnchanged(); try draftArtifact?.assertUnchanged()
+        return tokens.prefix(Int(count)).map(Int.init)
+    }
     public var metrics: LESMetrics { LESMetrics(flo_snapshot(handle)) }
     public var projectionProbe: LESProjectionProbe? { LESProjectionProbe(flo_snapshot(handle)) }
     public static var revision: String { String(cString: flo_revision()) }

@@ -16,6 +16,7 @@
 #include <array>
 #include <cstring>
 #include <set>
+#include <thread>
 namespace fs = std::filesystem;
 using json = nlohmann::json;
 struct output { std::vector<std::vector<float>> logits; std::vector<int> positions; flo_metrics metrics; };
@@ -99,7 +100,8 @@ struct layer_trace {
     }
 };
 static output evaluate(int fd, const char * dir, bool metal, int depth, int steps, int cache = 8, int prefill = 0,
-                       bool trace_layers = false, bool trace_routing = true, int physical = 4, int evaluation = 4) {
+                       bool trace_layers = false, bool trace_routing = true, int physical = 4, int evaluation = 4,
+                       bool flash_attention = false, bool state_only_prefill = false) {
     if (trace_layers && prefill) throw std::runtime_error("Layer controls use single-token forwards");
     layer_trace trace;
     flo_options options{};
@@ -107,6 +109,7 @@ static output evaluate(int fd, const char * dir, bool metal, int depth, int step
     options.cache_slots_per_layer = cache;
     options.lookahead_depth = depth; options.io_threads = 2; options.cpu_threads = 2;
     options.metal = metal; options.trace_routing = trace_routing; options.memory_ceiling_bytes = 5500000000ULL;
+    options.flash_attention = flash_attention;
     if (trace_layers) { options.checkpoint = layer_trace::capture; options.checkpoint_user = &trace; }
     flo_context * context = flo_open(fd, dir, options, nullptr, nullptr);
     if (!context) throw std::runtime_error(flo_last_error());
@@ -116,27 +119,38 @@ static output evaluate(int fd, const char * dir, bool metal, int depth, int step
         const int32_t tokens[] = {1, 2, 3, 15, 4};
         for (int first = 0; first < steps;) {
             const int count = first < prefill ? std::min(evaluation, prefill - first) : 1;
-            int32_t chunk[32]{};
+            std::vector<int32_t> chunk(count);
             for (int i = 0; i < count; ++i) chunk[i] = tokens[(first + i) % 5];
             std::vector<float> row(flo_vocabulary_size(context));
             trace.reset();
-            if (flo_decode(context, chunk, count, row.data(), (int)row.size())) throw std::runtime_error(flo_last_error());
+            const bool omit_output = state_only_prefill && first + count < prefill;
+            const int status = omit_output ? flo_ingest(context, chunk.data(), count) :
+                flo_decode(context, chunk.data(), count, row.data(), (int)row.size());
+            if (status) throw std::runtime_error(flo_last_error());
             if (trace_layers && trace.points != trace.expected) throw std::runtime_error("Incomplete native semantic layer trace");
-            out.logits.push_back(row);
-            first += count; out.positions.push_back(first - 1);
+            first += count;
+            if (!omit_output) { out.logits.push_back(row); out.positions.push_back(first - 1); }
         }
         out.metrics = flo_snapshot(context);
+        if (out.metrics.flash_attention_active != flash_attention) throw std::runtime_error("Requested attention graph was not used");
         if (trace_routing && !out.metrics.routing_decisions) throw std::runtime_error("Routing trace was not executed");
         if (!trace_routing && !trace_layers && (out.metrics.routing_decisions || out.metrics.canonical_routing_digest || out.metrics.canonical_expert_set_digest ||
                 out.metrics.probe_samples)) throw std::runtime_error("Callback-free execution unexpectedly observed tensors");
         flo_reset(context);
-        const int first_count = prefill > 0 ? std::min(evaluation, prefill) : 1;
-        int32_t initial[32]{};
+        const int first_count = state_only_prefill ? out.positions.front() + 1 :
+            (prefill > 0 ? std::min(evaluation, prefill) : 1);
+        std::vector<int32_t> initial(first_count);
         for (int i = 0; i < first_count; ++i) initial[i] = tokens[i % 5];
         std::vector<float> replay(out.logits[0].size());
         trace.reset();
-        if (flo_decode(context, initial, first_count, replay.data(), (int)replay.size()) || replay != out.logits[0])
-            throw std::runtime_error("Reset did not restore the complete recurrent/KV state");
+        for (int first = 0; first < first_count;) {
+            const int count = state_only_prefill ? std::min(evaluation, first_count - first) : first_count;
+            const int status = first + count < first_count ? flo_ingest(context, initial.data() + first, count) :
+                flo_decode(context, initial.data() + first, count, replay.data(), (int)replay.size());
+            if (status) throw std::runtime_error(flo_last_error());
+            first += count;
+        }
+        if (replay != out.logits[0]) throw std::runtime_error("Reset did not restore the complete recurrent/KV state");
         if (trace_layers && trace.points != trace.expected) throw std::runtime_error("Reset lost native semantic layer trace");
     } catch (...) { flo_close(context); throw; }
     flo_close(context);
@@ -145,7 +159,7 @@ static output evaluate(int fd, const char * dir, bool metal, int depth, int step
         throw std::runtime_error("Native context or buffer ownership survived close");
     return out;
 }
-static double compare(const output & a, const output & b, bool routing = true) {
+static double compare(const output & a, const output & b, bool routing = true, bool require_greedy = true) {
     if (routing && (a.metrics.canonical_routing_digest != b.metrics.canonical_routing_digest ||
         a.metrics.canonical_expert_set_digest != b.metrics.canonical_expert_set_digest ||
         a.metrics.routing_decisions != b.metrics.routing_decisions))
@@ -158,13 +172,30 @@ static double compare(const output & a, const output & b, bool routing = true) {
         if (position < 0 || size_t(position) >= a.positions.size() || a.positions[position] != position ||
             (i > 0 && position <= b.positions[i - 1]) || a.logits[position].size() != b.logits[i].size())
             throw std::runtime_error("Vocabulary or logit position changed");
-        for (size_t j = 0; j < a.logits[position].size(); ++j)
+        for (size_t j = 0; j < a.logits[position].size(); ++j) {
+            if (!std::isfinite(a.logits[position][j]) || !std::isfinite(b.logits[i][j]))
+                throw std::runtime_error("Non-finite control logit");
             error = std::max(error, std::abs((double)a.logits[position][j] - b.logits[i][j]));
-        if (std::max_element(a.logits[position].begin(), a.logits[position].end()) - a.logits[position].begin() !=
+        }
+        if (require_greedy && std::max_element(a.logits[position].begin(), a.logits[position].end()) - a.logits[position].begin() !=
             std::max_element(b.logits[i].begin(), b.logits[i].end()) - b.logits[i].begin())
             throw std::runtime_error("Greedy token changed");
     }
     return error;
+}
+static double relative_l2(const output & a, const output & b) {
+    // Cross-graph diagnostics also describe rejected experimental candidates.
+    // Shape and finiteness remain mandatory; ordinary controls are unchanged.
+    (void)compare(a, b, false, false);
+    double squared = 0, reference = 0;
+    for (size_t i = 0; i < b.logits.size(); ++i) {
+        const auto & expected = a.logits[b.positions[i]];
+        for (size_t j = 0; j < expected.size(); ++j) {
+            const double delta = double(expected[j]) - b.logits[i][j];
+            squared += delta * delta; reference += double(expected[j]) * expected[j];
+        }
+    }
+    return std::sqrt(squared / std::max(reference, 1e-30));
 }
 int main(int argc, char ** argv) {
     try {
@@ -202,6 +233,101 @@ int main(int argc, char ** argv) {
         if (diagnostic.describe("load").size() > 2054) throw std::runtime_error("Unbounded native loader error");
         diagnostic.end();
         if (flo_prepare(fd, dir.c_str(), nullptr, nullptr)) throw std::runtime_error(flo_last_error());
+        for (int slots : {8, 64, 128}) {
+            flo_options invalid_draft{};
+            invalid_draft.context_tokens = 32; invalid_draft.memory_ceiling_bytes = 5500000000ULL;
+            invalid_draft.experimental_dflash = true; invalid_draft.additional_reserve_bytes = 800000000ULL;
+            invalid_draft.prefill_slots = slots;
+            auto * invalid_context = flo_open(fd, dir.c_str(), invalid_draft, nullptr, nullptr);
+            if (invalid_context) { flo_close(invalid_context); throw std::runtime_error("Unsupported draft physical batch admitted"); }
+            if (std::string(flo_last_error()).find("physical batch four") == std::string::npos || flo_snapshot(nullptr).live_contexts)
+                throw std::runtime_error("Draft geometry failed after allocation or retained an owner");
+        }
+        {
+            flo_options serial{};
+            serial.context_tokens = 32; serial.prefill_slots = 32;
+            serial.io_threads = serial.cpu_threads = 2; serial.memory_ceiling_bytes = 5500000000ULL;
+            auto * context = flo_open(fd, dir.c_str(), serial, nullptr, nullptr);
+            if (!context) throw std::runtime_error(flo_last_error());
+            const int32_t token = 1;
+            std::vector<float> moved(flo_vocabulary_size(context)), fresh(moved.size());
+            bool duplicate_rejected = true;
+            int status = -1;
+            // The creating thread remains alive while another thread calls
+            // inference and teardown. A failed second owner must not release
+            // the first owner's lease. Never use a context concurrently.
+            std::thread worker([&] {
+                for (int i = 0; i < 2; ++i) {
+                    auto * duplicate = flo_open(fd, dir.c_str(), serial, nullptr, nullptr);
+                    duplicate_rejected = duplicate_rejected && duplicate == nullptr;
+                    if (duplicate) flo_close(duplicate);
+                }
+                status = flo_decode(context, &token, 1, moved.data(), int32_t(moved.size()));
+                flo_close(context);
+            });
+            worker.join(); context = nullptr;
+            if (!duplicate_rejected || status != 0 || flo_snapshot(nullptr).live_contexts)
+                throw std::runtime_error("Serial native ownership did not survive a thread hop");
+            context = flo_open(fd, dir.c_str(), serial, nullptr, nullptr);
+            if (!context) throw std::runtime_error("Thread-hop close did not release the native lease");
+            status = flo_decode(context, &token, 1, fresh.data(), int32_t(fresh.size()));
+            flo_close(context);
+            if (status != 0 || moved != fresh || flo_snapshot(nullptr).live_contexts)
+                throw std::runtime_error("Thread-hop inference changed logits or retained an owner");
+            std::cout << "ORNITH_SERIAL_THREAD_HOP openedOnCaller=true inferredAndClosedOnWorker=true duplicateOwnersRejected=2 freshReplayBitwise=true syntheticOnly=true\n";
+        }
+        uint64_t prefix_bytes = 0;
+        {
+            flo_options options{};
+            options.context_tokens = 32; options.prefill_slots = 32;
+            options.io_threads = options.cpu_threads = 2; options.memory_ceiling_bytes = 5500000000ULL;
+            flo_context * context = flo_open(fd, dir.c_str(), options, nullptr, nullptr);
+            if (!context) throw std::runtime_error(flo_last_error());
+            try {
+                const int32_t prefix[] = {1, 2, 3, 15}, old_suffix[] = {4, 3, 2}, new_suffix[] = {2, 4};
+                std::vector<float> expected(flo_vocabulary_size(context)), actual(expected.size());
+                auto decode = [&](const int32_t * ids, int count, std::vector<float> & row) {
+                    if (flo_decode(context, ids, count, row.data(), (int)row.size())) throw std::runtime_error(flo_last_error());
+                };
+                decode(prefix, 4, actual);
+                prefix_bytes = flo_capture_prefix(context);
+                if (!prefix_bytes || prefix_bytes > (128ULL << 20)) throw std::runtime_error("Missing bounded recurrent snapshot");
+                decode(old_suffix, 3, actual);
+                if (flo_restore_prefix(context)) throw std::runtime_error(flo_last_error());
+                decode(new_suffix, 2, actual);
+                flo_reset(context);
+                decode(prefix, 4, expected); decode(new_suffix, 2, expected);
+                if (actual != expected) throw std::runtime_error("Restored hybrid state differs from fresh exact-prefix replay");
+                // Exercise all accepted-prefix lengths against actual hybrid
+                // GDN/conv + attention state, without a trained draft model.
+                flo_reset(context); decode(prefix, 4, actual);
+                std::vector<int32_t> greedy;
+                std::vector<std::vector<float>> rows;
+                for (int i = 0; i < 5; ++i) {
+                    const int32_t id = int32_t(std::max_element(actual.begin(), actual.end()) - actual.begin());
+                    greedy.push_back(id); decode(&greedy.back(), 1, actual); rows.push_back(actual);
+                }
+                for (int rejected = 1; rejected <= 4; ++rejected) {
+                    flo_reset(context); decode(prefix, 4, actual);
+                    std::vector<int32_t> block(greedy.begin(), greedy.begin() + 4);
+                    if (rejected < 4) block[rejected] = (block[rejected] + 1) % int32_t(actual.size());
+                    const int accepted = flo_verify_greedy(context, block.data(), 4, actual.data(), int32_t(actual.size()));
+                    if (accepted != rejected) throw std::runtime_error("Wrong greedy accepted prefix");
+                    for (size_t i = 0; i < actual.size(); ++i)
+                        if (std::abs(actual[i] - rows[accepted - 1][i]) > 1e-6)
+                            throw std::runtime_error("Speculative rollback differs from ordinary target logits");
+                    decode(&greedy[accepted], 1, actual);
+                    for (size_t i = 0; i < actual.size(); ++i)
+                        if (std::abs(actual[i] - rows[accepted][i]) > 1e-6)
+                            throw std::runtime_error("Continuation after speculative rollback differs");
+                }
+                std::cout << "ORNITH_GREEDY_ROLLBACK branches=4 fullVocabulary=true recurrentAndAttention=true continuation=true trainedDraft=false\n";
+                flo_reset(context);
+                // Reset invalidates the snapshot rather than resurrecting history.
+                if (flo_restore_prefix(context) == 0) throw std::runtime_error("Cleared chat restored a stale snapshot");
+            } catch (...) { flo_close(context); throw; }
+            flo_close(context);
+        }
         const fs::path invalid = dir / "invalid-header";
         fs::create_directory(invalid);
         fs::copy_file(dir / "manifest-template.json", invalid / "manifest-template.json");
@@ -232,6 +358,38 @@ int main(int argc, char ** argv) {
         const auto streamed = evaluate(fd, dir.c_str(), false, 0, steps);
         const auto ahead = evaluate(fd, dir.c_str(), false, 2, steps);
         const auto page = evaluate(fd, dir.c_str(), false, 0, steps, 0);
+        // Keep the exact streaming test graph-matched. FA and decomposed
+        // attention use different F16 KV arithmetic in the pinned CPU backend;
+        // an extra 1e-4 cross-graph limit was not the app's acceptance policy.
+        // Neither the ordinary 1e-6 controls nor phone admission are relaxed.
+        const auto flash_reference = evaluate(fd, nullptr, false, 0, steps, 8, 0, false, true, 4, 4, true);
+        const auto flash = evaluate(fd, dir.c_str(), false, 0, steps, 0, 0, false, true, 4, 4, true);
+        const double flash_streaming_error = compare(flash_reference, flash);
+        if (flash_streaming_error > 1e-6) throw std::runtime_error("Flash Attention streaming differs from resident FA reference");
+        const double flash_error = compare(cpu, flash, false, false);
+        const double flash_relative = relative_l2(cpu, flash);
+        bool flash_greedy = true;
+        for (size_t i = 0; i < flash.logits.size(); ++i) {
+            const auto & a = cpu.logits[flash.positions[i]], & b = flash.logits[i];
+            flash_greedy = flash_greedy && std::max_element(a.begin(), a.end()) - a.begin() ==
+                std::max_element(b.begin(), b.end()) - b.begin();
+        }
+        const bool flash_routing = cpu.metrics.canonical_routing_digest == flash.metrics.canonical_routing_digest &&
+            cpu.metrics.canonical_expert_set_digest == flash.metrics.canonical_expert_set_digest &&
+            cpu.metrics.routing_decisions == flash.metrics.routing_decisions;
+        const bool flash_admitted = flash_error <= 0.01 && flash_relative <= 0.001 && flash_greedy && flash_routing;
+        std::cout << "ORNITH_CPU_FLASH_ATTENTION residentStreamingMaxAbs=" << flash_streaming_error
+                  << " decomposedMaxAbs=" << flash_error << " decomposedRelativeL2=" << flash_relative
+                  << " sameGreedy=" << flash_greedy << " exactRouting=" << flash_routing
+                  << " candidateAdmitted=" << flash_admitted << " physicalPhone=false\n" << std::flush;
+        // This is an explicit, never-promoted experiment. A rejected candidate
+        // is a valid diagnostic result, not permission to change chat/API.
+        // Phone execute() independently fails closed with the unchanged gate.
+        // A NaN must never disappear inside std::max and pass a numerical gate.
+        auto nonfinite = flash; nonfinite.logits[0][0] = std::numeric_limits<float>::quiet_NaN();
+        bool nonfinite_rejected = false;
+        try { (void)compare(cpu, nonfinite); } catch (...) { nonfinite_rejected = true; }
+        if (!nonfinite_rejected) throw std::runtime_error("Non-finite numerical control was accepted");
         const double error = std::max({compare(cpu, streamed), compare(cpu, ahead), compare(cpu, page)});
         if (error > 1e-6 || !ahead.metrics.io_calls || !ahead.metrics.io_bytes)
             throw std::runtime_error("LES correctness/instrumentation gate failed");
@@ -269,8 +427,36 @@ int main(int argc, char ** argv) {
             ++tuning_variants;
         }
         if (tuning_error > 1e-6) throw std::runtime_error("Larger physical/evaluation batch changed model logits");
+        int extended_variants = 0;
+        for (int evaluation : {64, 128, 256, 512, 1024, 2048}) for (bool observed : {true, false}) {
+            const auto tuned = evaluate(fd, dir.c_str(), false, 0, tuning_steps, 0, 33, false, observed, 4, evaluation);
+            if (compare(tuning_reference, tuned, observed) > 1e-6) throw std::runtime_error("Extended logical batch changed logits or routing");
+            ++extended_variants;
+        }
+        double state_only_error = 0; int state_only_variants = 0;
+        for (int physical : {1, 4, 8, 16}) for (int evaluation : {physical, 32}) for (bool observed : {true, false}) {
+            const auto tuned = evaluate(fd, dir.c_str(), false, 0, tuning_steps, 0, 33, false,
+                observed, physical, evaluation, false, true);
+            if (tuned.metrics.state_only_prefill_tokens != 32 || tuned.metrics.state_only_prefill_calls == 0 ||
+                tuned.metrics.target_tokens_evaluated != uint64_t(tuning_steps))
+                throw std::runtime_error("State-only prefill skipped tokens or failed to omit unused outputs");
+            state_only_error = std::max(state_only_error, compare(tuning_reference, tuned, observed));
+            ++state_only_variants;
+        }
+        if (state_only_error > 1e-6) throw std::runtime_error("State-only prefill changed final logits, routing or decode handoff");
         json report{{"syntheticOnly", true}, {"physicalPhone", false}, {"revision", flo_revision()},
+            {"stateOnlyPrefillVariants", state_only_variants}, {"stateOnlyPrefillMaximumAbsoluteError", state_only_error},
+            {"stateOnlyPrefillTokensPerVariant", 32},
             {"residentCPUReference", true}, {"cpuStreamingMaximumAbsoluteError", error},
+            {"recurrentOnlyPrefixCheckpointBitwiseReplay", true}, {"prefixCheckpointBytes", prefix_bytes},
+            {"greedyBlockRollbackBranches", 4}, {"trainedDFlashGraphExecuted", false},
+            {"unsupportedDraftPhysicalBatchRejectedBeforeLoad", true},
+            {"serialThreadHopLifetimeAndBitwiseReplay", true},
+            {"cpuFlashAttentionMaximumAbsoluteError", flash_error}, {"phoneFlashAttentionExecuted", false},
+            {"cpuFlashAttentionRelativeL2Error", flash_relative}, {"cpuFlashAttentionResidentStreamingMaximumAbsoluteError", flash_streaming_error},
+            {"cpuFlashAttentionSameGreedy", flash_greedy}, {"cpuFlashAttentionRoutingIdentical", flash_routing},
+            {"cpuFlashAttentionCandidateAdmitted", flash_admitted}, {"nonfiniteControlLogitsRejected", nonfinite_rejected},
+            {"extendedLogicalBatchControls", extended_variants}, {"logicalBatchLimit", 2048},
             {"metalExecutionVerified", false}, {"actualRoutingIdentical", true},
             {"invalidLookaheadRejected", true},
             {"verifiedDescriptorMetadata", true}, {"boundedPrivateLoaderErrors", true},
@@ -298,6 +484,9 @@ int main(int argc, char ** argv) {
         std::cout << "ORNITH_PREFILL_TUNING variants=" << tuning_variants << " physical=1,4,8,16 evaluationThrough32=true"
                   << " actualDimensions=true fullVocabulary=true canonicalRouting=true callbackFree=true unneededHeadsSkipped=true maxAbs="
                   << tuning_error << " syntheticOnly=true physicalPhone=false\n";
+        std::cout << "ORNITH_STATE_ONLY_PREFILL variants=" << state_only_variants
+                  << " allTokensEvaluated=true skippedOutputTokens=32 fullVocabulary=true exactRouting=true reset=true maxAbs="
+                  << state_only_error << " syntheticOnly=true physicalPhone=false\n";
         return 0;
     } catch (const std::exception & e) { std::cerr << e.what() << '\n'; return 1; }
 }

@@ -1,10 +1,12 @@
 # Local Ornith API and generation controls
 
-Built and privately delivered as TestFlight **0.1.0 (126)**, runtime source
-`6c1084c87b35c749a5152c140c4828e9dde84126`. Integrated host, archive/signing and independent Apple
-availability checks pass, retaining the build-125 foreground text API.
-Physical-phone network/USB reachability and explicit-budget answer quality
-remain unverified.
+The retained foreground text API was privately delivered, most recently
+independently confirmed in **0.1.0 (148)**. The separate
+`codex/security-ai-server` integration adds typed function calls, persistent
+Keychain credentials and native API measurements. Its Swift/native/app/iOS
+checks and new delivery are pending. See [current implementation and physical
+acceptance](SECURITY-AI-SERVER.md). Phone LAN/USB reachability, sustained agent
+sessions and answer quality remain physical acceptance requirements.
 The installed Q4_K_M remains unchanged. One admitted native context serves
 quick chat and API requests serially. No model or request goes to OpenAI.
 
@@ -12,8 +14,11 @@ quick chat and API requests serially. No model or request goes to OpenAI.
 
 Open **Ornith → API**, prepare the installed model and select **Starta lokalt
 API**. Copy the displayed **Base URL** and local API key to your client. The
-server creates a new random key each start, requires `Authorization: Bearer`,
-does not persist the key and does not record API conversations. An authenticated
+server requires `Authorization: Bearer`. It reuses a device-Keychain key,
+creates one on first start, or accepts your own 32–128-character printable
+ASCII key. Stop the server to replace or rotate it. Keys are not saved in
+model files, preferences or diagnostics. API conversations are not recorded.
+An authenticated
 `GET /v1/models` lists `ornith-1.5-35b-a3b`; `GET /health` checks the listener.
 The key is separate from an OpenAI account or paid API key.
 
@@ -53,24 +58,33 @@ An inactive saved thinking budget does not constrain a non-thinking request.
 
 | Control / API parameter | Default | Meaning |
 | --- | --- | --- |
-| Max token / `max_tokens` or `max_completion_tokens` | 512 | Total new tokens, including reasoning and budget-closing tokens; 1–2048 |
+| Max token / `max_tokens` or `max_completion_tokens` | 2048 | Total new tokens, including reasoning and budget-closing tokens; 1–4096 |
 | Tänkande / `enable_thinking` | true | Uses the model's canonical thinking or non-thinking chat template |
-| Tänkbudget / `thinking_budget` | no separate limit | Optional cap on sampled reasoning tokens; 0 disables thinking |
+| Tänkbudget / `thinking_budget` | 512 | Cap on sampled reasoning tokens; 0 disables thinking |
 | Temperatur / `temperature` | 0 | Greedy at 0; seeded sampling above 0, up to 2 |
 | Top-p / `top_p` | 1 | Nucleus sampling, greater than 0 and at most 1; applies above temperature 0 |
 | Slumpfrö / `seed` | 42 | Per-request deterministic random seed, 0–2147483647 |
+
+Standard `reasoning_effort` maps to the local presets: `none` → Off,
+`minimal`/`low` → Small, `medium` → Medium, `high`/`xhigh`/`max` → Ultra.
+These are local token budgets, not equivalent quality claims about OpenAI
+models. Explicit local thinking fields override the mapped defaults. When a
+client supplies only a shorter total limit, the inherited thinking cap is
+reduced to leave at least nine closing/answer tokens. An explicit incompatible
+`thinking_budget` is rejected rather than silently changed.
 
 An explicit reasoning cap feeds the canonical `</think>\n\n` token sequence
 through the original model, then generates its answer. The inserted IDs count
 toward the total/context limits and are disclosed in diagnostics/usage. They
 do not substitute hidden text or alter top-eight routing. Leave at least nine
 tokens between reasoning and total limits. A shorter reasoning budget can
-reduce answer quality; no separate cap is enabled by default. Default greedy
-sampling and unbounded-within-total thinking retain the previous policy.
+reduce answer quality. Off/Small/Medium/Ultra select bounded generation
+policies automatically; the UI default is Medium. API requests can override
+these defaults. Greedy remains the default sampling policy.
 
-Context capacity remains 4096, including prompt and total new-token allowance.
+Current source configures 8192, including prompt and total new-token allowance.
 Prompts that do not fit are rejected rather than silently truncated. This
-release does not establish 8K, 32K or 65K operation.
+configuration does not establish trained 8K, 32K or 65K reliability.
 
 ## Standard Python client
 
@@ -113,11 +127,22 @@ reusing only the existing in-process numerical admission. No simultaneous
 model copy is allocated. Request bodies are limited to 256 KiB, headers to
 16 KiB and live connections to four. Slow or oversized clients fail boundedly.
 
-This initial text API explicitly rejects structured tools/tool-call history,
-images, custom stop sequences, nonzero penalties and JSON-constrained output.
-It does not implement `/v1/responses`. A client requiring those features needs
-further integration; generic text compatibility is not a verified Hermes
-agent workflow.
+The current integration supports validated function definitions, tool choice,
+assistant `tool_calls` and matching `role: tool` results. The original Ornith
+XML format is parsed into schema-checked JSON arguments. Call payloads are
+withheld until complete and validated, including in SSE. Invalid, undeclared
+or token-limited calls return an error, never a repaired action. This is not
+grammar-constrained generation. Unsupported schema validation keywords fail
+explicitly. See [protocol bounds and Kali client](SECURITY-AI-SERVER.md).
+Images, custom stop sequences, nonzero penalties, JSON-constrained
+`response_format` and `/v1/responses` remain unsupported. Real phone/Hermes
+tool-call interoperability is still an acceptance test, not an assumed result.
+
+`usage.flash_local` carries measurements from the actual app inference owner:
+model SHA, platform/device/build/source identity, configured context, evaluated
+and reused prompt tokens, native prefill/decode time and passes, I/O, peak
+footprint, admitted memory budget and thermal state. Missing measurements
+remain absent; HTTP wall time is not substituted for native/GPU timing.
 
 ## Validation boundary
 
@@ -147,7 +172,7 @@ of higher decode throughput.
 3. Stop or disconnect an active client, then issue another request. The old
    inference must stop and the service must admit the next request after native
    teardown. A concurrent generation receives 429. Background the phone app and
-   confirm that the service stops; return and start it again with its new key.
+   confirm that the service stops; return and start it again with its saved key.
 
 These checks establish phone integration only. Use **Jämförelse** for the fixed
 128-token engine benchmark; a short API reply is not a comparable speed run.
