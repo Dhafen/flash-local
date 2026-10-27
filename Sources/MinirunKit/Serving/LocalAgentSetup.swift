@@ -16,7 +16,7 @@ public struct LocalAgentSetup {
         public var id: String { rawValue }
         public var title: String { self == .unix ? "Kali / Linux / Mac" : "Windows PowerShell" }
     }
-    public static let clientRevision = "3e8aae7d4f15d5a2a7b897723c79a6348a609200"
+    public static let clientRevision = "39c262c646ff3774f60e31c5b6f26b690e4dd01c"
     private var clientDirectory: String { "flash-local-clients-" + String(Self.clientRevision.prefix(8)) }
     public let client: Client
     public let computer: Computer

@@ -74,8 +74,9 @@ On an Apple-silicon Mac with Xcode:
 python scripts/build_flint_runtime.py
 # Also prepare the existing tokenizer XCFramework as required by Package.swift.
 python scripts/build_tokenizer_xcframework.py
-FLASH_LOCAL_ENABLE_FLINT=1 xcodebuild -scheme FlintEngine \
-  -destination 'platform=macOS,arch=arm64' test
+FLASH_LOCAL_ENABLE_FLINT=1 xcodebuild -scheme minirun-Package \
+  -destination 'platform=macOS,arch=arm64' test \
+  -only-testing:FlintEngineTests -only-testing:MinirunKitTests
 # App integration retains LES and adds the isolated Flint product transitively.
 FLASH_LOCAL_ENABLE_LES=1 FLASH_LOCAL_ENABLE_FLINT=1 xcodebuild build \
   -project Apps/Minirun/Minirun.xcodeproj -scheme Minirun-iOS \
