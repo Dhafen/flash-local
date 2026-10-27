@@ -56,6 +56,7 @@ def discover(client, requested=None):
     context, output = capabilities.get('context_capacity_tokens'), capabilities.get('max_output_tokens')
     if type(context) is not int or context not in [8192, 16384, 32768, 65536] or type(output) is not int or not 1 <= output < context:
         raise ValueError('Invalid live context/output budget')
+    client.selected_model, client.capabilities = name, dict(capabilities)
     return {'model': name, 'context': context, 'output': output, 'capabilities': capabilities}
 
 
@@ -169,6 +170,8 @@ def main(argv=None):
             print(json.dumps({'connected': True, 'base_url': client.base, **live}, ensure_ascii=False))
             return 0
         if args.command == 'run':
+            if live['capabilities'].get('thinking_budget_control') is False:
+                print('This phone model controls its own reasoning. Agent effort/budget defaults are not forwarded as forced reasoning controls.', flush=True)
             if args.client == 'opencode':
                 return run_opencode(client, live, args.project)
             from flash_local_clients import run_hermes, run_codex, run_pentagi

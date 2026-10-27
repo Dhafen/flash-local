@@ -8,6 +8,13 @@ _flf_token_piece
 _flf_render_prompt
 _flf_is_eog
 _flf_evaluate
+_flf_evaluate_for_sampling
+_flf_copy_logits
+_flf_configure_sampling
+_flf_sample
+_flf_trace_routes
+_flf_routing_json
 _flf_snapshot
 _flf_last_error
 _flf_revision
+_flf_library_path

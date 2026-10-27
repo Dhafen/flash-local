@@ -28,7 +28,7 @@
   },
   "sampling": {"temperature": 1.0, "topP": 0.95, "topK": 20},
   "status": {
-    "fullFileSHA256VerifiedLocally": false, "trainedInferenceVerified": false,
+    "fullFileSHA256VerifiedLocally": true, "trainedInferenceVerified": false,
     "iPhoneVerified": false, "enabledInProduction": false
   }
 }

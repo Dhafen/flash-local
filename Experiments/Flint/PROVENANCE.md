@@ -67,9 +67,11 @@ a compact SWA cache whose earlier cells may have been overwritten.
 Native model lifetime is independent of a view. Cancellation and reset are
 separate from unloading. The Swift actor serializes native operations; its
 small locked cancellation bridge can be signaled during a synchronous native
-call. The app still needs to connect this adapter to its shared model owner and
-chat/API selection after Apple checks; native omni environment knobs require an
-exclusive app-level engine lease. Do not load Ornith and Flint concurrently.
+call. The opt-in app integration now connects one actor to chat/API and enforces
+a cross-runtime engine lease. The current serving configuration does not install
+routing diagnostic callbacks. The first numerical comparison uses a separate
+diagnostic context, then reloads the ordinary serving context after passing.
+Apple build, visual and actual device checks are still required.
 
 ## Admission is not a phone benchmark
 
@@ -98,8 +100,17 @@ untrained models verify the graph and streaming mechanics; the publisher's real
 vocabulary verifies tokenization independently of weights. Prompt replay tests
 verify format, not trained tool-call reliability. The Swift/Metal/iOS build,
 actual trained logits, tool generation and sustained phone performance are
-still unverified. Existing sampling/reasoning presets are not automatically
-claimed to work with Flint. No production model switch has been made.
+still unverified. Native sampling uses reusable GGML candidate storage; the
+publisher defaults are temperature 1/top-p 0.95/top-k 20. Greedy controls are
+separate. The native seed is reproducible within GGML, not asserted identical
+to MLX random draws. No production model switch has been made.
+
+The complete official GGUF SHA was verified on disk, without loading the model
+into memory for inference. Twenty-seven real slices verify Q4_1 dequantization
+and bounded CPU projections. The new source-identical Linux Swift controls test
+tool schemas/replay, UTF-8/reasoning boundaries, prefix policy and comparison
+rejection; they are not xcodebuild/Metal tests. Historical first-stage evidence
+is retained; second-stage evidence states its own exact source/binary hashes.
 
 An issue could not be opened before this larger adapter change because this
 private repository has issues disabled. Repository settings were left intact;

@@ -35,6 +35,7 @@
 		22215427EF6C2F520A27ED70 /* REAMAppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4AB578C0D8B81F6A36ED8AA /* REAMAppModel.swift */; };
 		22820868C1C26B19282EBA95 /* CatalogFixtures.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8295EF8C10708DA25D6703DE /* CatalogFixtures.swift */; };
 		229A6437D3C68BDFAC3C0E01 /* OrnithLESView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEF9601E7D9E23FB5F00C312 /* OrnithLESView.swift */; };
+		2133BB9AB34285433FE5DA57 /* FlintView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF2FDB2F26ED15969A511594 /* FlintView.swift */; };
 		23520FC352F51E1043D1ED4C /* PanelWindowSizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F2C99A01DEA2FB109264058 /* PanelWindowSizerTests.swift */; };
 		2500E73D76A825968883EB53 /* MockDownloadManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC3C8A9583966D64F857F8DC /* MockDownloadManager.swift */; };
 		2604E8921622244F844F7E38 /* ConversationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B06BE2189BEE49CE15A4B9 /* ConversationStore.swift */; };
@@ -47,7 +48,9 @@
 		2B4838F595A71611247C3322 /* ProjectionStrip.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74ED1F2BB87D224E2E5E2AE3 /* ProjectionStrip.swift */; };
 		2D36EE6E12BD8305425E1E59 /* SwiftletNotices.txt in Resources */ = {isa = PBXBuildFile; fileRef = 4CCBFD2090C4EEEEF5E8F45F /* SwiftletNotices.txt */; };
 		2DCFE1F02086457F9B733FE0 /* OrnithLES-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = D15F57C48F6FDA32C5B53ED9 /* OrnithLES-LICENSE.txt */; };
+		165BA43BCA774C1083E666BC /* Flint-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 62DA85027FE958E6AE18D9A4 /* Flint-LICENSE.txt */; };
 		2E6B24EE0E9EBD725F27FD88 /* OrnithLESAppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4B6BCF03E7DDD48E35D5895 /* OrnithLESAppModel.swift */; };
+		EEC7D8A79508C6D39FC25A72 /* FlintAppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43B937B1FD46D573182A44CB /* FlintAppModel.swift */; };
 		3461ACF8176F64EAAF31184A /* CatalogNamingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 238D59D9207619AA515D15C1 /* CatalogNamingTests.swift */; };
 		34A61FAAFA9736E817C4ED7C /* REAMChatRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C08F3DD8D8D9B2A60C2A690 /* REAMChatRenderTests.swift */; };
 		34BAD95298C4A4E53A80FF1F /* OpenSourceNotices.txt in Resources */ = {isa = PBXBuildFile; fileRef = 4584526402C0C724EA126739 /* OpenSourceNotices.txt */; };
@@ -103,7 +106,9 @@
 		7505AE766D51ADC19F41519E /* AssessmentCardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90F12F96EDA27426D335BD79 /* AssessmentCardTests.swift */; };
 		755FD30FB432EC3D1E04E4D1 /* OrnithPerformanceAppTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AB662DC12C34C403BAEE928 /* OrnithPerformanceAppTests.swift */; };
 		7569B8874FA7DDD567665581 /* OrnithLESView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEF9601E7D9E23FB5F00C312 /* OrnithLESView.swift */; };
+		0E9CC267BB541BFB8697AD24 /* FlintView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF2FDB2F26ED15969A511594 /* FlintView.swift */; };
 		771BDBADE7805352A707B428 /* OrnithLESAppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4B6BCF03E7DDD48E35D5895 /* OrnithLESAppModel.swift */; };
+		2FC4CCB89C789162EB5802E0 /* FlintAppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43B937B1FD46D573182A44CB /* FlintAppModel.swift */; };
 		77558B2511C3EACAAF6DBDEA /* BudgetPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = 536D180F81B960143A0A930C /* BudgetPlan.swift */; };
 		775CA38CC743E4D3671AFCA8 /* REAMAppModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D3C06570C8926B59B835700 /* REAMAppModelTests.swift */; };
 		7DA046973C2690F5D0E3F9AC /* Instruments.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A8A6B9E1EC4E72CDCD10BFA /* Instruments.swift */; };
@@ -142,6 +147,7 @@
 		A6DE0C746EE8EA3BC2A758D5 /* PreviewTokenizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40CD85A0EA5D6BF84A9CD902 /* PreviewTokenizer.swift */; };
 		A86EFED428377053FC01DA70 /* ModelAdapters in Frameworks */ = {isa = PBXBuildFile; productRef = 327A9F472B9753BF7101AFA8 /* ModelAdapters */; };
 		AE0828EBA881DDB401E0F077 /* OrnithLES-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = D15F57C48F6FDA32C5B53ED9 /* OrnithLES-LICENSE.txt */; };
+		E7181F1ADEF61D745B82C38C /* Flint-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 62DA85027FE958E6AE18D9A4 /* Flint-LICENSE.txt */; };
 		AE28F2D70CCBFC07C9AF9023 /* MinirunKit in Frameworks */ = {isa = PBXBuildFile; productRef = 3F970A77AA1EA60FC0957DEB /* MinirunKit */; };
 		AF68BAEBBE105EABA6D4246F /* OpenSourceNotices.txt in Resources */ = {isa = PBXBuildFile; fileRef = 4584526402C0C724EA126739 /* OpenSourceNotices.txt */; };
 		B17B0A68725FC61FAC59B299 /* BudgetPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = 536D180F81B960143A0A930C /* BudgetPlan.swift */; };
@@ -304,9 +310,11 @@
 		C1DEEA6CFC2E23E3B7BBC60E /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		C2F522404FD75DC76C939972 /* OrnithPerformanceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrnithPerformanceView.swift; sourceTree = "<group>"; };
 		C4B6BCF03E7DDD48E35D5895 /* OrnithLESAppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrnithLESAppModel.swift; sourceTree = "<group>"; };
+		43B937B1FD46D573182A44CB /* FlintAppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlintAppModel.swift; sourceTree = "<group>"; };
 		C90D785356A47D759E611773 /* DownloadState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadState.swift; sourceTree = "<group>"; };
 		D141E4CE3E6B7999B983C191 /* DeepSeekV41ProductRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeepSeekV41ProductRuntime.swift; sourceTree = "<group>"; };
 		D15F57C48F6FDA32C5B53ED9 /* OrnithLES-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "OrnithLES-LICENSE.txt"; sourceTree = "<group>"; };
+		62DA85027FE958E6AE18D9A4 /* Flint-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "Flint-LICENSE.txt"; sourceTree = "<group>"; };
 		D4615FE6055CFB662D8CBCE7 /* VolumeAssessments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VolumeAssessments.swift; sourceTree = "<group>"; };
 		D6A1975DDF806967F14C197F /* OrnithPerformanceAppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrnithPerformanceAppModel.swift; sourceTree = "<group>"; };
 		D6EF89D698188921CC13DF66 /* ConversationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationTests.swift; sourceTree = "<group>"; };
@@ -330,6 +338,7 @@
 		FD74D0BD0333E338DC0FD46A /* ModelCatalogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelCatalogView.swift; sourceTree = "<group>"; };
 		FE35EC3C17CCD2A3D96C012D /* InstrumentPanelRenderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstrumentPanelRenderTests.swift; sourceTree = "<group>"; };
 		FEF9601E7D9E23FB5F00C312 /* OrnithLESView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrnithLESView.swift; sourceTree = "<group>"; };
+		DF2FDB2F26ED15969A511594 /* FlintView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlintView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -409,6 +418,7 @@
 				7FB065E4579BEAAA27BC5273 /* FlashLocalMark.svg */,
 				4584526402C0C724EA126739 /* OpenSourceNotices.txt */,
 				D15F57C48F6FDA32C5B53ED9 /* OrnithLES-LICENSE.txt */,
+				62DA85027FE958E6AE18D9A4 /* Flint-LICENSE.txt */,
 				355654F1DB934ADC8AD27EE8 /* PrivacyInfo.xcprivacy */,
 				4EBB7691E9CBEE5D213A2C65 /* QwenModelLicense.txt */,
 				4CCBFD2090C4EEEEF5E8F45F /* SwiftletNotices.txt */,
@@ -488,6 +498,7 @@
 				68460D773F76808905F3D13D /* K3ProductRuntime.swift */,
 				B70FAB3186603ABADC3D5268 /* ModelRuntime.swift */,
 				C4B6BCF03E7DDD48E35D5895 /* OrnithLESAppModel.swift */,
+				43B937B1FD46D573182A44CB /* FlintAppModel.swift */,
 				D6A1975DDF806967F14C197F /* OrnithPerformanceAppModel.swift */,
 				9EC1C3587459DC0447DF0538 /* PromptAssembler.swift */,
 				F4AB578C0D8B81F6A36ED8AA /* REAMAppModel.swift */,
@@ -546,6 +557,7 @@
 				FD74D0BD0333E338DC0FD46A /* ModelCatalogView.swift */,
 				F6534E68BABDC703360D074B /* ModelDetailView.swift */,
 				FEF9601E7D9E23FB5F00C312 /* OrnithLESView.swift */,
+				DF2FDB2F26ED15969A511594 /* FlintView.swift */,
 				C2F522404FD75DC76C939972 /* OrnithPerformanceView.swift */,
 				9EFD1C4AD23582687D8423FD /* REAMRootView.swift */,
 				1DB98DAE51D81245C7954BF4 /* RootView.swift */,
@@ -723,6 +735,7 @@
 				59EE90717EDDF5B55D9F3A46 /* FlashLocalMark.svg in Resources */,
 				34BAD95298C4A4E53A80FF1F /* OpenSourceNotices.txt in Resources */,
 				2DCFE1F02086457F9B733FE0 /* OrnithLES-LICENSE.txt in Resources */,
+				165BA43BCA774C1083E666BC /* Flint-LICENSE.txt in Resources */,
 				D0A4B87C44B5642EB4865042 /* PrivacyInfo.xcprivacy in Resources */,
 				149410BD57CBB47F8503E743 /* QwenModelLicense.txt in Resources */,
 				7FEAF83F4E1EFD13FD8D9848 /* SwiftletNotices.txt in Resources */,
@@ -737,6 +750,7 @@
 				DC341D43C50CF5020CEDAC46 /* FlashLocalMark.svg in Resources */,
 				AF68BAEBBE105EABA6D4246F /* OpenSourceNotices.txt in Resources */,
 				AE0828EBA881DDB401E0F077 /* OrnithLES-LICENSE.txt in Resources */,
+				E7181F1ADEF61D745B82C38C /* Flint-LICENSE.txt in Resources */,
 				501482B02CE9C5DEEF74A6E6 /* PrivacyInfo.xcprivacy in Resources */,
 				F82982E5F9A6A6EF44CA7338 /* QwenModelLicense.txt in Resources */,
 				2D36EE6E12BD8305425E1E59 /* SwiftletNotices.txt in Resources */,
@@ -819,7 +833,9 @@
 				EEE0AC03CE20981B47731FD0 /* ModelDetailView.swift in Sources */,
 				1616AFA946ED9D3A0D75CC5B /* ModelRuntime.swift in Sources */,
 				2E6B24EE0E9EBD725F27FD88 /* OrnithLESAppModel.swift in Sources */,
+				EEC7D8A79508C6D39FC25A72 /* FlintAppModel.swift in Sources */,
 				7569B8874FA7DDD567665581 /* OrnithLESView.swift in Sources */,
+				0E9CC267BB541BFB8697AD24 /* FlintView.swift in Sources */,
 				4715A78897C8100ACE7C1583 /* OrnithPerformanceAppModel.swift in Sources */,
 				28DC393DDFF8BEF0291B3514 /* OrnithPerformanceView.swift in Sources */,
 				A6DE0C746EE8EA3BC2A758D5 /* PreviewTokenizer.swift in Sources */,
@@ -884,7 +900,9 @@
 				7039121984A1E5C633160AE6 /* ModelDetailView.swift in Sources */,
 				66D04A92427CADE07301610E /* ModelRuntime.swift in Sources */,
 				771BDBADE7805352A707B428 /* OrnithLESAppModel.swift in Sources */,
+				2FC4CCB89C789162EB5802E0 /* FlintAppModel.swift in Sources */,
 				229A6437D3C68BDFAC3C0E01 /* OrnithLESView.swift in Sources */,
+				2133BB9AB34285433FE5DA57 /* FlintView.swift in Sources */,
 				5920C9CC7B35C05ED0C03762 /* OrnithPerformanceAppModel.swift in Sources */,
 				93D1EAB61E2CE1FE709917E4 /* OrnithPerformanceView.swift in Sources */,
 				A66991DC4AB79C50A9210B7E /* PreviewTokenizer.swift in Sources */,

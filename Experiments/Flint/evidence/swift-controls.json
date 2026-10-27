@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "toolchain": "Swift version 6.2.3 (swift-6.2.3-RELEASE)\nTarget: x86_64-unknown-linux-gnu",
+  "platform": "Linux Foundation controls",
+  "testsPassed": 14,
+  "applePackageTestsRun": false,
+  "iOSBuildVerified": false,
+  "trainedInferenceExecuted": false,
+  "sourceIdentical": true,
+  "sources": {
+    "Sources/MinirunKit/Serving/LocalChatProtocol.swift": "54b962b428cbd21e1f8658b487d9eea6d193e8069850c4502bdcb476ef933e28",
+    "Sources/MinirunKit/Serving/LocalGenerationOptions.swift": "9cf741586efc26f59302a916d5e674f387b151547bbf5ff5c8701933c0bf909d",
+    "Sources/MinirunKit/Serving/LocalToolProtocol.swift": "23e5400a8aa5bf8cc89e0f1bd19b741807ba37b2164137ab0f5ab7d9c07fed3e",
+    "Sources/MinirunKit/Serving/LocalFlintToolOutput.swift": "f66f227185201de249c2e7f93172f4e1d8d78f738ebdb8c3dacea745a943fcb6",
+    "Sources/MinirunKit/Serving/LocalAPIHTTP.swift": "203218d71b7ee76a5f1143d5e37be04637dddc5bd73e4d31548f37c0cf307821",
+    "Sources/MinirunKit/Serving/LocalEngineLease.swift": "368fe37fbc2ec01eb28a0a36d691c232346a40861cc0b1fba0b78d57498f1e92",
+    "Experiments/Flint/Sources/FlintEngine/FlintPrefixPolicy.swift": "235038709fa2aa6eb1f31741eff43709fbb52db4132da28ab66bd3cfa420a8e8",
+    "Experiments/Flint/Sources/FlintEngine/FlintTextStream.swift": "d3d61d3b4129a74e7123778cd45918e496a98b60addde34382922319da91277a",
+    "Experiments/Flint/Sources/FlintEngine/FlintWirePrompt.swift": "b509454f1c5a8fb98fc8fcb3bac378097f29745211967cd57736268f7df7b41a",
+    "Experiments/Flint/Sources/FlintEngine/FlintNumerics.swift": "861fd5eee25579f1cc4476100b3c1fbdbd67a3ba7ca3c96d115d5c6ca94355e8",
+    "Tests/MinirunKitTests/LocalFlintProtocolTests.swift": "3749c8832f353e6f011b721654533e68b6ad317f2f6f36103694169aec931714",
+    "Experiments/Flint/Tests/FlintEngineTests/FlintStreamTests.swift": "3443b277aabd9c8bd11691e3e56820f99512cb02e56278f200271d5a81532c12"
+  }
+}

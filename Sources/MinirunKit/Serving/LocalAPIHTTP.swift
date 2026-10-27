@@ -69,9 +69,9 @@ enum LocalAPIWire {
         if status == 429 { value += "Retry-After: 2\r\n" }
         return Data((value + "\r\n").utf8)
     }
-    static func chunk(id: String, created: Int, delta: [String: Any], finish: String? = nil) throws -> Data {
+    static func chunk(id: String, created: Int, model: String = LocalChatRequest.modelID, delta: [String: Any], finish: String? = nil) throws -> Data {
         let value: [String: Any] = ["id": id, "object": "chat.completion.chunk", "created": created,
-            "model": LocalChatRequest.modelID, "usage": NSNull(),
+            "model": model, "usage": NSNull(),
             "choices": [["index": 0, "delta": delta, "finish_reason": finish as Any? ?? NSNull()]]]
         return try sse(value)
     }

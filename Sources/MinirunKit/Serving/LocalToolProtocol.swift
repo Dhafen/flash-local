@@ -67,6 +67,24 @@ public struct LocalToolDefinition: Equatable, Sendable {
         }
         throw LocalAPIError.invalid("tool_calls", "XML parameter does not match its declared schema")
     }
+    /// Flint's Rec protocol uses literal strings and JSON for other values.
+    /// A nullable union's literal null is null (publisher convention). Do not
+    /// apply Qwen's Python scalar spellings or strip source-code whitespace.
+    func flintArgument(_ text: String, name: String) throws -> Any {
+        let root = try JSONSerialization.jsonObject(with: Data(parametersJSON.utf8)) as! [String: Any]
+        let property = (root["properties"] as? [String: Any])?[name] ?? root["additionalProperties"] ?? true
+        var candidates: [Any] = []
+        if text == "null" { candidates.append(NSNull()) }
+        candidates.append(text)
+        if let value = try? JSONSerialization.jsonObject(with: Data(text.utf8), options: [.fragmentsAllowed]) {
+            candidates.append(value)
+        }
+        for candidate in candidates {
+            var schema = LocalToolSchema(root: root)
+            if (try? schema.validate(candidate, against: property)) != nil { return candidate }
+        }
+        throw LocalAPIError.invalid("tool_calls", "Flint argument does not match its declared schema")
+    }
 }
 
 public struct LocalToolCall: Codable, Equatable, Sendable {

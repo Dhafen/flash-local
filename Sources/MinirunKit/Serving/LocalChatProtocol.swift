@@ -34,8 +34,10 @@ public struct LocalChatRequest: Sendable {
     public let tools: [LocalToolDefinition]
     public let toolChoice: LocalToolChoice
     public let parallelToolCalls: Bool
+    public let requestedModelID: String
 
-    public init(data: Data, defaults: LocalGenerationOptions = .init()) throws {
+    public init(data: Data, defaults: LocalGenerationOptions? = nil, capabilities: LocalModelCapabilities = .init()) throws {
+        let defaults = defaults ?? capabilities.defaultOptions
         guard data.count <= 262144, let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw LocalAPIError.invalid("body", "Expected a JSON object, at most 256 KiB")
         }
@@ -45,8 +47,16 @@ public struct LocalChatRequest: Sendable {
         if let key = object.keys.sorted().first(where: { !allowed.contains($0) }) {
             throw LocalAPIError.invalid(key, "This parameter is not supported by the local text API")
         }
-        guard object["model"] as? String == Self.modelID else {
+        guard object["model"] as? String == capabilities.modelID else {
             throw LocalAPIError(status: 404, message: "Unknown model; use GET /v1/models", parameter: "model")
+        }
+        requestedModelID = capabilities.modelID
+        if capabilities.family == .flint {
+            for key in ["reasoning_effort", "thinking_budget", "enable_thinking", "chat_template_kwargs"] {
+                if let value = object[key], !(value is NSNull) {
+                    throw LocalAPIError.invalid(key, "Flint exposes native reasoning output; forced reasoning budgets are not supported")
+                }
+            }
         }
         func numeric(_ key: String, from source: [String: Any]? = nil) throws -> Double? {
             guard let value = (source ?? object)[key], !(value is NSNull) else { return nil }

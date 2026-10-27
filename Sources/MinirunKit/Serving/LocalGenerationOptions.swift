@@ -11,12 +11,34 @@ public enum LocalContextProfile: Int, Codable, CaseIterable, Identifiable, Senda
 }
 
 public struct LocalModelCapabilities: Sendable {
+    public enum Family: Sendable { case ornith, flint }
     public let context: LocalContextProfile
-    public init(context: LocalContextProfile = .standard) { self.context = context }
+    public let family: Family
+    public init(context: LocalContextProfile = .standard, family: Family = .ornith) {
+        self.context = context; self.family = family
+    }
+    public var modelID: String { family == .ornith ? LocalChatRequest.modelID : "recursive-flint-40b-a2.5b-int4" }
+    public var defaultOptions: LocalGenerationOptions {
+        var value = LocalGenerationOptions()
+        if family == .flint {
+            value.temperature = 1; value.topP = 0.95
+            // Rec publishes reasoning output, not Ornith's forced-budget or
+            // enable_thinking protocol. Do not advertise an invented control.
+            value.enableThinking = true; value.thinkingBudget = nil
+        }
+        return value
+    }
     var json: [String: Any] {
         ["context_capacity_tokens": context.rawValue, "max_output_tokens": 4096,
-         "reasoning_presets": ["off", "small", "medium", "ultra"],
-         "tool_calls": true, "context_quality_verified": false]
+         "reasoning_presets": family == .ornith ? ["off", "small", "medium", "ultra"] : [],
+         "reasoning_output": true, "thinking_budget_control": family == .ornith,
+         "tool_calls": true, "tool_quality_verified": false, "context_quality_verified": false]
+    }
+    func parseTools(_ text: String, request: LocalChatRequest) throws -> (content: String, calls: [LocalToolCall]) {
+        if family == .flint {
+            return try LocalFlintToolOutput.parse(text, tools: request.tools, choice: request.toolChoice, parallel: request.parallelToolCalls)
+        }
+        return try LocalToolOutput.parse(text, tools: request.tools, choice: request.toolChoice, parallel: request.parallelToolCalls)
     }
 }
 

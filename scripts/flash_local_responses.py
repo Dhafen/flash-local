@@ -125,7 +125,7 @@ def translate(request, live):
     for key in ['temperature', 'top_p']:
         if key in request:
             payload[key] = request[key]
-    if request.get('reasoning', {}).get('effort'):
+    if request.get('reasoning', {}).get('effort') and live.get('capabilities', {}).get('thinking_budget_control') is not False:
         payload['reasoning_effort'] = request['reasoning']['effort']
     return payload, custom
 

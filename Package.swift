@@ -89,6 +89,7 @@ let package = Package(
                 "StorageCore",
                 .product(name: "MLX", package: "mlx-swift"),
             ] + (enableLES ? [.target(name: "OrnithLES")] : [])
+              + (enableFlint ? [.target(name: "FlintEngine")] : [])
         ),
         .testTarget(
             name: "MinirunRunnersTests",
@@ -105,7 +106,7 @@ let package = Package(
         .binaryTarget(name: "FlashFlint", path: ".work/flint-runtime/FlashFlint.xcframework"),
         .target(name: "FlintEngine", dependencies: ["FlashFlint", "GGUFCore", "MinirunKit", "StorageCore"],
             path: "Experiments/Flint/Sources/FlintEngine"),
-        .testTarget(name: "FlintEngineTests", dependencies: ["FlintEngine"],
+        .testTarget(name: "FlintEngineTests", dependencies: ["FlintEngine", "MinirunKit"],
             path: "Experiments/Flint/Tests/FlintEngineTests")
     ] : [])
 )

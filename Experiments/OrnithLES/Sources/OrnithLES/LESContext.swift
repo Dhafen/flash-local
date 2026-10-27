@@ -110,6 +110,7 @@ public final class LESContext {
     private let checkpoints: GGUFCheckpointCollector?
     private var draftArtifact: VerifiedGGUFArtifact?
     private var handle: OpaquePointer?
+    private var engineLease: LocalEngineLease?
     public let vocabularySize: Int
     public let plan: LESMemoryPlan
     public init(artifact: VerifiedGGUFArtifact, prepared: URL, plan: LESMemoryPlan,
@@ -149,12 +150,13 @@ public final class LESContext {
             options.checkpoint_user = Unmanaged.passUnretained(checkpoints).toOpaque()
         }
         let descriptor = try artifact.duplicateForReading(); defer { Darwin.close(descriptor) }
+        let engineLease = try LocalEngineLease.acquire(.ornith)
         guard let handle = flo_open(descriptor, prepared.path, options, { user in
             guard let user else { return true }
             return Unmanaged<LESControl>.fromOpaque(user).takeUnretainedValue().shouldAbort()
         }, Unmanaged.passUnretained(control).toOpaque()) else { throw Self.failure() }
         do { try artifact.assertUnchanged() } catch { flo_close(handle); throw error }
-        self.handle = handle; vocabularySize = Int(flo_vocabulary_size(handle))
+        self.handle = handle; self.engineLease = engineLease; vocabularySize = Int(flo_vocabulary_size(handle))
     }
     deinit { close() }
     /// End native ownership at a phase boundary, regardless of ARC lifetime
@@ -164,6 +166,7 @@ public final class LESContext {
         self.handle = nil
         flo_close(handle)
         draftArtifact = nil
+        engineLease = nil
     }
     public static var runtimeMemory: LESRuntimeMemory { LESRuntimeMemory(flo_snapshot(nil)) }
     public func logits(tokens: [Int]) throws -> [Float] {

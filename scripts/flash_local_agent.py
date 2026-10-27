@@ -192,9 +192,17 @@ class LocalClient:
             raise ValueError("Set FLASH_LOCAL_API_KEY to the key shown by the phone")
         self.base = base_url.rstrip("/")
         self.key, self.timeout = key, timeout
+        self.selected_model, self.capabilities = None, {}
         self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
 
     def request(self, path, payload=None):
+        if (path == '/chat/completions' and isinstance(payload, dict) and
+                payload.get('model') == self.selected_model and self.capabilities.get('thinking_budget_control') is False):
+            # Capability-aware launcher adapter: Flint retains native reasoning.
+            # Legacy agent defaults are not forwarded as unsupported Ornith
+            # budget controls. The phone's direct API still rejects such fields.
+            payload = {k: v for k, v in payload.items() if k not in {
+                'reasoning_effort', 'enable_thinking', 'thinking_budget', 'chat_template_kwargs'}}
         data = None if payload is None else json.dumps(payload, allow_nan=False).encode()
         if data is not None and len(data) > 262144:
             raise ValueError("Request exceeds the server's 256 KiB input bound")

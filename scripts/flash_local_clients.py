@@ -54,7 +54,7 @@ def write_private(path, content):
 
 
 def hermes_configuration(client, live):
-    return {'model': {'default': live['model'], 'provider': 'custom', 'base_url': client.base,
+    value = {'model': {'default': live['model'], 'provider': 'custom', 'base_url': client.base,
                       'api_mode': 'chat_completions', 'context_length': live['context']},
         'agent': {'max_turns': 32, 'max_tokens': live['output'], 'reasoning_effort': 'medium'},
         'compression': {'enabled': True, 'threshold': 0.55, 'target_ratio': 0.20},
@@ -66,6 +66,9 @@ def hermes_configuration(client, live):
         'delegation': {'provider': 'custom', 'model': live['model'], 'base_url': client.base,
                        'max_iterations': 16},
         'display': {'streaming': True}, 'checkpoints': {'enabled': True}}
+    if live.get('capabilities', {}).get('thinking_budget_control') is False:
+        value['agent'].pop('reasoning_effort', None)
+    return value
 
 
 def run_hermes(client, live, root, project=None):
@@ -85,8 +88,9 @@ def run_hermes(client, live, root, project=None):
                HERMES_API_TIMEOUT=seconds, HERMES_STREAM_READ_TIMEOUT=seconds,
                HERMES_STREAM_STALE_TIMEOUT=seconds)
     print('Hermes local profile (sessions retained): ' + str(profile), flush=True)
+    reasoning = [] if live.get('capabilities', {}).get('thinking_budget_control') is False else ['--reasoning', 'medium']
     return subprocess.run([executable, 'chat', '--provider', 'custom', '--model', live['model'],
-                           '--toolsets', 'terminal,file', '--reasoning', 'medium'],
+                           '--toolsets', 'terminal,file', *reasoning],
                           cwd=project, env=env, check=False).returncode
 
 
@@ -105,6 +109,8 @@ def codex_arguments(live, base, project=None):
         'model_providers.flashlocal.stream_idle_timeout_ms': request_timeout_seconds(live) * 1000,
         'features.apps': False, 'features.plugins': False, 'features.multi_agent': False,
         'features.multi_agent_v2': False, 'features.goals': False, 'features.tool_suggest': False}
+    if live.get('capabilities', {}).get('thinking_budget_control') is False:
+        values.pop('model_reasoning_effort', None)
     # Disable configured MCP servers for this invocation only. Read section names,
     # never copy credentials or rewrite the operator's config. Python >=3.11.
     import tomllib

@@ -15,6 +15,7 @@ public final class LocalModelAPIServer: @unchecked Sendable {
     private let loopbackOnly: Bool
     private let defaults: LocalGenerationOptions
     private let capabilities: LocalModelCapabilities
+    private let canServe: @Sendable () -> Bool
     private var listener: NWListener?
     private var sessions: [UUID: LocalAPISession] = [:]
     private var stopped = false
@@ -26,13 +27,16 @@ public final class LocalModelAPIServer: @unchecked Sendable {
         }
         return bytes.map { String(format: "%02x", $0) }.joined()
     }
-    public init(key: String, port: UInt16 = 8080, loopbackOnly: Bool = false, defaults: LocalGenerationOptions = .init(),
+    public init(key: String, port: UInt16 = 8080, loopbackOnly: Bool = false, defaults: LocalGenerationOptions? = nil,
                 capabilities: LocalModelCapabilities = .init(),
+                canServe: @escaping @Sendable () -> Bool = { true },
                 handler: @escaping Handler, onState: @escaping @Sendable (State) -> Void) throws {
         try LocalAPIKeyStore.validate(key)
+        let defaults = defaults ?? capabilities.defaultOptions
         try defaults.validate()
         self.key = key; self.handler = handler; self.onState = onState; self.loopbackOnly = loopbackOnly; self.defaults = defaults
         self.capabilities = capabilities
+        self.canServe = canServe
         let parameters = NWParameters.tcp
         parameters.prohibitedInterfaceTypes = [.cellular]
         parameters.includePeerToPeer = false
@@ -59,7 +63,7 @@ public final class LocalModelAPIServer: @unchecked Sendable {
                 connection.cancel(); return
             }
             let id = UUID()
-            let session = LocalAPISession(connection: connection, queue: self.queue, key: self.key, defaults: self.defaults, capabilities: self.capabilities, handler: self.handler) { [weak self] in
+            let session = LocalAPISession(connection: connection, queue: self.queue, key: self.key, defaults: self.defaults, capabilities: self.capabilities, canServe: self.canServe, handler: self.handler) { [weak self] in
                 self?.sessions.removeValue(forKey: id)
             }
             self.sessions[id] = session; session.start()
@@ -125,6 +129,7 @@ private final class LocalAPISession: @unchecked Sendable {
     private let handler: LocalModelAPIServer.Handler
     private let defaults: LocalGenerationOptions
     private let capabilities: LocalModelCapabilities
+    private let canServe: @Sendable () -> Bool
     private let onClose: () -> Void
     private var parser = LocalHTTPParser()
     private var finished = false
@@ -132,9 +137,11 @@ private final class LocalAPISession: @unchecked Sendable {
     private var generation: LocalChatGeneration?
     private var task: Task<Void, Never>?
     init(connection: NWConnection, queue: DispatchQueue, key: String, defaults: LocalGenerationOptions, capabilities: LocalModelCapabilities,
+         canServe: @escaping @Sendable () -> Bool,
          handler: @escaping LocalModelAPIServer.Handler, onClose: @escaping () -> Void) {
         self.connection = connection; self.queue = queue; self.key = key; self.defaults = defaults; self.handler = handler; self.onClose = onClose
         self.capabilities = capabilities
+        self.canServe = canServe
     }
     func start() {
         connection.stateUpdateHandler = { [weak self] state in
@@ -173,8 +180,11 @@ private final class LocalAPISession: @unchecked Sendable {
             respondError(.init(status: 403, message: "Browser-origin requests are not enabled")); return
         }
         if request.method == "GET", request.path == "/v1/models" || request.path == "/health" {
-            let object: [String: Any] = request.path == "/health" ? ["status": "ok", "inference": "local", "model": LocalChatRequest.modelID] :
-                ["object": "list", "data": [["id": LocalChatRequest.modelID, "object": "model", "created": 0, "owned_by": "local", "flash_local": capabilities.json]]]
+            if request.path == "/health", !canServe() {
+                respondError(.init(status: 503, message: "The local model is unloaded or the phone app is not active")); return
+            }
+            let object: [String: Any] = request.path == "/health" ? ["status": "ok", "inference": "local", "model": capabilities.modelID] :
+                ["object": "list", "data": [["id": capabilities.modelID, "object": "model", "created": 0, "owned_by": "local", "flash_local": capabilities.json]]]
             task = Task { [weak self] in
                 guard let self else { return }
                 do { try await self.sendJSON(object) } catch { }
@@ -185,11 +195,14 @@ private final class LocalAPISession: @unchecked Sendable {
         guard request.method == "POST", request.path == "/v1/chat/completions" else {
             respondError(.init(status: 404, message: "Use /v1/models or /v1/chat/completions")); return
         }
+        guard canServe() else {
+            respondError(.init(status: 503, message: "Load the local model and keep the phone app active")); return
+        }
         guard request.headers["content-type"]?.lowercased().split(separator: ";").first == "application/json" else {
             respondError(.init(status: 415, message: "Content-Type must be application/json")); return
         }
         do {
-            let prompt = try LocalChatRequest(data: request.body, defaults: defaults)
+            let prompt = try LocalChatRequest(data: request.body, defaults: defaults, capabilities: capabilities)
             task = Task { [weak self] in guard let self else { return }; await self.generate(prompt) }
         } catch { respondError(error as? LocalAPIError ?? .init(status: 400, message: "Invalid JSON request")) }
     }
@@ -209,7 +222,7 @@ private final class LocalAPISession: @unchecked Sendable {
             let id = "chatcmpl-" + UUID().uuidString.lowercased(), created = Int(Date().timeIntervalSince1970)
             if request.stream {
                 try await send(LocalAPIWire.head(type: "text/event-stream")); headersSent = true
-                try await send(LocalAPIWire.chunk(id: id, created: created, delta: ["role": "assistant", "content": ""]))
+                try await send(LocalAPIWire.chunk(id: id, created: created, model: capabilities.modelID, delta: ["role": "assistant", "content": ""]))
             }
             var answer = "", reasoning = "", usage: LocalCompletionUsage?
             for try await event in source.events {
@@ -224,14 +237,13 @@ private final class LocalAPISession: @unchecked Sendable {
                         // and every argument validates. Reasoning still streams.
                         if !content.isEmpty, !request.toolChoice.enabled { delta["content"] = content }
                         if !thought.isEmpty { delta["reasoning_content"] = thought }
-                        if !delta.isEmpty { try await send(LocalAPIWire.chunk(id: id, created: created, delta: delta)) }
+                        if !delta.isEmpty { try await send(LocalAPIWire.chunk(id: id, created: created, model: capabilities.modelID, delta: delta)) }
                     }
                 case .complete(let result): usage = result
                 }
             }
             guard let usage else { throw LocalAPIError(status: 500, message: "Generation ended without usage") }
-            let result = try LocalToolOutput.parse(answer, tools: request.tools, choice: request.toolChoice,
-                parallel: request.parallelToolCalls)
+            let result = try capabilities.parseTools(answer, request: request)
             guard result.calls.isEmpty || usage.finishReason == "stop" else {
                 throw LocalAPIError(status: 502, message: "Function generation reached its limit before a normal completion", parameter: "tool_calls")
             }
@@ -241,25 +253,25 @@ private final class LocalAPISession: @unchecked Sendable {
             }
             if request.stream {
                 if request.toolChoice.enabled, !result.content.isEmpty {
-                    try await send(LocalAPIWire.chunk(id: id, created: created, delta: ["content": result.content]))
+                    try await send(LocalAPIWire.chunk(id: id, created: created, model: capabilities.modelID, delta: ["content": result.content]))
                 }
                 if !result.calls.isEmpty {
                     let calls = result.calls.enumerated().map { index, call -> [String: Any] in
                         var value = call.json; value["index"] = index; return value
                     }
-                    try await send(LocalAPIWire.chunk(id: id, created: created, delta: ["tool_calls": calls]))
+                    try await send(LocalAPIWire.chunk(id: id, created: created, model: capabilities.modelID, delta: ["tool_calls": calls]))
                 }
-                try await send(LocalAPIWire.chunk(id: id, created: created, delta: [:], finish: finish))
+                try await send(LocalAPIWire.chunk(id: id, created: created, model: capabilities.modelID, delta: [:], finish: finish))
                 if request.includeUsage {
                     try await send(LocalAPIWire.sse(["id": id, "object": "chat.completion.chunk", "created": created,
-                        "model": LocalChatRequest.modelID, "choices": [], "usage": usage.json]))
+                        "model": capabilities.modelID, "choices": [], "usage": usage.json]))
                 }
                 try await send(Data("data: [DONE]\n\n".utf8))
             } else {
                 var message: [String: Any] = ["role": "assistant", "content": result.content.isEmpty && !result.calls.isEmpty ? NSNull() : result.content as Any]
                 if !result.calls.isEmpty { message["tool_calls"] = result.calls.map(\.json) }
                 if !reasoning.isEmpty { message["reasoning_content"] = reasoning }
-                try await sendJSON(["id": id, "object": "chat.completion", "created": created, "model": LocalChatRequest.modelID,
+                try await sendJSON(["id": id, "object": "chat.completion", "created": created, "model": capabilities.modelID,
                     "choices": [["index": 0, "message": message, "finish_reason": finish]], "usage": usage.json])
             }
             queue.async { self.generation = nil; self.finish(cancelInference: false) }

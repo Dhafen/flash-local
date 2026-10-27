@@ -23,11 +23,31 @@ struct REAMRootView: View {
     #endif
     var body: some View {
         NavigationStack {
+            #if canImport(FlintEngine) && canImport(OrnithLES)
+            VStack(spacing: 12) {
+                HStack {
+                    Text(model.showsFlint ? "Flint · experiment" : "Ornith").font(.headline)
+                    Spacer()
+                    Button(model.showsFlint ? "Till Ornith" : "Prova Flint") {
+                        guard !model.isSwitchingInferenceModel else { return }
+                        model.isSwitchingInferenceModel = true
+                        Task {
+                            if model.showsFlint { await model.flintSession.shutdown() }
+                            else { await lesModel.shutdown() }
+                            model.showsFlint.toggle(); model.isSwitchingInferenceModel = false
+                        }
+                    }.disabled(model.isSwitchingInferenceModel)
+                }.padding(.horizontal)
+                if model.showsFlint { FlintView(model: model.flintSession) }
+                else { OrnithLESView(model: lesModel, existing: model.verifiedOrnithForAlternateRunner()) }
+            }
+            #else
             #if canImport(OrnithLES)
             OrnithLESView(model: lesModel, existing: model.verifiedOrnithForAlternateRunner())
             #else
             REAMChatPage(model: model, discard: { confirmation = .discard })
                 .navigationTitle("Flash Local")
+            #endif
             #endif
         }
         // LES owns verification and lifecycle when it is the root experience.

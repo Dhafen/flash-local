@@ -35,7 +35,7 @@ def main():
                 if name != "macos": command += ["-G", "Xcode", "-DCMAKE_SYSTEM_NAME=iOS",
                     "-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY", "-DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO"]
                 run(command)
-                targets = ["FlashFlint"] + (["flint-control", "flint-quantize-control", "flint-api-control", "flint-vocab-control", "flint-prompt-control"] if name == "macos" else [])
+                targets = ["FlashFlint"] + (["flint-control", "flint-quantize-control", "flint-api-control", "flint-vocab-control", "flint-prompt-control", "flint-weight-control"] if name == "macos" else [])
                 run(["cmake", "--build", build, "--config", "Release", "--target", *targets, "--parallel", "3"])
                 products = [p for p in build.rglob("FlashFlint.framework") if (p / "FlashFlint").is_file()]
                 if len(products) != 1: raise RuntimeError(f"Expected one actual {name} framework")

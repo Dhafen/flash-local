@@ -187,6 +187,11 @@ final class REAMAppModel {
     // Owned by the process-level model, not by a sheet or tab identity.
     @ObservationIgnored lazy var ornithSession = OrnithLESAppModel.live()
     #endif
+    #if canImport(FlintEngine)
+    @ObservationIgnored lazy var flintSession = FlintAppModel.live()
+    var showsFlint = false
+    var isSwitchingInferenceModel = false
+    #endif
     enum Activity { case idle, downloading, verifying, generating, checkingNumerics, resetting, stopping }
     private(set) var activity = Activity.idle
     private(set) var messages: [REAMMessage] = []

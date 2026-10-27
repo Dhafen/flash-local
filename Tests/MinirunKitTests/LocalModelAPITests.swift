@@ -346,13 +346,34 @@ final class LocalModelAPITests: XCTestCase {
         }
         for (count, expected) in zip(counts, [0.1, 0.3, 0.6]) { XCTAssertEqual(Double(count) / 10000, expected, accuracy: 0.02) }
     }
-    private func listen(capabilities: LocalModelCapabilities = .init(), handler: @escaping LocalModelAPIServer.Handler) async throws -> (LocalModelAPIServer, URL) {
+    private func listen(capabilities: LocalModelCapabilities = .init(), canServe: @escaping @Sendable () -> Bool = { true }, handler: @escaping LocalModelAPIServer.Handler) async throws -> (LocalModelAPIServer, URL) {
         let ready = expectation(description: "real TCP listener ready"), port = APITestBox()
-        let server = try LocalModelAPIServer(key: key, port: 0, loopbackOnly: true, capabilities: capabilities, handler: handler) { state in
+        let server = try LocalModelAPIServer(key: key, port: 0, loopbackOnly: true, capabilities: capabilities, canServe: canServe, handler: handler) { state in
             if case .ready(let value, _) = state { port.set(Int(value)); ready.fulfill() }
         }
         await fulfillment(of: [ready], timeout: 10)
         return (server, try XCTUnwrap(URL(string: "http://127.0.0.1:\(port.get())")))
+    }
+    func testFlintTCPReadinessAndModelIdentityWithoutAnyInference() async throws {
+        let available = APITestBox(), calls = APITestBox(), caps = LocalModelCapabilities(family: .flint)
+        let (server, base) = try await listen(capabilities: caps, canServe: { available.get() == 1 }) { _ in
+            calls.increment(); throw LocalAPIError(status: 503, message: "Synthetic provider; no model loaded")
+        }
+        defer { server.stop() }
+        let config = URLSessionConfiguration.ephemeral; config.connectionProxyDictionary = [:]
+        let transport = URLSession(configuration: config); defer { transport.invalidateAndCancel() }
+        let (models, modelResponse) = try await transport.data(for: request(base.appendingPathComponent("v1/models")))
+        XCTAssertEqual((modelResponse as? HTTPURLResponse)?.statusCode, 200)
+        XCTAssertTrue(String(decoding: models, as: UTF8.self).contains(caps.modelID))
+        let payload = try JSONSerialization.data(withJSONObject: ["model": caps.modelID, "messages": [["role": "user", "content": "fixture"]]])
+        for probe in [request(base.appendingPathComponent("health")), request(base.appendingPathComponent("v1/chat/completions"), method: "POST", json: payload)] {
+            let (_, response) = try await transport.data(for: probe)
+            XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 503)
+        }
+        XCTAssertEqual(calls.get(), 0)
+        available.set(1)
+        let (_, response) = try await transport.data(for: request(base.appendingPathComponent("health")))
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
     }
     private func request(_ url: URL, method: String = "GET", json: Data? = nil, authorized: Bool = true) -> URLRequest {
         var request = URLRequest(url: url); request.httpMethod = method; request.timeoutInterval = 10

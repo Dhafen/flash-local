@@ -3,11 +3,15 @@
 #include "llama-context.h"
 #include "llama-moe-slot.h"
 #include "gguf.h"
+#include "ggml-backend.h"
 #include <nlohmann/json.hpp>
 #include <atomic>
+#include <array>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <dlfcn.h>
 #include <filesystem>
 #include <fstream>
 #include <limits>
@@ -19,6 +23,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <vector>
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
 #endif
@@ -35,6 +40,8 @@ struct flf_context {
     FILE * stream = nullptr;
     llama_model * model = nullptr;
     llama_context * context = nullptr;
+    llama_sampler * sampler = nullptr;
+    std::vector<llama_token_data> candidates;
     std::string manifest;
     struct stat identity{};
     flf_options options{};
@@ -44,8 +51,16 @@ struct flf_context {
     flf_progress progress = nullptr;
     void * user = nullptr;
     bool failed = false;
+    bool logits_valid = false;
+    bool trace_routes = false;
+    struct route { int32_t position, layer; std::array<int32_t, 6> experts; };
+    std::vector<route> routes;
+    std::array<uint32_t, 49> trace_layer_rows{};
+    int32_t layers = 0, trace_final_position = -1;
+    bool trace_output_requested = false;
     int32_t slots = 0;
     ~flf_context() {
+        if (sampler) llama_sampler_free(sampler);
         if (context) llama_free(context);
         if (model) llama_model_free(model);
         if (stream) fclose(stream);
@@ -90,6 +105,7 @@ static void prepare_manifest(flf_context & c, const char * directory) {
     require(arch >= 0 && gguf_get_kv_type(file.get(), arch) == GGUF_TYPE_STRING &&
         std::string(gguf_get_val_str(file.get(), arch)) == "flint", "Expected Flint GGUF architecture");
     const uint32_t layers = u32(file.get(), "flint.block_count"), dense_layers = u32(file.get(), "flint.leading_dense_block_count");
+    c.layers = int32_t(layers);
     const uint32_t experts = u32(file.get(), "flint.expert_count"), topk = u32(file.get(), "flint.expert_used_count");
     const uint32_t nk = u32(file.get(), "flint.attention.head_count_kv"), head = u32(file.get(), "flint.attention.key_length");
     const uint32_t window = u32(file.get(), "flint.attention.sliding_window");
@@ -212,6 +228,34 @@ flf_context * flf_open(int fd, const char * directory, flf_options o, flf_abort 
         cp.type_k = cp.type_v = o.f32_kv_control ? GGML_TYPE_F32 : GGML_TYPE_F16;
         cp.flash_attn_type = o.metal ? LLAMA_FLASH_ATTN_TYPE_ENABLED : LLAMA_FLASH_ATTN_TYPE_DISABLED;
         cp.abort_callback_data = c.get(); cp.abort_callback = [](void * p) { return static_cast<flf_context *>(p)->should_abort(); };
+        cp.cb_eval_user_data = c.get();
+        cp.cb_eval = o.diagnostic_routing ? +[](ggml_tensor * tensor, bool ask, void * opaque) {
+            auto & c = *static_cast<flf_context *>(opaque);
+            if (!c.trace_routes) return !ask;
+            const std::string name = ggml_get_name(tensor), prefix = "ffn_moe_topk-";
+            const bool topk = name.rfind(prefix, 0) == 0;
+            if (ask) return topk;
+            if (!topk) return true;
+            try {
+                const int layer = std::stoi(name.substr(prefix.size()));
+                if (layer < 0 || layer >= 49 || tensor->type != GGML_TYPE_I32 || tensor->ne[0] != 6 ||
+                    tensor->ne[2] != 1 || tensor->ne[3] != 1 || tensor->ne[1] < 1 || tensor->ne[1] > 2048 ||
+                    c.routes.size() + tensor->ne[1] > 32768) return false;
+                for (int row = 0; row < tensor->ne[1]; ++row) {
+                    // The final FFN is gathered to requested output rows. Its
+                    // row 0 represents the last input position, not position 0.
+                    if (layer == c.layers - 1 && (!c.trace_output_requested || tensor->ne[1] != 1 || c.trace_layer_rows[layer] != 0)) return false;
+                    const int32_t position = layer == c.layers - 1 ? c.trace_final_position :
+                        int32_t(c.metrics.cached_tokens + c.trace_layer_rows[layer] + row);
+                    flf_context::route entry{position, layer, {}};
+                    ggml_backend_tensor_get(tensor, entry.experts.data(), size_t(row) * tensor->nb[1], 6 * sizeof(int32_t));
+                    for (int id : entry.experts) if (id < 0 || id >= 256) return false;
+                    c.routes.push_back(entry);
+                }
+                c.trace_layer_rows[layer] += uint32_t(tensor->ne[1]);
+                return !c.should_abort();
+            } catch (...) { return false; }
+        } : nullptr;
         c->context = llama_init_from_model(c->model, cp); require(c->context, "Flint KV/graph allocation failed");
         c->metrics.flash_attention_active = c->context->get_cparams().flash_attn;
         c->check(); if (progress) progress(3, 1, user);
@@ -226,7 +270,10 @@ void flf_cancel(flf_context * c) { if (c) c->cancelled.store(true); }
 int flf_reset(flf_context * c) {
     if (!c) { error_text = "Flint context is null"; return -1; }
     llama_memory_clear(llama_get_memory(c->context), false);
-    c->metrics.cached_tokens = 0; c->cancelled.store(false); c->failed = false; return 0;
+    c->metrics.cached_tokens = 0; c->cancelled.store(false); c->failed = false; c->logits_valid = false;
+    c->routes.clear(); c->trace_layer_rows.fill(0);
+    if (c->sampler) llama_sampler_reset(c->sampler);
+    return 0;
 }
 int32_t flf_vocab_size(const flf_context * c) { return c ? llama_vocab_n_tokens(llama_model_get_vocab(c->model)) : 0; }
 int flf_tokenize(flf_context * c, const char * text, int32_t bytes, int32_t * tokens, int32_t capacity) {
@@ -238,7 +285,7 @@ int flf_token_piece(flf_context * c, int32_t token, char * text, int32_t capacit
     return llama_token_to_piece(llama_model_get_vocab(c->model), token, text, capacity, 0, true);
 }
 bool flf_is_eog(flf_context * c, int32_t token) { return c && token >= 0 && token < flf_vocab_size(c) && llama_vocab_is_eog(llama_model_get_vocab(c->model), token); }
-int flf_evaluate(flf_context * c, const int32_t * tokens, int32_t count, float * logits, int32_t capacity) {
+static int evaluate(flf_context * c, const int32_t * tokens, int32_t count, bool final_row, float * logits, int32_t capacity) {
     error_text.clear();
     try {
         require(c && tokens && count > 0 && count <= c->options.evaluation_batch && !c->failed, "Invalid Flint evaluation or failed session; reset required");
@@ -246,10 +293,14 @@ int flf_evaluate(flf_context * c, const int32_t * tokens, int32_t count, float *
         require(!logits || capacity >= flf_vocab_size(c), "Insufficient Flint logit buffer");
         for (int i = 0; i < count; ++i) require(tokens[i] >= 0 && tokens[i] < flf_vocab_size(c), "Invalid Flint input token");
         c->check();
+        c->logits_valid = false;
+        c->trace_layer_rows.fill(0);
+        c->trace_final_position = int32_t(c->metrics.cached_tokens + count - 1);
+        c->trace_output_requested = final_row;
         llama_batch batch = llama_batch_init(count, 0, 1); batch.n_tokens = count;
         for (int i = 0; i < count; ++i) {
             batch.token[i] = tokens[i]; batch.pos[i] = c->metrics.cached_tokens + i;
-            batch.n_seq_id[i] = 1; batch.seq_id[i][0] = 0; batch.logits[i] = logits && i == count - 1;
+            batch.n_seq_id[i] = 1; batch.seq_id[i][0] = 0; batch.logits[i] = final_row && i == count - 1;
         }
         const auto start = std::chrono::steady_clock::now();
         const int status = llama_decode(c->context, batch); llama_batch_free(batch);
@@ -260,14 +311,90 @@ int flf_evaluate(flf_context * c, const int32_t * tokens, int32_t count, float *
             throw std::runtime_error("Flint evaluation cancelled/failed; partial KV cleared, reset required");
         }
         c->metrics.cached_tokens += count; c->metrics.evaluated_tokens += count;
-        if (logits) {
+        if (final_row) {
             const auto * result = llama_get_logits_ith(c->context, -1);
             require(result, "Flint returned no requested logits");
-            std::memcpy(logits, result, flf_vocab_size(c) * sizeof(float));
+            if (logits) std::memcpy(logits, result, flf_vocab_size(c) * sizeof(float));
+            c->logits_valid = true;
         }
         else c->metrics.state_only_tokens += count;
         c->check(); return 0;
     } catch (const std::exception & e) { error_text = e.what(); return -1; }
+}
+int flf_evaluate(flf_context * c, const int32_t * tokens, int32_t count, float * logits, int32_t capacity) {
+    return evaluate(c, tokens, count, logits != nullptr, logits, capacity);
+}
+int flf_evaluate_for_sampling(flf_context * c, const int32_t * tokens, int32_t count) {
+    return evaluate(c, tokens, count, true, nullptr, 0);
+}
+int flf_copy_logits(flf_context * c, float * logits, int32_t capacity) {
+    error_text.clear();
+    try {
+        require(c && !c->failed && c->logits_valid && logits && capacity >= flf_vocab_size(c), "No current Flint logits or invalid diagnostic buffer");
+        c->check();
+        const auto * row = llama_get_logits_ith(c->context, -1);
+        require(row, "Flint logit row missing");
+        std::memcpy(logits, row, flf_vocab_size(c) * sizeof(float)); return flf_vocab_size(c);
+    } catch (const std::exception & e) { error_text = e.what(); return -1; }
+}
+int flf_configure_sampling(flf_context * c, float temperature, float top_p, int32_t top_k, uint32_t seed) {
+    error_text.clear();
+    try {
+        require(c && !c->failed && std::isfinite(temperature) && temperature >= 0 && temperature <= 2 &&
+            std::isfinite(top_p) && top_p > 0 && top_p <= 1 && top_k >= 0 && top_k <= flf_vocab_size(c), "Invalid Flint sampling configuration");
+        c->check();
+        auto params = llama_sampler_chain_default_params(); params.no_perf = true;
+        std::unique_ptr<llama_sampler, decltype(&llama_sampler_free)> chain(llama_sampler_chain_init(params), llama_sampler_free);
+        require(bool(chain), "Cannot allocate Flint sampler");
+        if (temperature == 0) llama_sampler_chain_add(chain.get(), llama_sampler_init_greedy());
+        else {
+            llama_sampler_chain_add(chain.get(), llama_sampler_init_top_k(top_k));
+            llama_sampler_chain_add(chain.get(), llama_sampler_init_temp(temperature));
+            llama_sampler_chain_add(chain.get(), llama_sampler_init_top_p(top_p, 1));
+            llama_sampler_chain_add(chain.get(), llama_sampler_init_dist(seed));
+        }
+        if (c->sampler) llama_sampler_free(c->sampler);
+        c->sampler = chain.release(); c->candidates.resize(flf_vocab_size(c)); return 0;
+    } catch (const std::exception & e) { error_text = e.what(); return -1; }
+}
+int32_t flf_sample(flf_context * c) {
+    error_text.clear();
+    try {
+        require(c && !c->failed && c->sampler && c->logits_valid, "Configure sampling and evaluate final Flint logits first");
+        c->check();
+        const auto * logits = llama_get_logits_ith(c->context, -1);
+        require(logits, "Flint logit row missing");
+        // Same GGML sampling chain as llama_sampler_sample, with one reusable
+        // candidate buffer instead of allocating a vocabulary vector per step.
+        for (int32_t i = 0; i < flf_vocab_size(c); ++i) {
+            require(std::isfinite(logits[i]), "Non-finite Flint logits; sampling stopped");
+            c->candidates[i] = {i, logits[i], 0};
+        }
+        llama_token_data_array values{c->candidates.data(), c->candidates.size(), -1, false};
+        llama_sampler_apply(c->sampler, &values);
+        require(values.selected >= 0 && uint64_t(values.selected) < values.size, "Flint sampler returned no selection");
+        const auto token = values.data[values.selected].id;
+        llama_sampler_accept(c->sampler, token); return token;
+    } catch (const std::exception & e) { error_text = e.what(); return -1; }
+}
+int flf_trace_routes(flf_context * c, bool enabled) {
+    error_text.clear();
+    try {
+        require(c && !c->failed && (!enabled || c->options.diagnostic_routing), "Flint routing callback was not enabled at load"); c->check();
+        c->trace_routes = enabled; c->routes.clear(); c->trace_layer_rows.fill(0); return 0;
+    } catch (const std::exception & e) { error_text = e.what(); return -1; }
+}
+int flf_routing_json(flf_context * c, char * output, int32_t capacity) {
+    error_text.clear();
+    try {
+        require(c && !c->failed && c->trace_routes && capacity >= 0 && (!capacity || output), "Enable bounded Flint routing diagnostics first");
+        c->check(); auto entries = json::array();
+        for (const auto & row : c->routes) entries.push_back({{"position", row.position}, {"layer", row.layer}, {"experts", row.experts}});
+        const auto text = entries.dump();
+        require(text.size() <= (4u << 20), "Flint routing diagnostic exceeds output budget");
+        if (size_t(capacity) < text.size()) return -int(text.size());
+        std::memcpy(output, text.data(), text.size()); return int(text.size());
+    } catch (const std::exception & e) { error_text = e.what(); return 0; }
 }
 flf_metrics flf_snapshot(const flf_context * c) {
     if (!c) return {};
@@ -276,4 +403,11 @@ flf_metrics flf_snapshot(const flf_context * c) {
     return out;
 }
 const char * flf_last_error() { return error_text.c_str(); }
-const char * flf_revision() { return "96bbf617+flint-a37cc461-backport-1"; }
+const char * flf_revision() { return "96bbf617+flint-a37cc461-backport-2"; }
+const char * flf_library_path() {
+    Dl_info info{};
+    if (!dladdr(reinterpret_cast<const void *>(&flf_revision), &info) || !info.dli_fname) {
+        error_text = "Cannot identify the loaded Flint framework"; return nullptr;
+    }
+    return info.dli_fname;
+}
