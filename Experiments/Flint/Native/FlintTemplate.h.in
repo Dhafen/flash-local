@@ -1,0 +1,2 @@
+#pragma once
+static const char FLINT_CHAT_TEMPLATE[] = R"FLINT_CHAT(@FLINT_CHAT_TEMPLATE@)FLINT_CHAT";

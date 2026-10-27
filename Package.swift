@@ -5,6 +5,7 @@ import Foundation
 // Only the isolated experiment opts in. Normal production resolution and its
 // tokenizer/reference binary remain unchanged.
 let enableLES = ProcessInfo.processInfo.environment["FLASH_LOCAL_ENABLE_LES"] == "1"
+let enableFlint = ProcessInfo.processInfo.environment["FLASH_LOCAL_ENABLE_FLINT"] == "1"
 
 let package = Package(
     name: "minirun",
@@ -21,7 +22,8 @@ let package = Package(
         .library(name: "BenchScenarios", targets: ["BenchScenarios"]),
         .library(name: "MinirunKit", targets: ["MinirunKit"]),
         .library(name: "MinirunRunners", targets: ["MinirunRunners"]),
-    ] + (enableLES ? [.library(name: "OrnithLES", targets: ["OrnithLES"])] : []),
+    ] + (enableLES ? [.library(name: "OrnithLES", targets: ["OrnithLES"])] : [])
+      + (enableFlint ? [.library(name: "FlintEngine", targets: ["FlintEngine"])] : []),
     dependencies: [
         .package(url: "https://github.com/ml-explore/mlx-swift.git", exact: "0.31.4"),
     ],
@@ -99,5 +101,11 @@ let package = Package(
             .product(name: "MLX", package: "mlx-swift")], path: "Experiments/OrnithLES/Sources/OrnithLES"),
         .testTarget(name: "OrnithLESTests", dependencies: ["OrnithLES", "GGUFCore", "StorageCore", "ModelAdapters", "MinirunKit"],
             path: "Experiments/OrnithLES/Tests/OrnithLESTests")
+    ] : []) + (enableFlint ? [
+        .binaryTarget(name: "FlashFlint", path: ".work/flint-runtime/FlashFlint.xcframework"),
+        .target(name: "FlintEngine", dependencies: ["FlashFlint", "GGUFCore", "MinirunKit", "StorageCore"],
+            path: "Experiments/Flint/Sources/FlintEngine"),
+        .testTarget(name: "FlintEngineTests", dependencies: ["FlintEngine"],
+            path: "Experiments/Flint/Tests/FlintEngineTests")
     ] : [])
 )

@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "vocabularyCases": 93,
+  "promptCases": 8,
+  "allTokenIDsEqual": true,
+  "allPromptBytesEqual": true,
+  "tensorCount": 0,
+  "weightsUsed": false,
+  "trainedInferenceVerified": false,
+  "iPhoneVerified": false,
+  "tokenizerSHA256": "a263cce0b7e2b03f7ee07ce809783ef4b47f160c3f268a4ea1524f638da45b68",
+  "prefixSHA256": "a4a3cfd21a3028b7a92057969f47874d0f1dc32f7cf3dd49988dbdcd5ce34390",
+  "vocabularySHA256": "1c90f0327bc4fef04fa6e9c86eb08a2673fbcd790948e6cdd9181e1ed2de4aed",
+  "tokenizersVersion": "0.23.3",
+  "jinjaVersion": "3.1.4",
+  "templateSHA256": "44fd1b0f94b78d9cf554c5a207945e48fef698b279d65863a33a77d787ca411b"
+}

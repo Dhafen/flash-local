@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-27",
+  "host": "Ubuntu WSL x86_64, GCC 13.3, CMake 3.28",
+  "nativeBuildPassed": true,
+  "syntheticGraphCasesPassed": 39,
+  "swaRingRolloverCases": 3,
+  "actual256ExpertRouterCases": 12,
+  "pythonUnitTestsPassed": 147,
+  "pythonTestIncludesMocks": true,
+  "exportsIsolated": true,
+  "exports": [
+    "flf_cancel",
+    "flf_close",
+    "flf_evaluate",
+    "flf_is_eog",
+    "flf_last_error",
+    "flf_open",
+    "flf_render_prompt",
+    "flf_reset",
+    "flf_revision",
+    "flf_snapshot",
+    "flf_token_piece",
+    "flf_tokenize",
+    "flf_vocab_size"
+  ],
+  "nativeAPIControls": {
+    "formats": [
+      "F32",
+      "canonical-Q4_1"
+    ],
+    "memoryAdmission": true,
+    "duplicateLoadRejected": true,
+    "verifiedDescriptorRetained": true,
+    "stateOnlyPrefillParity": true,
+    "kvAppendReset": true,
+    "cancellation": true,
+    "unload": true
+  },
+  "vocabularyCasesPassed": 93,
+  "templateCasesPassed": 8,
+  "fullTrainedModelDownloaded": false,
+  "fullTrainedModelSHA256Verified": false,
+  "trainedInferenceVerified": false,
+  "trainedToolCallingVerified": false,
+  "swiftTestsRun": false,
+  "appleBuildRun": false,
+  "metalTestsRun": false,
+  "iPhoneBenchmarksRun": false,
+  "testFlightUploadAttempted": false,
+  "blocker": "No local Xcode; GitHub Actions free included minutes exhausted. No paid runner or workflow/signing changes.",
+  "notes": [
+    "Synthetic graph checks are not trained quality or throughput benchmarks.",
+    "Explicit expert pread totals are not physical NAND traffic.",
+    "Python unit fixtures print mocked Apple/client/render outcomes; no such real remote runs occurred."
+  ]
+}

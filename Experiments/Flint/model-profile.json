@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "modelID": "recursive-flint-40b-a2.5b-int4",
+  "architecture": "flint",
+  "source": {"repository": "RecursiveSI/flint", "revision": "2a247be0c0aec895ccb0ac7ca92229ec6df37288"},
+  "artifact": {
+    "repository": "RecursiveSI/flint-int4-gguf",
+    "revision": "9c47151036bc2c34331142dda04488bceab2bc9f",
+    "fileName": "flint-int4-q4_1.gguf",
+    "bytes": 25992966976,
+    "sha256": "43c07baccdba42eb7528a9630ee15699b1942c297291dc1b39a061f508ee1a4b",
+    "quantization": "Q4_1 + F32",
+    "license": "Apache-2.0"
+  },
+  "geometry": {
+    "layers": 49, "leadingDenseLayers": 2, "routedExperts": 256, "topK": 6,
+    "hiddenSize": 2048, "routedWidth": 512, "sharedWidth": 1024,
+    "attentionHeads": 32, "kvHeads": 4, "headDimension": 128,
+    "slidingWindow": 513,
+    "fullAttentionWithoutRoPE": [0, 1, 5, 9, 13, 17, 21, 25, 29, 33, 37, 41, 45, 48],
+    "ropeTheta": 10000, "metadataContextLimit": 262144, "vocabulary": 150144
+  },
+  "layoutAudit": {
+    "tensors": 779, "Q4_1": 485, "F32": 294,
+    "routedBytes": 23655874560, "nonRoutedBytes": 2331622528,
+    "inputEmbeddingBytes": 1229979648,
+    "selectedExpertLogicalBytesPerTokenBeforeCache": 554434560
+  },
+  "sampling": {"temperature": 1.0, "topP": 0.95, "topK": 20},
+  "status": {
+    "fullFileSHA256VerifiedLocally": false, "trainedInferenceVerified": false,
+    "iPhoneVerified": false, "enabledInProduction": false
+  }
+}
