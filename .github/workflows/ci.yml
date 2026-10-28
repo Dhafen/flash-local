@@ -17,6 +17,10 @@ on:
         description: 'Include the isolated GGUF LES benchmark after all native/reference controls'
         type: boolean
         default: false
+      flint:
+        description: 'Opt-in Flint chat/API build; requires ornith_les and all validation gates'
+        type: boolean
+        default: false
       release_archive:
         description: 'Also build and inspect an unsigned Release archive for device iOS; does not upload'
         type: boolean
@@ -61,6 +65,24 @@ env:
   XCODEBUILD_FLAGS: -skipPackagePluginValidation -skipMacroValidation
 
 jobs:
+  flint-inputs:
+    if: ${{ inputs.flint }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Require the complete isolated integration gates
+        env:
+          FLINT_CI_INPUTS: ${{ toJSON(inputs) }}
+        run: python3 scripts/check_flint_ci_inputs.py
+  flint-validation:
+    needs: [flint-inputs]
+    if: ${{ inputs.flint }}
+    uses: ./.github/workflows/flint.yml
+    with:
+      use_macos15: ${{ github.event_name != 'workflow_dispatch' || inputs.use_macos15 }}
   les-validation:
     if: ${{ inputs.ornith_les && !inputs.provisioning_only && !inputs.check_delivery_tools && !inputs.regenerate_project_only }}
     uses: ./.github/workflows/ornith-les.yml
@@ -86,6 +108,7 @@ jobs:
           test '${{ inputs.provisioning_only }}' = false
           test '${{ inputs.check_delivery_tools }}' = false
           test '${{ inputs.upload_private_testflight }}' = false
+          test '${{ inputs.flint }}' = false
           sudo xcode-select -s /Applications/Xcode_26.2.app
       - run: python3 scripts/generate_xcode_project.py
       - uses: actions/upload-artifact@v4
@@ -120,13 +143,14 @@ jobs:
           retention-days: 7
 
   build-and-test:
-    needs: [qpack-validation, les-validation]
-    if: ${{ !cancelled() && !inputs.check_delivery_tools && !inputs.regenerate_project_only && (needs.qpack-validation.result == 'success' || inputs.provisioning_only) && (!inputs.ornith_les || needs.les-validation.result == 'success') }}
+    needs: [qpack-validation, les-validation, flint-validation]
+    if: ${{ !cancelled() && !inputs.check_delivery_tools && !inputs.regenerate_project_only && (needs.qpack-validation.result == 'success' || inputs.provisioning_only) && (!inputs.ornith_les || needs.les-validation.result == 'success') && (!inputs.flint || needs.flint-validation.result == 'success') }}
     name: ${{ inputs.provisioning_only && 'device archive · signing probe (no test coverage)' || 'streaming tests · app tests · package tests · iOS build' }}
     runs-on: ${{ (github.event_name != 'workflow_dispatch' || inputs.use_macos15) && 'macos-15' || 'macos-26' }}
     timeout-minutes: ${{ inputs.upload_private_testflight && 120 || 90 }}
     env:
       FLASH_LOCAL_ENABLE_LES: ${{ inputs.ornith_les && '1' || '0' }}
+      FLASH_LOCAL_ENABLE_FLINT: ${{ inputs.flint && '1' || '0' }}
       ORNITH_LES_CPU_CONTROL: ${{ inputs.ornith_les && '1' || '0' }}
     steps:
       - uses: actions/checkout@v7
@@ -175,6 +199,10 @@ jobs:
 
       - name: Build pinned tokenizer XCFramework (Mac, iPhone, Simulator)
         run: python3 scripts/build_tokenizer_xcframework.py
+
+      - name: Build isolated Flint runtime (Mac, iPhone, Simulator)
+        if: inputs.flint
+        run: python3 scripts/build_flint_runtime.py
 
       - name: Generate fork project with pinned XcodeGen
         run: python3 scripts/generate_xcode_project.py
@@ -289,6 +317,15 @@ jobs:
             -only-testing:MinirunKitTests 2>&1 | tee package-tests.log | tail -40
           grep 'ORNITH_LOCAL_API realTCP=true auth=true json=true sse=true reasoningSeparated=true syntheticOnly=true phoneReachability=false' package-tests.log
 
+      - name: Flint Swift actor and protocol tests
+        if: inputs.flint
+        run: |
+          xcodebuild test -scheme minirun-Package $XCODEBUILD_FLAGS -destination 'platform=macOS' \
+            -only-testing:FlintEngineTests -only-testing:MinirunKitTests/LocalFlintProtocolTests \
+            2>&1 | tee flint-swift-tests.log | tail -50
+          grep -E 'FlintStreamTests.*passed' flint-swift-tests.log
+          grep -E 'FlintPolicyTests.*passed' flint-swift-tests.log
+
       - name: Failing tests, if any
         if: failure()
         run: |
@@ -310,6 +347,9 @@ jobs:
             .work/reference-build.log
             .work/tokenizer-build.log
             .work/runtime/build-manifest.json
+            flint-swift-tests.log
+            .work/flint-runtime/build-manifest.json
+            .work/flint-runtime/build.log
             .test-fixtures/llama-reference-logits.json
             .test-fixtures/llama-mixed-reference-logits.json
             .test-fixtures/synthetic-qwen4exp-mixed.json
@@ -328,6 +368,13 @@ jobs:
           xcodebuild build -project Apps/Minirun/Minirun.xcodeproj $XCODEBUILD_FLAGS \
             -scheme Minirun-iOS -destination 'generic/platform=iOS Simulator' \
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee ios-build.log | tail -30
+
+      - name: Compile the opt-in Flint app for physical iPhone (unsigned)
+        if: inputs.flint
+        run: |
+          xcodebuild build -project Apps/Minirun/Minirun.xcodeproj $XCODEBUILD_FLAGS \
+            -scheme Minirun-iOS -configuration Release -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee flint-device-build.log | tail -50
 
       - name: iOS brand review in light and dark (bounded and fail-closed)
         if: github.event_name != 'workflow_dispatch' || !inputs.provisioning_only
@@ -411,6 +458,8 @@ jobs:
             mac-brand.log
             ios-brand.log
             ios-build.log
+            flint-device-build.log
+            flint-swift-tests.log
             ios-brand.log
             ios-brand-attempt-*.log
             ios-archive.log

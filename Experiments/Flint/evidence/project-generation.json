@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "generatorRepository": "https://github.com/yonaskolb/XcodeGen",
+  "generatorVersion": "2.46.0",
+  "generatorRevision": "8445e778451c7e44237b90281bde622d764b0084",
+  "host": "Ubuntu WSL Swift6.2.3",
+  "unchangedMacBaselineReproducedExactly": true,
+  "applicationIdentityAndSigningPreserved": true,
+  "projectSHA256": "dfdb0f4dcc4dfa2a4063f02e3d23a0e29fafbeea763a9768d48fbef45483a148",
+  "appleCompilationRun": false
+}

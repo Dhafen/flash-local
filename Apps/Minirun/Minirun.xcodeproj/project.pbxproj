@@ -35,7 +35,6 @@
 		22215427EF6C2F520A27ED70 /* REAMAppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4AB578C0D8B81F6A36ED8AA /* REAMAppModel.swift */; };
 		22820868C1C26B19282EBA95 /* CatalogFixtures.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8295EF8C10708DA25D6703DE /* CatalogFixtures.swift */; };
 		229A6437D3C68BDFAC3C0E01 /* OrnithLESView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEF9601E7D9E23FB5F00C312 /* OrnithLESView.swift */; };
-		2133BB9AB34285433FE5DA57 /* FlintView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF2FDB2F26ED15969A511594 /* FlintView.swift */; };
 		23520FC352F51E1043D1ED4C /* PanelWindowSizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F2C99A01DEA2FB109264058 /* PanelWindowSizerTests.swift */; };
 		2500E73D76A825968883EB53 /* MockDownloadManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC3C8A9583966D64F857F8DC /* MockDownloadManager.swift */; };
 		2604E8921622244F844F7E38 /* ConversationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B06BE2189BEE49CE15A4B9 /* ConversationStore.swift */; };
@@ -48,9 +47,7 @@
 		2B4838F595A71611247C3322 /* ProjectionStrip.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74ED1F2BB87D224E2E5E2AE3 /* ProjectionStrip.swift */; };
 		2D36EE6E12BD8305425E1E59 /* SwiftletNotices.txt in Resources */ = {isa = PBXBuildFile; fileRef = 4CCBFD2090C4EEEEF5E8F45F /* SwiftletNotices.txt */; };
 		2DCFE1F02086457F9B733FE0 /* OrnithLES-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = D15F57C48F6FDA32C5B53ED9 /* OrnithLES-LICENSE.txt */; };
-		165BA43BCA774C1083E666BC /* Flint-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 62DA85027FE958E6AE18D9A4 /* Flint-LICENSE.txt */; };
 		2E6B24EE0E9EBD725F27FD88 /* OrnithLESAppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4B6BCF03E7DDD48E35D5895 /* OrnithLESAppModel.swift */; };
-		EEC7D8A79508C6D39FC25A72 /* FlintAppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43B937B1FD46D573182A44CB /* FlintAppModel.swift */; };
 		3461ACF8176F64EAAF31184A /* CatalogNamingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 238D59D9207619AA515D15C1 /* CatalogNamingTests.swift */; };
 		34A61FAAFA9736E817C4ED7C /* REAMChatRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C08F3DD8D8D9B2A60C2A690 /* REAMChatRenderTests.swift */; };
 		34BAD95298C4A4E53A80FF1F /* OpenSourceNotices.txt in Resources */ = {isa = PBXBuildFile; fileRef = 4584526402C0C724EA126739 /* OpenSourceNotices.txt */; };
@@ -90,6 +87,7 @@
 		5E35075C5A6C6C5575EA4BF2 /* DownloadState.swift in Sources */ = {isa = PBXBuildFile; fileRef = C90D785356A47D759E611773 /* DownloadState.swift */; };
 		5EABAD1D905D76D79FEED7D9 /* DeepSeekV4ProductRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38E30B7578E4871024BE0168 /* DeepSeekV4ProductRuntime.swift */; };
 		5FE71D87919739B3DDD9C485 /* Conversation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9928B43DAB1B47EE7EF21F34 /* Conversation.swift */; };
+		60FF8D9CC8B7FA6480544916 /* FlintAppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 683AEB6B8309A2D1D58C2136 /* FlintAppModel.swift */; };
 		62DD62A8A10B112100C3FF4C /* ForkBrandRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3FBF4A16266DFE74D807B05 /* ForkBrandRenderTests.swift */; };
 		64AEE5AFD98DDE3E2BF689B6 /* InstalledModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BB1F5994A3E1F690A831B57 /* InstalledModels.swift */; };
 		659CFBA33C11F0D36961C1CA /* DeepSeekV41PreparationMemoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 307968BBED41DE917D47936C /* DeepSeekV41PreparationMemoryTests.swift */; };
@@ -97,6 +95,7 @@
 		66893EB34EE2CACB1788AD62 /* SpeedProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23CA3B8BB9865A2EFEE5E13D /* SpeedProjection.swift */; };
 		66D04A92427CADE07301610E /* ModelRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = B70FAB3186603ABADC3D5268 /* ModelRuntime.swift */; };
 		6706473715A7329FF759C5ED /* MemoryDialRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0445F3BE60E28B1714ED2345 /* MemoryDialRenderTests.swift */; };
+		68B0366DB99565CE175518A0 /* FlintView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 112D0909C2F4FF2153F7D7AC /* FlintView.swift */; };
 		6933E236AD1A2FD1F2254C59 /* OrnithPerformance in Frameworks */ = {isa = PBXBuildFile; productRef = 23E40A3F374831A4F828B256 /* OrnithPerformance */; };
 		6AA3E4DB3A5D922A767D918D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C1DEEA6CFC2E23E3B7BBC60E /* Assets.xcassets */; };
 		6BCA2D0C523908AB45B42ACE /* RunTraceRecorderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5DDECDCB05DC2DDC87CD236 /* RunTraceRecorderTests.swift */; };
@@ -106,9 +105,7 @@
 		7505AE766D51ADC19F41519E /* AssessmentCardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90F12F96EDA27426D335BD79 /* AssessmentCardTests.swift */; };
 		755FD30FB432EC3D1E04E4D1 /* OrnithPerformanceAppTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AB662DC12C34C403BAEE928 /* OrnithPerformanceAppTests.swift */; };
 		7569B8874FA7DDD567665581 /* OrnithLESView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEF9601E7D9E23FB5F00C312 /* OrnithLESView.swift */; };
-		0E9CC267BB541BFB8697AD24 /* FlintView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF2FDB2F26ED15969A511594 /* FlintView.swift */; };
 		771BDBADE7805352A707B428 /* OrnithLESAppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4B6BCF03E7DDD48E35D5895 /* OrnithLESAppModel.swift */; };
-		2FC4CCB89C789162EB5802E0 /* FlintAppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43B937B1FD46D573182A44CB /* FlintAppModel.swift */; };
 		77558B2511C3EACAAF6DBDEA /* BudgetPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = 536D180F81B960143A0A930C /* BudgetPlan.swift */; };
 		775CA38CC743E4D3671AFCA8 /* REAMAppModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D3C06570C8926B59B835700 /* REAMAppModelTests.swift */; };
 		7DA046973C2690F5D0E3F9AC /* Instruments.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A8A6B9E1EC4E72CDCD10BFA /* Instruments.swift */; };
@@ -147,7 +144,6 @@
 		A6DE0C746EE8EA3BC2A758D5 /* PreviewTokenizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40CD85A0EA5D6BF84A9CD902 /* PreviewTokenizer.swift */; };
 		A86EFED428377053FC01DA70 /* ModelAdapters in Frameworks */ = {isa = PBXBuildFile; productRef = 327A9F472B9753BF7101AFA8 /* ModelAdapters */; };
 		AE0828EBA881DDB401E0F077 /* OrnithLES-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = D15F57C48F6FDA32C5B53ED9 /* OrnithLES-LICENSE.txt */; };
-		E7181F1ADEF61D745B82C38C /* Flint-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 62DA85027FE958E6AE18D9A4 /* Flint-LICENSE.txt */; };
 		AE28F2D70CCBFC07C9AF9023 /* MinirunKit in Frameworks */ = {isa = PBXBuildFile; productRef = 3F970A77AA1EA60FC0957DEB /* MinirunKit */; };
 		AF68BAEBBE105EABA6D4246F /* OpenSourceNotices.txt in Resources */ = {isa = PBXBuildFile; fileRef = 4584526402C0C724EA126739 /* OpenSourceNotices.txt */; };
 		B17B0A68725FC61FAC59B299 /* BudgetPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = 536D180F81B960143A0A930C /* BudgetPlan.swift */; };
@@ -171,11 +167,13 @@
 		CA035537A2B76A4DC7D5F78C /* AddStorageLocation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1249A4E2EF960978A22E8471 /* AddStorageLocation.swift */; };
 		CA2665E60BA136E5DC1C6EF5 /* DeepSeekV41PreparationMemoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 307968BBED41DE917D47936C /* DeepSeekV41PreparationMemoryTests.swift */; };
 		CC873AB18727CEB7149AE28F /* SoftwareUpdater.swift in Sources */ = {isa = PBXBuildFile; fileRef = 666BA794B3DAAC9791BFD72F /* SoftwareUpdater.swift */; };
+		CCBB824E0BFCE992D4CA215D /* FlintView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 112D0909C2F4FF2153F7D7AC /* FlintView.swift */; };
 		CD0C05BEE7AD86F8DE6CB6A6 /* AssessmentCardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90F12F96EDA27426D335BD79 /* AssessmentCardTests.swift */; };
 		CD8D202E9EB4FAE06EF2DE24 /* InstrumentSample.swift in Sources */ = {isa = PBXBuildFile; fileRef = 541C7B8E135AAD5FC190934C /* InstrumentSample.swift */; };
 		CFD74BDB3F64ABCE1DEF50BE /* MinirunRunners in Frameworks */ = {isa = PBXBuildFile; productRef = 0CE0F9F50081920ED5D8023D /* MinirunRunners */; };
 		CFFDEB4C27DCA7665AA2D220 /* VerificationBackgroundWork.swift in Sources */ = {isa = PBXBuildFile; fileRef = 468E84AB80FF569F373B2FD7 /* VerificationBackgroundWork.swift */; };
 		D0A4B87C44B5642EB4865042 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 355654F1DB934ADC8AD27EE8 /* PrivacyInfo.xcprivacy */; };
+		D0B81EF6F64082FF70A2CB6E /* FlintAppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 683AEB6B8309A2D1D58C2136 /* FlintAppModel.swift */; };
 		D28ABD814BBAAC5F9F7EF951 /* DeepSeekV4ProductRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38E30B7578E4871024BE0168 /* DeepSeekV4ProductRuntime.swift */; };
 		D36E78D2FC2FCC299211EC7C /* ProjectionStrip.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74ED1F2BB87D224E2E5E2AE3 /* ProjectionStrip.swift */; };
 		D4BDCE4E6CC7A5CF2B011F90 /* InstalledModelsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8BFAAD5FB6F2AACE93ECD73 /* InstalledModelsTests.swift */; };
@@ -208,12 +206,14 @@
 		ED1DC67F73ACE4E99E70F5D3 /* InstalledModelsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8BFAAD5FB6F2AACE93ECD73 /* InstalledModelsTests.swift */; };
 		ED78E776B358D7498867C62D /* ConversationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B66FB709A329A5423DEBDCEE /* ConversationView.swift */; };
 		EE4463594E2CF95174E8B929 /* ConversationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6EF89D698188921CC13DF66 /* ConversationTests.swift */; };
+		EEC8FF560EFB35A029E2E6CC /* Flint-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 880695D74DB9AFF1E7125230 /* Flint-LICENSE.txt */; };
 		EEE0AC03CE20981B47731FD0 /* ModelDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6534E68BABDC703360D074B /* ModelDetailView.swift */; };
 		EFC637DA19F40FB63054A2D6 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C206C2D7B96B01E6C0A3C36 /* SettingsView.swift */; };
 		F0F83A631A813D506BB526A7 /* REAMAppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4AB578C0D8B81F6A36ED8AA /* REAMAppModel.swift */; };
 		F3E8D1C6C406D4A356C6FFD6 /* CatalogNamingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 238D59D9207619AA515D15C1 /* CatalogNamingTests.swift */; };
 		F82982E5F9A6A6EF44CA7338 /* QwenModelLicense.txt in Resources */ = {isa = PBXBuildFile; fileRef = 4EBB7691E9CBEE5D213A2C65 /* QwenModelLicense.txt */; };
 		F8B8578297539F3C0A90C996 /* ConversationListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F2E4C8D4C174BDB0E19CF0E /* ConversationListView.swift */; };
+		F9CFB8277A05BC4590AE9206 /* Flint-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 880695D74DB9AFF1E7125230 /* Flint-LICENSE.txt */; };
 		FB100FB243E7492B2E3259E6 /* BudgetPlanTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34012DB1B47A8BA43CDF840A /* BudgetPlanTests.swift */; };
 		FE1B188E307812A369A1439F /* AccessibilityNamesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 782C152792D056673FD1B220 /* AccessibilityNamesTests.swift */; };
 		FF5C283A479063EA45AE3816 /* SoftwareUpdateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DA64D1C6288655AFA31B203 /* SoftwareUpdateTests.swift */; };
@@ -243,6 +243,7 @@
 		0AB7887AE23375D7D3D3162C /* MinirunApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MinirunApp.swift; sourceTree = "<group>"; };
 		0C6CFCCE2C98047709B17A41 /* StorageSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageSettingsView.swift; sourceTree = "<group>"; };
 		0F54CD33ED58ACD796F82587 /* AssessmentCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssessmentCard.swift; sourceTree = "<group>"; };
+		112D0909C2F4FF2153F7D7AC /* FlintView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlintView.swift; sourceTree = "<group>"; };
 		1249A4E2EF960978A22E8471 /* AddStorageLocation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddStorageLocation.swift; sourceTree = "<group>"; };
 		1A05D40F308B9D5B543BB299 /* RunController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunController.swift; sourceTree = "<group>"; };
 		1BC7C2CA7842B67F066AF74A /* Rows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Rows.swift; sourceTree = "<group>"; };
@@ -274,6 +275,7 @@
 		5FD3923DC64AB82EE5FC433C /* Primitives.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Primitives.swift; sourceTree = "<group>"; };
 		6448A9D4326018EB7626C265 /* OrnithLESAppTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrnithLESAppTests.swift; sourceTree = "<group>"; };
 		666BA794B3DAAC9791BFD72F /* SoftwareUpdater.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SoftwareUpdater.swift; sourceTree = "<group>"; };
+		683AEB6B8309A2D1D58C2136 /* FlintAppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlintAppModel.swift; sourceTree = "<group>"; };
 		68460D773F76808905F3D13D /* K3ProductRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = K3ProductRuntime.swift; sourceTree = "<group>"; };
 		711CD103DA8391A506294E69 /* MRTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MRTokens.swift; sourceTree = "<group>"; };
 		74ED1F2BB87D224E2E5E2AE3 /* ProjectionStrip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectionStrip.swift; sourceTree = "<group>"; };
@@ -285,6 +287,7 @@
 		7FFD1F783466387DCB38A15C /* RunSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunSnapshot.swift; sourceTree = "<group>"; };
 		8295EF8C10708DA25D6703DE /* CatalogFixtures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogFixtures.swift; sourceTree = "<group>"; };
 		84A909AEF345A0B1E78F6D5F /* RunPipelineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunPipelineTests.swift; sourceTree = "<group>"; };
+		880695D74DB9AFF1E7125230 /* Flint-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "Flint-LICENSE.txt"; sourceTree = "<group>"; };
 		8DA64D1C6288655AFA31B203 /* SoftwareUpdateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SoftwareUpdateTests.swift; sourceTree = "<group>"; };
 		90F12F96EDA27426D335BD79 /* AssessmentCardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssessmentCardTests.swift; sourceTree = "<group>"; };
 		987960C6CC71EE66DE01C8E0 /* FlashLocal.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = FlashLocal.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -310,11 +313,9 @@
 		C1DEEA6CFC2E23E3B7BBC60E /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		C2F522404FD75DC76C939972 /* OrnithPerformanceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrnithPerformanceView.swift; sourceTree = "<group>"; };
 		C4B6BCF03E7DDD48E35D5895 /* OrnithLESAppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrnithLESAppModel.swift; sourceTree = "<group>"; };
-		43B937B1FD46D573182A44CB /* FlintAppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlintAppModel.swift; sourceTree = "<group>"; };
 		C90D785356A47D759E611773 /* DownloadState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadState.swift; sourceTree = "<group>"; };
 		D141E4CE3E6B7999B983C191 /* DeepSeekV41ProductRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeepSeekV41ProductRuntime.swift; sourceTree = "<group>"; };
 		D15F57C48F6FDA32C5B53ED9 /* OrnithLES-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "OrnithLES-LICENSE.txt"; sourceTree = "<group>"; };
-		62DA85027FE958E6AE18D9A4 /* Flint-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "Flint-LICENSE.txt"; sourceTree = "<group>"; };
 		D4615FE6055CFB662D8CBCE7 /* VolumeAssessments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VolumeAssessments.swift; sourceTree = "<group>"; };
 		D6A1975DDF806967F14C197F /* OrnithPerformanceAppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrnithPerformanceAppModel.swift; sourceTree = "<group>"; };
 		D6EF89D698188921CC13DF66 /* ConversationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationTests.swift; sourceTree = "<group>"; };
@@ -338,7 +339,6 @@
 		FD74D0BD0333E338DC0FD46A /* ModelCatalogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelCatalogView.swift; sourceTree = "<group>"; };
 		FE35EC3C17CCD2A3D96C012D /* InstrumentPanelRenderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstrumentPanelRenderTests.swift; sourceTree = "<group>"; };
 		FEF9601E7D9E23FB5F00C312 /* OrnithLESView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrnithLESView.swift; sourceTree = "<group>"; };
-		DF2FDB2F26ED15969A511594 /* FlintView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlintView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -416,9 +416,9 @@
 			children = (
 				C1DEEA6CFC2E23E3B7BBC60E /* Assets.xcassets */,
 				7FB065E4579BEAAA27BC5273 /* FlashLocalMark.svg */,
+				880695D74DB9AFF1E7125230 /* Flint-LICENSE.txt */,
 				4584526402C0C724EA126739 /* OpenSourceNotices.txt */,
 				D15F57C48F6FDA32C5B53ED9 /* OrnithLES-LICENSE.txt */,
-				62DA85027FE958E6AE18D9A4 /* Flint-LICENSE.txt */,
 				355654F1DB934ADC8AD27EE8 /* PrivacyInfo.xcprivacy */,
 				4EBB7691E9CBEE5D213A2C65 /* QwenModelLicense.txt */,
 				4CCBFD2090C4EEEEF5E8F45F /* SwiftletNotices.txt */,
@@ -493,12 +493,12 @@
 				D141E4CE3E6B7999B983C191 /* DeepSeekV41ProductRuntime.swift */,
 				A98B7BDC8F758CF1A1A4A63B /* DownloadController.swift */,
 				C90D785356A47D759E611773 /* DownloadState.swift */,
+				683AEB6B8309A2D1D58C2136 /* FlintAppModel.swift */,
 				2BB1F5994A3E1F690A831B57 /* InstalledModels.swift */,
 				541C7B8E135AAD5FC190934C /* InstrumentSample.swift */,
 				68460D773F76808905F3D13D /* K3ProductRuntime.swift */,
 				B70FAB3186603ABADC3D5268 /* ModelRuntime.swift */,
 				C4B6BCF03E7DDD48E35D5895 /* OrnithLESAppModel.swift */,
-				43B937B1FD46D573182A44CB /* FlintAppModel.swift */,
 				D6A1975DDF806967F14C197F /* OrnithPerformanceAppModel.swift */,
 				9EC1C3587459DC0447DF0538 /* PromptAssembler.swift */,
 				F4AB578C0D8B81F6A36ED8AA /* REAMAppModel.swift */,
@@ -552,12 +552,12 @@
 				51BE474F9AE32C45E714938D /* DestinationPicker.swift */,
 				EB2D2CE1AA18A176403302A4 /* DownloadDetailView.swift */,
 				7D5F602A6A195BFA9250B42D /* DownloadsView.swift */,
+				112D0909C2F4FF2153F7D7AC /* FlintView.swift */,
 				AE65194D2A1F359EDB839857 /* InstrumentPanelView.swift */,
 				1E70B2AF60BB7C7C1FED638A /* MemoryDialView.swift */,
 				FD74D0BD0333E338DC0FD46A /* ModelCatalogView.swift */,
 				F6534E68BABDC703360D074B /* ModelDetailView.swift */,
 				FEF9601E7D9E23FB5F00C312 /* OrnithLESView.swift */,
-				DF2FDB2F26ED15969A511594 /* FlintView.swift */,
 				C2F522404FD75DC76C939972 /* OrnithPerformanceView.swift */,
 				9EFD1C4AD23582687D8423FD /* REAMRootView.swift */,
 				1DB98DAE51D81245C7954BF4 /* RootView.swift */,
@@ -733,9 +733,9 @@
 			files = (
 				6AA3E4DB3A5D922A767D918D /* Assets.xcassets in Resources */,
 				59EE90717EDDF5B55D9F3A46 /* FlashLocalMark.svg in Resources */,
+				F9CFB8277A05BC4590AE9206 /* Flint-LICENSE.txt in Resources */,
 				34BAD95298C4A4E53A80FF1F /* OpenSourceNotices.txt in Resources */,
 				2DCFE1F02086457F9B733FE0 /* OrnithLES-LICENSE.txt in Resources */,
-				165BA43BCA774C1083E666BC /* Flint-LICENSE.txt in Resources */,
 				D0A4B87C44B5642EB4865042 /* PrivacyInfo.xcprivacy in Resources */,
 				149410BD57CBB47F8503E743 /* QwenModelLicense.txt in Resources */,
 				7FEAF83F4E1EFD13FD8D9848 /* SwiftletNotices.txt in Resources */,
@@ -748,9 +748,9 @@
 			files = (
 				221167AA697CCEAB94887ADD /* Assets.xcassets in Resources */,
 				DC341D43C50CF5020CEDAC46 /* FlashLocalMark.svg in Resources */,
+				EEC8FF560EFB35A029E2E6CC /* Flint-LICENSE.txt in Resources */,
 				AF68BAEBBE105EABA6D4246F /* OpenSourceNotices.txt in Resources */,
 				AE0828EBA881DDB401E0F077 /* OrnithLES-LICENSE.txt in Resources */,
-				E7181F1ADEF61D745B82C38C /* Flint-LICENSE.txt in Resources */,
 				501482B02CE9C5DEEF74A6E6 /* PrivacyInfo.xcprivacy in Resources */,
 				F82982E5F9A6A6EF44CA7338 /* QwenModelLicense.txt in Resources */,
 				2D36EE6E12BD8305425E1E59 /* SwiftletNotices.txt in Resources */,
@@ -817,6 +817,8 @@
 				DF0700C83E64BDE75A485D35 /* DownloadDetailView.swift in Sources */,
 				5E35075C5A6C6C5575EA4BF2 /* DownloadState.swift in Sources */,
 				EC01155316359962D173F065 /* DownloadsView.swift in Sources */,
+				60FF8D9CC8B7FA6480544916 /* FlintAppModel.swift in Sources */,
+				CCBB824E0BFCE992D4CA215D /* FlintView.swift in Sources */,
 				85514D923B7AA4AB54E0B3DE /* InstalledModels.swift in Sources */,
 				0B41D840EC9CD9C371085425 /* InstrumentPanelView.swift in Sources */,
 				1F3098BDA538808362B6BE74 /* InstrumentSample.swift in Sources */,
@@ -833,9 +835,7 @@
 				EEE0AC03CE20981B47731FD0 /* ModelDetailView.swift in Sources */,
 				1616AFA946ED9D3A0D75CC5B /* ModelRuntime.swift in Sources */,
 				2E6B24EE0E9EBD725F27FD88 /* OrnithLESAppModel.swift in Sources */,
-				EEC7D8A79508C6D39FC25A72 /* FlintAppModel.swift in Sources */,
 				7569B8874FA7DDD567665581 /* OrnithLESView.swift in Sources */,
-				0E9CC267BB541BFB8697AD24 /* FlintView.swift in Sources */,
 				4715A78897C8100ACE7C1583 /* OrnithPerformanceAppModel.swift in Sources */,
 				28DC393DDFF8BEF0291B3514 /* OrnithPerformanceView.swift in Sources */,
 				A6DE0C746EE8EA3BC2A758D5 /* PreviewTokenizer.swift in Sources */,
@@ -884,6 +884,8 @@
 				B3448DD59621DE0FB075E8C3 /* DownloadDetailView.swift in Sources */,
 				2B0AAD388AE3C5F66DDBEA55 /* DownloadState.swift in Sources */,
 				B3D78EE46DA3C666D2B14836 /* DownloadsView.swift in Sources */,
+				D0B81EF6F64082FF70A2CB6E /* FlintAppModel.swift in Sources */,
+				68B0366DB99565CE175518A0 /* FlintView.swift in Sources */,
 				64AEE5AFD98DDE3E2BF689B6 /* InstalledModels.swift in Sources */,
 				95BE5E72B5A336732F367BB7 /* InstrumentPanelView.swift in Sources */,
 				CD8D202E9EB4FAE06EF2DE24 /* InstrumentSample.swift in Sources */,
@@ -900,9 +902,7 @@
 				7039121984A1E5C633160AE6 /* ModelDetailView.swift in Sources */,
 				66D04A92427CADE07301610E /* ModelRuntime.swift in Sources */,
 				771BDBADE7805352A707B428 /* OrnithLESAppModel.swift in Sources */,
-				2FC4CCB89C789162EB5802E0 /* FlintAppModel.swift in Sources */,
 				229A6437D3C68BDFAC3C0E01 /* OrnithLESView.swift in Sources */,
-				2133BB9AB34285433FE5DA57 /* FlintView.swift in Sources */,
 				5920C9CC7B35C05ED0C03762 /* OrnithPerformanceAppModel.swift in Sources */,
 				93D1EAB61E2CE1FE709917E4 /* OrnithPerformanceView.swift in Sources */,
 				A66991DC4AB79C50A9210B7E /* PreviewTokenizer.swift in Sources */,

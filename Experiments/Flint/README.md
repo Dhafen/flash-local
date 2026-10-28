@@ -89,10 +89,34 @@ from the existing `flo_*` and tokenizer/reference libraries. The Linux build
 also restricts its shared-library exports.
 
 The app's new path remains disabled unless `FLASH_LOCAL_ENABLE_FLINT=1` was
-present during package resolution; the existing release workflow is unchanged.
+present during package resolution. CI now has a disabled-by-default `flint`
+input. Ordinary Ornith jobs, signing, credentials and app identity retain their
+existing configuration. Enabling Flint requires the LES owner and full native,
+package/app and iOS gates. The first Flint run refuses signing/upload modes
+until actual Apple checks and the new UI have been reviewed.
 The experimental selector shuts down the former owner first. A common engine
 lease also rejects concurrent Ornith/Flint native ownership. No second app,
 signing identity or production backend replacement was created.
+
+Once included Apple runner time is available, the first validation can be
+started from the existing CI workflow on this branch:
+
+```sh
+gh workflow run ci.yml --repo Dhafen/flash-local --ref codex/flint-engine \
+  -f flint=true -f ornith_les=true -f use_macos15=true -f release_archive=true
+```
+
+This is an unsigned validation/archive, not an upload. Its extra native job
+downloads only the bounded public vocabulary/header controls, never the trained
+model. Actual trained CPU/Metal admission and phone measurements remain later
+device gates. No workflow has been dispatched from the current Windows host.
+
+The committed project was regenerated using official XcodeGen 2.46.0 source at
+`8445e778451c7e44237b90281bde622d764b0084` on Linux. The same tool reproduced the
+existing Mac-generated baseline exactly before the new project was adopted.
+App identity, signing, schemes, Info plists and entitlements were checked against
+the baseline. This removes a known project-regeneration mismatch; it is not an
+Apple compile check. See `evidence/project-generation.json`.
 
 Before generation, `FlintSession.prepare` performs four real CPU/Metal logit
 checks and compares every actually computed top-6 set. Final-layer FFNs at

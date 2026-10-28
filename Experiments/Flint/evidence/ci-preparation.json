@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "dateUTC": "2026-10-28T10:20:56.592428+00:00",
+  "demonstratedReason": "The previous CI had no Flint environment flag/runtime builder and would omit the optional backend. Manually registered project IDs would also differ from pinned XcodeGen regeneration.",
+  "optInDefault": false,
+  "legacySigningAndDeliveryStepsPreservedExactly": true,
+  "initialFlintRunValidationOnly": true,
+  "pythonTestsPassed": 161,
+  "newCIGuardTestsPassed": 4,
+  "actionlintVersion": "1.7.12",
+  "actionlintReleaseSHA256": "6e7241b51e6817ea6a047693d8e6fed13b31819c9a0dd6c5a726e1592d22f6e9",
+  "workflowLintPassed": true,
+  "hostedWorkflowDispatched": false,
+  "appleBuildRun": false,
+  "testFlightUploaded": false,
+  "freshBillingQuotaConfirmed": false,
+  "sources": {
+    ".github/workflows/ci.yml": "fde794ac1e18ad2c8e5f9c5e471be525e1751b67c15d23d641e715d3aa1c5664",
+    ".github/workflows/flint.yml": "8db5e01f52389be2bf4b671f89d65766b8587d63a79aec9eaaa62b2db303a641",
+    "scripts/check_flint_ci_inputs.py": "512d7dcdc7c0013aee0c4ac7e1e6d3b47fdaaddc26ecfdcef75261705f300b4f",
+    "scripts/tests/test_flint_ci_inputs.py": "54e13062fa80e1b602a3bc44d61c82f0f1afddb000a8a4fc76d37efc183f857c",
+    "Apps/Minirun/Minirun.xcodeproj/project.pbxproj": "dfdb0f4dcc4dfa2a4063f02e3d23a0e29fafbeea763a9768d48fbef45483a148"
+  }
+}

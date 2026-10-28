@@ -1,0 +1,72 @@
+name: Flint isolated validation
+on:
+  workflow_call:
+    inputs:
+      use_macos15:
+        type: boolean
+        default: true
+  workflow_dispatch:
+    inputs:
+      use_macos15:
+        description: 'Use the existing macos-15 arm64/Xcode 26.2 host'
+        type: boolean
+        default: true
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: bash
+jobs:
+  native-controls:
+    runs-on: ${{ (github.event_name != 'workflow_dispatch' || inputs.use_macos15) && 'macos-15' || 'macos-26' }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - name: Select the existing pinned Apple host
+        run: |
+          test "$(uname -m)" = arm64
+          sudo xcode-select -s /Applications/Xcode_26.2.app
+      - name: Install pinned small-control dependencies
+        run: python3 -m pip install -r Experiments/Flint/reference-requirements.txt
+      - name: Build isolated Mac Flint framework and control binaries
+        run: python3 scripts/build_flint_runtime.py --mac-only
+      - name: Real small synthetic graphs against independent FP64 controls
+        run: |
+          python3 scripts/verify_flint_controls.py \
+            --control .work/flint-build-macos/bin/flint-control \
+            --quantizer .work/flint-build-macos/bin/flint-quantize-control \
+            --output .work/flint-ci-graph
+      - name: Actual publisher vocabulary and exact template bytes (no weights)
+        run: |
+          python3 scripts/fetch_flint_metadata.py
+          python3 scripts/verify_flint_protocol.py \
+            --prefix .work/flint-inputs/gguf-prefix.bin \
+            --tokenizer .work/flint-inputs/tokenizer.json \
+            --native-bin .work/flint-build-macos/bin --output .work/flint-ci-protocol
+      - name: Native ownership, seeded generation, KV and microbatch routing
+        run: |
+          for fixture in normal/synthetic-flint-f32.gguf normal/q4_1/synthetic-flint-q4_1.gguf wide-router/synthetic-flint-f32.gguf; do
+            .work/flint-build-macos/bin/flint-api-control ".work/flint-ci-graph/$fixture" .work/flint-api-control-session \
+              > .work/flint-api-control.log 2>&1
+            grep 'FLINT_API_CONTROL.*routingTrace=true.*unload=true' .work/flint-api-control.log
+          done
+      - name: Retain small-control evidence, never full model files
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flint-native-controls
+          path: |
+            .work/flint-runtime/build.log
+            .work/flint-runtime/build-manifest.json
+            .work/flint-api-control.log
+            .work/flint-ci-graph/**/*.json
+            .work/flint-ci-graph/**/*.log
+            .work/flint-ci-protocol/**/*.json
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7
