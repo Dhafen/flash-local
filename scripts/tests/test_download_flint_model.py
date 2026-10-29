@@ -58,7 +58,9 @@ class FlintDownloadTests(unittest.TestCase):
     def test_existing_final_is_rehashed_and_not_replaced(self):
         final = self.directory / "fixture.gguf"; final.write_bytes(self.payload)
         with patch("download_flint_model.urllib.request.urlopen") as network:
-            self.assertEqual(fetch(self.directory), final)
+            # macOS exposes /var as an alias of /private/var. The downloader
+            # intentionally returns the canonical path on every platform.
+            self.assertEqual(fetch(self.directory), final.resolve())
             network.assert_not_called()
             final.write_bytes(b"badMODEL")
             with self.assertRaises(ValueError): fetch(self.directory)
