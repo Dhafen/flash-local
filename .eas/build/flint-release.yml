@@ -6,7 +6,10 @@ build:
         name: Prepare pinned Apple test dependencies
         command: |
           set -eu
+          test "$(uname -m)" = arm64
+          xcodebuild -version
           command -v cmake >/dev/null || brew install cmake
+          command -v python3.12 >/dev/null || brew install python@3.12
           python3.12 -m venv .work/eas-python
           .work/eas-python/bin/python -m pip install -r Experiments/Flint/eas-requirements.txt
     - run:

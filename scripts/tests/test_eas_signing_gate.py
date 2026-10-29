@@ -18,6 +18,15 @@ finally:
 
 
 class EASSigningGateTests(unittest.TestCase):
+    @unittest.skipUnless(importlib.util.find_spec('yaml'), 'EAS-only PyYAML not installed')
+    def test_fresh_signing_worker_initializes_the_tested_python_runtime(self):
+        import yaml
+        commands = []
+        for filename in ('flint-validation.yml', 'flint-release.yml'):
+            job = yaml.safe_load((ROOT / '.eas/build' / filename).read_text())
+            commands.append(job['build']['steps'][1]['run']['command'])
+        self.assertEqual(commands[0], commands[1])
+
     def test_private_diagnostics_expose_only_redacted_errors(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / 'private.log'
