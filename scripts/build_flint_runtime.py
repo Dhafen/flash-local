@@ -4,13 +4,57 @@ import hashlib
 import json
 import pathlib
 import platform
+import plistlib
 import subprocess
 from prepare_flint_runtime import prepare, ROOT, NATIVE
+
+
+def verify_existing(source, output, native=NATIVE, mac_only=False):
+    """Verify a prior immutable build; never replace or silently rebuild it."""
+    record = json.loads((output / "build-manifest.json").read_text())
+    source_record = json.loads((source / "flash-local-flint-source.json").read_text())
+    if record["source"] != source_record or record.get("trainedInferenceVerified") is not False or record.get("iPhoneVerified") is not False:
+        raise ValueError("Existing Flint framework source or validation declaration changed")
+    actual_inputs = {str(p.relative_to(native)): hashlib.sha256(p.read_bytes()).hexdigest()
+                     for p in native.iterdir() if p.is_file()}
+    if record["nativeFiles"] != actual_inputs:
+        raise ValueError("Existing Flint framework native inputs changed")
+    exports = set((native / "exports.txt").read_text().split())
+    expected = {entry["platform"]: entry for entry in record["slices"]}
+    platforms = {"macos"} if mac_only else {"macos", "ios", "ios-simulator"}
+    if len(expected) != len(record["slices"]) or set(expected) != platforms or any(
+            x.get("moduleImportVerified") is not True or x.get("symbolIsolated") is not True
+            or set(x["exportedSymbols"]) != exports for x in expected.values()):
+        raise ValueError("Incomplete Flint platform, symbol or module proof")
+    framework = (output / "FlashFlint.xcframework").resolve()
+    info = plistlib.loads((framework / "Info.plist").read_bytes())
+    seen = set()
+    for entry in info["AvailableLibraries"]:
+        name = entry["SupportedPlatform"]
+        if entry.get("SupportedPlatformVariant") == "simulator": name += "-simulator"
+        if name not in expected or name in seen or entry["SupportedArchitectures"] != ["arm64"]:
+            raise ValueError("Unexpected Flint XCFramework slice")
+        seen.add(name)
+        library = (framework / entry["LibraryIdentifier"] / entry["LibraryPath"]).resolve()
+        if not library.is_relative_to(framework): raise ValueError("Flint framework path escaped output")
+        digest = hashlib.sha256()
+        with (library / "FlashFlint").open("rb") as stream:
+            for chunk in iter(lambda: stream.read(4 << 20), b""): digest.update(chunk)
+        if digest.hexdigest() != expected[name]["sha256"]:
+            raise ValueError("Existing Flint framework binary changed")
+        if (library / "Headers/FlashFlint.h").read_bytes() != (native / "FlashFlint.h").read_bytes():
+            raise ValueError("Existing Flint framework C ABI header changed")
+        module = 'framework module FlashFlint {\n  umbrella header "FlashFlint.h"\n  export *\n}\n'
+        if (library / "Modules/module.modulemap").read_text() != module:
+            raise ValueError("Existing Flint framework module declaration changed")
+    if seen != platforms: raise ValueError("Missing Flint XCFramework slice")
+    return len(seen)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mac-only", action="store_true")
+    parser.add_argument("--verify-existing", action="store_true", help="Verify and reuse immutable output; never rebuild")
     args = parser.parse_args()
     if platform.system() != "Darwin" or platform.machine() != "arm64":
         raise RuntimeError("Apple framework verification requires an Apple-silicon Mac with Xcode. Linux CPU controls are separate.")
@@ -18,6 +62,10 @@ def main():
     output = ROOT / ".work/flint-runtime"
     output.mkdir(parents=True, exist_ok=True)
     target = output / "FlashFlint.xcframework"
+    if args.verify_existing:
+        count = verify_existing(source, output, mac_only=args.mac_only)
+        print(f"FLINT_RUNTIME_REUSE sourceHashes=true binaryHashes=true platforms={count} unchanged=true")
+        return
     if target.exists(): raise RuntimeError("Keep immutable XCFramework evidence; use a fresh build directory/worktree")
     platforms = [("macos", "macosx", "14.0")]
     if not args.mac_only: platforms += [("ios", "iphoneos", "18.0"), ("ios-simulator", "iphonesimulator", "18.0")]

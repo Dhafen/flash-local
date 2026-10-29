@@ -79,6 +79,12 @@ def workflow_steps(filename, job, first, last, root=ROOT):
             # EAS uses /Applications/Xcode.app; the actual version is checked
             # by both the parent and this runner before any test executes.
             body = body.replace(original, "")
+        if step.get("name") == "Build isolated Flint runtime (Mac, iPhone, Simulator)":
+            if body not in ("python3 scripts/build_flint_runtime.py", "python3 scripts/build_flint_runtime.py\n"):
+                raise ValueError("Flint build step changed; review immutable reuse")
+            # The same EAS job has already built and numerically checked this
+            # artifact. Keep its evidence immutable and verify every slice.
+            body = "python3 scripts/build_flint_runtime.py --verify-existing\n"
         if any(word in body for word in ("${{", "deliver_testflight.py", "prepare_flash_signing.sh",
                                          "-allowProvisioningUpdates", "xcodebuild archive")):
             raise ValueError("Only fully resolved, unsigned CI test bodies are allowed")

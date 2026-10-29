@@ -49,6 +49,11 @@ GitHub's `/Applications/Xcode_26.2.app`. It does not edit the workflows or selec
 their archive/signing/upload steps. PyYAML is a pinned build-only dependency.
 Each actual result records the source revision, shell-body hash and full log.
 Dry-run `--plan` output is never evidence that these checks executed.
+The main CI's second Flint build verifies/reuses the artifact already built
+and numerically checked earlier in the same EAS job. Reuse checks all current
+native inputs, the prepared source record, all three executable hashes, exported
+symbol proofs, headers and module declarations. Default builds still refuse
+to overwrite an existing XCFramework; no test or numerical assertion is removed.
 XcodeGen's local-package navigator ID also depends on the checkout basename.
 The generation wrapper uses a temporary source-only `flash-local` layout and
 copies back the canonical project. This retains the actual relative package

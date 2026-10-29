@@ -44,6 +44,9 @@ class EASWorkflowSourceTests(unittest.TestCase):
         self.assertTrue(any("ORNITH_PAIRED_GRAPH mixed=true" in step["body"] for step in regression))
         self.assertTrue(any("ORNITH_CACHE_INTERRUPTION" in step["body"] for step in regression))
         self.assertTrue(any("ORNITH_LOCAL_API realTCP=true" in step["body"] for step in regression))
+        self.assertEqual([step["body"] for step in regression if step["name"] ==
+                         "Build isolated Flint runtime (Mac, iPhone, Simulator)"],
+                         ["python3 scripts/build_flint_runtime.py --verify-existing\n"])
         self.assertEqual(regression[-1]["name"], "Compile the opt-in Flint app for physical iPhone (unsigned)")
         for step in qpack + regression:
             self.assertNotIn("${{", step["body"])
