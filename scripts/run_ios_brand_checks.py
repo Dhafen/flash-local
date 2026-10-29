@@ -22,15 +22,20 @@ TEST_SUITES = (
     "MinirunIOSTests/OrnithPerformanceRenderTests",
 )
 LES_SUITE = "MinirunIOSTests/OrnithLESRenderTests"
+FLINT_SUITE = "MinirunIOSTests/FlintRenderTests"
+FLINT_MARKER = "FLINT_RENDER unloadedPanes=3 appearances=2 realControls=true modelLoaded=false trainedInference=false"
 
 
 def selected_suites() -> tuple[str, ...]:
     # OrnithLESRenderTests is compiled only when canImport(OrnithLES).
     # The standard CI configuration does not link that optional module.
     # Keep the LES visual gate mandatory for LES-enabled delivery runs.
+    suites = TEST_SUITES
     if os.environ.get("FLASH_LOCAL_ENABLE_LES") == "1":
-        return (*TEST_SUITES, LES_SUITE)
-    return TEST_SUITES
+        suites += (LES_SUITE,)
+    if os.environ.get("FLASH_LOCAL_ENABLE_FLINT") == "1":
+        suites += (FLINT_SUITE,)
+    return suites
 
 
 
@@ -125,6 +130,7 @@ def run_test_attempt(udid: str, *, seconds: int, log: Path, result: Path) -> boo
         code == 0
         and "** TEST SUCCEEDED **" in content
         and all(required_passes.values())
+        and (FLINT_SUITE not in suites or FLINT_MARKER in content)
     )
     print(f"Visual test completed: rc={code}, suites={required_passes}, pass={okay}", flush=True)
     if not okay:

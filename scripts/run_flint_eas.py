@@ -39,7 +39,7 @@ def plan(stage):
                           ("256-experts", "wide-router/synthetic-flint-f32.gguf")]:
         steps.append(("flint-api-" + name, [".work/flint-build-macos/bin/flint-api-control",
             ".work/flint-eas-graph/" + fixture, ".work/flint-eas-api-" + name]))
-    if stage == "compile":
+    if stage in ("compile", "visual"):
         steps += [
             ("tokenizer-frameworks", [py, "scripts/build_tokenizer_xcframework.py"]),
             ("les-frameworks", [py, "scripts/build_ornith_les.py"]),
@@ -56,6 +56,17 @@ def plan(stage):
         ]
     elif stage != "native":
         raise ValueError("Unknown EAS validation stage")
+    if stage == "visual":
+        steps += [
+            ("mac-visual-tests", ["xcodebuild", "test", "-project", "Apps/Minirun/Minirun.xcodeproj", "-scheme", "Minirun-macOS",
+                "-destination", "platform=macOS", "CODE_SIGNING_ALLOWED=NO", *FLAGS,
+                "-only-testing:MinirunTests/ForkBrandRenderTests", "-only-testing:MinirunTests/REAMChatRenderTests",
+                "-only-testing:MinirunTests/OrnithPerformanceRenderTests", "-only-testing:MinirunTests/OrnithLESRenderTests",
+                "-only-testing:MinirunTests/FlintRenderTests", "-resultBundlePath", ".work/eas-visual/mac.xcresult"]),
+            ("mac-visual-export", ["xcrun", "xcresulttool", "export", "attachments", "--path", ".work/eas-visual/mac.xcresult",
+                "--output-path", ".work/eas-visual/mac"]),
+            ("ios-visual-tests", [py, "scripts/run_ios_brand_checks.py", "--timeout-seconds", "900", "--attempts", "1"]),
+        ]
     return steps
 
 
@@ -85,6 +96,8 @@ def execute(stage):
     save()
     try:
         record["host"] = host_check()
+        if stage == "visual":
+            (ROOT / ".work/eas-visual").mkdir(parents=True, exist_ok=True)
         env = os.environ.copy()
         env.update({"FLASH_LOCAL_ENABLE_LES": "1", "FLASH_LOCAL_ENABLE_FLINT": "1",
                     "ORNITH_LES_CPU_CONTROL": "1", "GITHUB_WORKSPACE": str(ROOT)})
@@ -103,6 +116,10 @@ def execute(stage):
                 text = (OUTPUT / (name + ".log")).read_text()
                 if "FLINT_API_CONTROL" not in text or "routingTrace=true" not in text or "unload=true" not in text:
                     raise RuntimeError("Native API success marker missing: " + name)
+            if name == "mac-visual-tests":
+                text = (OUTPUT / (name + ".log")).read_text()
+                if "FLINT_RENDER unloadedPanes=3 appearances=2 realControls=true modelLoaded=false trainedInference=false" not in text:
+                    raise RuntimeError("Flint native captures were not executed")
             print("Passed: " + name, flush=True)
         record["status"] = "passed"
     except BaseException as error:
@@ -122,7 +139,9 @@ def collect():
         ".work/tokenizer-build.log", ".work/runtime/build-manifest.json",
         ".work/ornith-les-runtime/build.log", ".work/ornith-les-runtime/build-manifest.json",
         ".work/flint-eas-graph/**/*.json", ".work/flint-eas-graph/**/*.log",
-        ".work/flint-eas-protocol/**/*.json"]
+        ".work/flint-eas-protocol/**/*.json", ".work/eas-visual/mac/**/*.png",
+        ".work/eas-visual/mac/**/*.json", "brand-ios/**/*.png", "brand-ios/**/*.json",
+        "ios-brand*.log"]
     files = {p for pattern in patterns for p in ROOT.glob(pattern) if p.is_file() and not p.is_symlink()}
     index = []
     with zipfile.ZipFile(OUTPUT / "reports.zip", "w", compression=zipfile.ZIP_DEFLATED) as archive:
@@ -138,7 +157,7 @@ def collect():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--stage", choices=["native", "compile"], default="native")
+    parser.add_argument("--stage", choices=["native", "compile", "visual"], default="native")
     parser.add_argument("--plan", action="store_true", help="Print commands only; does not execute a build")
     parser.add_argument("--collect", action="store_true")
     args = parser.parse_args()

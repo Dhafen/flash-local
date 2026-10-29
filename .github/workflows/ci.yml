@@ -299,14 +299,22 @@ jobs:
       - name: macOS brand review in light and dark
         if: github.event_name != 'workflow_dispatch' || !inputs.provisioning_only
         run: |
+          flint_visual=()
+          if test "$FLASH_LOCAL_ENABLE_FLINT" = 1; then
+            flint_visual+=(-only-testing:MinirunTests/FlintRenderTests)
+          fi
           xcodebuild test -project Apps/Minirun/Minirun.xcodeproj $XCODEBUILD_FLAGS \
             -scheme Minirun-macOS -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO \
             -only-testing:MinirunTests/ForkBrandRenderTests -resultBundlePath mac-brand.xcresult \
             -only-testing:MinirunTests/REAMChatRenderTests \
             -only-testing:MinirunTests/OrnithPerformanceRenderTests \
             -only-testing:MinirunTests/OrnithLESRenderTests \
+            "${flint_visual[@]}" \
             2>&1 | tee mac-brand.log | tail -50
           grep -E 'ForkBrandRenderTests.*passed' mac-brand.log
+          if test "$FLASH_LOCAL_ENABLE_FLINT" = 1; then
+            grep 'FLINT_RENDER unloadedPanes=3 appearances=2 realControls=true modelLoaded=false trainedInference=false' mac-brand.log
+          fi
           xcrun xcresulttool export attachments --path mac-brand.xcresult --output-path brand-macos
 
       - name: Package tests (MinirunKit)

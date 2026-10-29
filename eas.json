@@ -27,6 +27,12 @@
       "env": {
         "FLASH_LOCAL_EAS_STAGE": "compile"
       }
+    },
+    "flint-visual": {
+      "extends": "flint-native",
+      "env": {
+        "FLASH_LOCAL_EAS_STAGE": "visual"
+      }
     }
   }
 }

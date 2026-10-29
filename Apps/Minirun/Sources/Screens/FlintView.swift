@@ -11,8 +11,12 @@ import AppKit
 struct FlintView: View {
     @Bindable var model: FlintAppModel
     @Environment(\.scenePhase) private var scenePhase
-    private enum Pane: String, CaseIterable { case chat = "Chatt", api = "API", measurements = "Prestanda" }
-    @State private var pane: Pane = .chat
+    enum Pane: String, CaseIterable { case chat = "Chatt", api = "API", measurements = "Prestanda" }
+    @State private var pane: Pane
+    init(model: FlintAppModel, pane: Pane = .chat) {
+        self._model = Bindable(wrappedValue: model)
+        self._pane = State(initialValue: pane)
+    }
     var body: some View {
         VStack(spacing: 0) {
             Picker("Flint", selection: $pane) {

@@ -38,7 +38,7 @@ class IOSBrandGateTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "No available"):
                 visual.find_simulator()
 
-    def visual_gate_with_fake_xcodebuild(self, *, returncode, output, les_enabled=False):
+    def visual_gate_with_fake_xcodebuild(self, *, returncode, output, les_enabled=False, flint_enabled=False):
         class CompletedPopen:
             pid = 999999
             def __init__(self, argv, stdout, stderr, start_new_session):
@@ -46,7 +46,7 @@ class IOSBrandGateTests(unittest.TestCase):
                 self.assertions = (
                     "-parallel-testing-enabled" in argv
                     and "NO" in argv
-                    and sum(arg.startswith("-only-testing:") for arg in argv) == (4 if les_enabled else 3)
+                    and sum(arg.startswith("-only-testing:") for arg in argv) == 3 + int(les_enabled) + int(flint_enabled)
                 )
                 stdout.write(output)
                 stdout.flush()
@@ -54,7 +54,7 @@ class IOSBrandGateTests(unittest.TestCase):
                 return returncode
 
         with tempfile.TemporaryDirectory() as d:
-            with mock.patch.dict(visual.os.environ, {"FLASH_LOCAL_ENABLE_LES": "1" if les_enabled else "0"}), mock.patch.object(visual.subprocess, "Popen", CompletedPopen):
+            with mock.patch.dict(visual.os.environ, {"FLASH_LOCAL_ENABLE_LES": "1" if les_enabled else "0", "FLASH_LOCAL_ENABLE_FLINT": "1" if flint_enabled else "0"}), mock.patch.object(visual.subprocess, "Popen", CompletedPopen):
                 return visual.run_test_attempt(
                     "FAKE-SIM", seconds=120,
                     log=Path(d) / "ios-brand.log",
@@ -96,6 +96,16 @@ class IOSBrandGateTests(unittest.TestCase):
         self.assertTrue(
             self.visual_gate_with_fake_xcodebuild(returncode=0, output=all_four, les_enabled=True)
         )
+
+    def test_flint_requires_all_suites_and_actual_capture_marker(self):
+        all_five = "** TEST SUCCEEDED **\n" + "".join(
+            f"Test Suite '{suite.rsplit('/', 1)[-1]}' passed\n"
+            for suite in (*visual.TEST_SUITES, visual.LES_SUITE, visual.FLINT_SUITE)
+        )
+        self.assertFalse(self.visual_gate_with_fake_xcodebuild(returncode=0, output=all_five,
+            les_enabled=True, flint_enabled=True))
+        self.assertTrue(self.visual_gate_with_fake_xcodebuild(returncode=0, output=all_five + visual.FLINT_MARKER,
+            les_enabled=True, flint_enabled=True))
 
 
 if __name__ == "__main__":

@@ -20,6 +20,7 @@ before dispatch; never upgrade billing or choose a large worker implicitly.
 eas account:usage dhafgard --json --non-interactive
 eas build --platform ios --profile flint-native --non-interactive --no-wait
 eas build --platform ios --profile flint-compile --non-interactive --no-wait
+eas build --platform ios --profile flint-visual --non-interactive --no-wait
 ```
 
 `flint-native` builds symbol-isolated Mac/iPhone/Simulator frameworks, then
@@ -28,6 +29,10 @@ ownership/sampling/KV/routing controls. It downloads only metadata, never the
 26 GB trained model. `flint-compile` adds the existing tokenizer and LES runtimes,
 targeted package tests, Mac app compilation and an unsigned physical-iPhone
 Release compilation. Models and credentials are excluded by `.easignore`.
+`flint-visual` also captures the three unloaded Flint panes in both appearances
+on Mac and Simulator, alongside the four existing visual suites. Its gate
+requires actual capture markers; skipped/empty tests cannot silently pass.
+Inspect the exported PNGs before treating visual review as complete.
 
 Both profiles preserve full logs and a source-bound JSON record in their build
 artifacts, including on failure. A green job is only evidence for its listed
