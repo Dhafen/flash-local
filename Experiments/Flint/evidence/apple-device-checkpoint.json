@@ -1,0 +1,116 @@
+{
+  "schemaVersion": 1,
+  "runURL": "https://expo.dev/accounts/dhafgard/projects/flash-local/builds/20aab523-248f-4a3e-b04d-bdde58ea1d7d",
+  "sourceRevision": "e9cad1be2c2f8e61f9df4c27d3ea953a1277ed80",
+  "host": {
+    "platform": "macOS",
+    "architecture": "arm64",
+    "xcode": "Xcode 26.2\nBuild version 17C52",
+    "sourceRevision": "e9cad1be2c2f8e61f9df4c27d3ea953a1277ed80"
+  },
+  "stage": "partial-device-and-simulator-controls",
+  "checks": [
+    {
+      "name": "python-tests",
+      "exitCode": 0,
+      "seconds": 5.796877834000007
+    },
+    {
+      "name": "flint-frameworks",
+      "exitCode": 0,
+      "seconds": 182.68811429200002
+    },
+    {
+      "name": "flint-graphs",
+      "exitCode": 0,
+      "seconds": 33.97898699999999
+    },
+    {
+      "name": "flint-metadata",
+      "exitCode": 0,
+      "seconds": 2.410671999999977
+    },
+    {
+      "name": "flint-protocol",
+      "exitCode": 0,
+      "seconds": 1.7057507920000035
+    },
+    {
+      "name": "flint-api-f32",
+      "exitCode": 0,
+      "seconds": 0.7060512499999732
+    },
+    {
+      "name": "flint-api-q4-1",
+      "exitCode": 0,
+      "seconds": 0.5946710420000159
+    },
+    {
+      "name": "flint-api-256-experts",
+      "exitCode": 0,
+      "seconds": 0.5462817910000126
+    },
+    {
+      "name": "tokenizer-frameworks",
+      "exitCode": 0,
+      "seconds": 113.24416258299999
+    },
+    {
+      "name": "les-frameworks",
+      "exitCode": 0,
+      "seconds": 153.11679908400004
+    },
+    {
+      "name": "les-framework-integrity",
+      "exitCode": 0,
+      "seconds": 0.04068408400007684
+    },
+    {
+      "name": "resolve-packages",
+      "exitCode": 0,
+      "seconds": 28.64583429100003
+    },
+    {
+      "name": "mac-app-compile",
+      "exitCode": 0,
+      "seconds": 71.22828729100002
+    },
+    {
+      "name": "iphone-release-compile",
+      "exitCode": 0,
+      "seconds": 231.03925774999993
+    },
+    {
+      "name": "apple-test-host",
+      "exitCode": 0,
+      "seconds": 0.6001425409999683
+    },
+    {
+      "name": "ios-visual-tests",
+      "exitCode": 1,
+      "seconds": 203.82898062499999
+    }
+  ],
+  "artifactIndexHashesVerified": 101,
+  "macAppCompilePassed": true,
+  "unsignedPhysicalIPhoneReleaseCompilePassed": true,
+  "simulatorSuitesPassed": [
+    "FlintRenderTests",
+    "OrnithLESRenderTests",
+    "OrnithPerformanceRenderTests",
+    "REAMChatRenderTests"
+  ],
+  "simulatorSuitesFailed": [
+    "ForkBrandRenderTests"
+  ],
+  "failure": "Windows archive converted the hash-bound OpenSourceNotices.txt from LF to CRLF; no license content change in Git.",
+  "appleHostDiagnosis": "Custom build steps use System bootstrap; genuine com.apple.testmanagerd is registered in the existing gui/501 session.",
+  "allSwiftPackageTestsPassed": false,
+  "visualReviewComplete": false,
+  "fullReleaseGatesPassed": false,
+  "trainedModelNumericsVerified": false,
+  "physicalIPhoneInferenceVerified": false,
+  "performanceMeasured": false,
+  "signingAttempted": false,
+  "testFlightUploaded": false
+}

@@ -44,6 +44,14 @@ Simulator controls now precede host XCTest, and the ephemeral worker runs
 Apple's normal `xcodebuild -runFirstLaunch` setup with bounded diagnostics.
 Tests run serially. No security settings are disabled, and a missing service
 still fails the tests and prevents delivery; initialization is not test proof.
+The next worker audit confirmed its steps run in the `System` bootstrap while
+Apple's `com.apple.testmanagerd` is already registered in `gui/501`. Mac XCTest
+therefore enters the existing user session via `launchctl asuser` and drops
+back to that same unprivileged user before launching Xcode. A real `Aqua`
+bootstrap is required; unrelated credentials are not forwarded. Empty/skipped
+suite selections cannot replace executed tests or the local TCP round trip.
+Hash-bound LF notices are also kept as LF in Windows-made source archives;
+the original Qwen license intentionally retains its published CRLF bytes.
 
 Both profiles preserve full logs and a source-bound JSON record in their build
 artifacts, including on failure. A green job is only evidence for its listed

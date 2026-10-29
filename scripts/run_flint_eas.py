@@ -14,6 +14,7 @@ import os
 import pathlib
 import platform
 import plistlib
+import re
 import subprocess
 import sys
 import time
@@ -169,6 +170,57 @@ def host_check():
     return {"platform": "macOS", "architecture": "arm64", "xcode": xcode.strip(), "sourceRevision": revision}
 
 
+def verify_step_log(name, content):
+    """A zero process status must not admit empty or skipped test selections."""
+    if name.startswith("flint-api-"):
+        if "FLINT_API_CONTROL" not in content or "routingTrace=true" not in content or "unload=true" not in content:
+            raise RuntimeError("Native API success marker missing: " + name)
+    suites = ()
+    if name == "flint-swift-tests":
+        suites = ("FlintPolicyTests", "FlintStreamTests", "LocalFlintProtocolTests", "LocalModelAPITests")
+        for marker in ("ORNITH_LOCAL_API realTCP=true auth=true json=true sse=true reasoningSeparated=true",
+                       "LOCAL_API_TOOL_ROUNDTRIP realTCP=true structuredArguments=true matchedToolResult=true"):
+            if marker not in content:
+                raise RuntimeError("Required API round trip did not execute")
+    elif name == "mac-visual-tests":
+        suites = ("ForkBrandRenderTests", "REAMChatRenderTests", "OrnithPerformanceRenderTests",
+                  "OrnithLESRenderTests", "FlintRenderTests")
+        if "FLINT_RENDER unloadedPanes=3 appearances=2 realControls=true modelLoaded=false trainedInference=false" not in content:
+            raise RuntimeError("Flint native captures were not executed")
+    for suite in suites:
+        if ("Test Suite '" + suite + "' passed") not in content or not re.search(
+                r"Test Case [^\n]*\b" + re.escape(suite) + r"\b[^\n]* passed", content):
+            raise RuntimeError("Required XCTest suite did not execute and pass: " + suite)
+
+
+def gui_command(command, env, uid):
+    """Join the already logged-in EAS user's bootstrap, then drop root again.
+
+    The worker launches custom steps in the System bootstrap. Apple's genuine
+    testmanagerd is in gui/<uid>; no agent is installed or reconfigured here.
+    Only explicit build settings are carried across sudo, never credentials.
+    """
+    if type(uid) is not int or uid <= 0:
+        raise RuntimeError("Apple tests must run as the existing non-root EAS user")
+    settings = {key: env[key] for key in (
+        "PATH", "HOME", "USER", "LOGNAME", "TMPDIR", "LANG", "DEVELOPER_DIR",
+        "GITHUB_WORKSPACE", "FLASH_LOCAL_ENABLE_LES", "FLASH_LOCAL_ENABLE_FLINT",
+        "ORNITH_LES_CPU_CONTROL", "TEST_RUNNER_ORNITH_LES_CPU_CONTROL",
+    ) if key in env}
+    return ["sudo", "-n", "/bin/launchctl", "asuser", str(uid),
+            "sudo", "-n", "-H", "-u", "#" + str(uid), "--", "/usr/bin/env", "-i",
+            *[key + "=" + value for key, value in settings.items()], *command]
+
+
+def check_gui_context(env, uid):
+    probe = subprocess.run(gui_command(["/bin/launchctl", "managername"], env, uid),
+                           capture_output=True, text=True, timeout=30)
+    if probe.returncode or probe.stdout.strip() != "Aqua":
+        raise RuntimeError("Apple XCTest did not enter the existing Aqua session: " +
+                           (probe.stdout + probe.stderr)[-2000:])
+    return {"manager": "Aqua", "userID": uid, "credentialsInherited": False}
+
+
 def execute(stage):
     OUTPUT.mkdir(parents=True, exist_ok=True)
     record = {"schemaVersion": 1, "stage": stage, "status": "running", "steps": [],
@@ -187,11 +239,24 @@ def execute(stage):
             (ROOT / ".work/eas-visual").mkdir(parents=True, exist_ok=True)
         env = os.environ.copy()
         env.update({"FLASH_LOCAL_ENABLE_LES": "1", "FLASH_LOCAL_ENABLE_FLINT": "1",
-                    "ORNITH_LES_CPU_CONTROL": "1", "GITHUB_WORKSPACE": str(ROOT)})
+                    "ORNITH_LES_CPU_CONTROL": "1", "TEST_RUNNER_ORNITH_LES_CPU_CONTROL": "1",
+                    "GITHUB_WORKSPACE": str(ROOT)})
+        if stage in ("compile", "visual"):
+            # Verify the host transition before spending time rebuilding native
+            # slices. A missing desktop session must remain a visible blocker.
+            record["testBootstrap"] = check_gui_context(env, os.getuid())
+            save()
+            print("Verified existing Aqua test session; build user preserved", flush=True)
         for name, command in plan(stage):
             print("Starting native check: " + name, flush=True)
             started = time.monotonic()
             with (OUTPUT / (name + ".log")).open("w", encoding="utf-8") as log:
+                if name in ("flint-swift-tests", "mac-visual-tests"):
+                    context = check_gui_context(env, os.getuid())
+                    log.write(json.dumps({"testBootstrap": context}) + "\n")
+                    log.write("EAS_TEST_BOOTSTRAP manager=Aqua sameUser=true credentialsInherited=false\n")
+                    log.flush()
+                    command = gui_command(command, env, os.getuid())
                 result = subprocess.run(command, cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
             item = {"name": name, "exitCode": result.returncode, "seconds": time.monotonic() - started}
             record["steps"].append(item)
@@ -199,14 +264,7 @@ def execute(stage):
             if result.returncode:
                 print((OUTPUT / (name + ".log")).read_text(errors="replace")[-16000:], flush=True)
                 raise RuntimeError("Native check failed: " + name)
-            if name.startswith("flint-api-"):
-                text = (OUTPUT / (name + ".log")).read_text()
-                if "FLINT_API_CONTROL" not in text or "routingTrace=true" not in text or "unload=true" not in text:
-                    raise RuntimeError("Native API success marker missing: " + name)
-            if name == "mac-visual-tests":
-                text = (OUTPUT / (name + ".log")).read_text()
-                if "FLINT_RENDER unloadedPanes=3 appearances=2 realControls=true modelLoaded=false trainedInference=false" not in text:
-                    raise RuntimeError("Flint native captures were not executed")
+            verify_step_log(name, (OUTPUT / (name + ".log")).read_text(errors="replace"))
             print("Passed: " + name, flush=True)
         record["status"] = "passed"
     except BaseException as error:

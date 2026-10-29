@@ -1,2 +1,6 @@
 # The upstream model license is hash-bound verbatim, including its CRLF bytes.
 Apps/Minirun/Resources/QwenModelLicense.txt -text
+# These upstream LF notices are hash-bound too. Windows-made EAS archives must
+# carry the same license bytes as an Apple/Git checkout.
+Apps/Minirun/Resources/OpenSourceNotices.txt text eol=lf
+Apps/Minirun/Resources/Flint-LICENSE.txt text eol=lf
