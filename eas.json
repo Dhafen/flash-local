@@ -33,6 +33,18 @@
       "env": {
         "FLASH_LOCAL_EAS_STAGE": "visual"
       }
+    },
+    "flint-qpack": {
+      "extends": "flint-native",
+      "env": {
+        "FLASH_LOCAL_EAS_STAGE": "qpack"
+      }
+    },
+    "flint-regression": {
+      "extends": "flint-native",
+      "env": {
+        "FLASH_LOCAL_EAS_STAGE": "regression"
+      }
     }
   }
 }

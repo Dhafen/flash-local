@@ -72,6 +72,10 @@ def restore_git_symlinks(root):
 
 def plan(stage):
     py = sys.executable
+    if stage == "qpack":
+        return [("python-tests", [py, "-m", "unittest", "discover", "-s", "scripts/tests", "-p", "test_*.py", "-v"]),
+                ("apple-test-host", [py, "scripts/run_flint_eas.py", "--prepare-tests"]),
+                ("qpack-ci", [py, "scripts/run_eas_regressions.py", "qpack"])]
     steps = [
         ("python-tests", [py, "-m", "unittest", "discover", "-s", "scripts/tests", "-p", "test_*.py", "-v"]),
         ("flint-frameworks", [py, "scripts/build_flint_runtime.py"]),
@@ -99,6 +103,9 @@ def plan(stage):
                 "-configuration", "Release", "-destination", "generic/platform=iOS", "CODE_SIGNING_ALLOWED=NO", *FLAGS]),
             ("apple-test-host", [py, "scripts/run_flint_eas.py", "--prepare-tests"]),
         ]
+    elif stage == "regression":
+        steps += [("apple-test-host", [py, "scripts/run_flint_eas.py", "--prepare-tests"]),
+                  ("regression-ci", [py, "scripts/run_eas_regressions.py", "regression"])]
     elif stage != "native":
         raise ValueError("Unknown EAS validation stage")
     if stage == "visual":
@@ -206,6 +213,7 @@ def gui_command(command, env, uid):
         "PATH", "HOME", "USER", "LOGNAME", "TMPDIR", "LANG", "DEVELOPER_DIR",
         "GITHUB_WORKSPACE", "FLASH_LOCAL_ENABLE_LES", "FLASH_LOCAL_ENABLE_FLINT",
         "ORNITH_LES_CPU_CONTROL", "TEST_RUNNER_ORNITH_LES_CPU_CONTROL",
+        "EAS_BUILD_ID", "EAS_BUILD_GIT_COMMIT_HASH",
     ) if key in env}
     return ["sudo", "-n", "/bin/launchctl", "asuser", str(uid),
             "sudo", "-n", "-H", "-u", "#" + str(uid), "--", "/usr/bin/env", "-i",
@@ -241,7 +249,7 @@ def execute(stage):
         env.update({"FLASH_LOCAL_ENABLE_LES": "1", "FLASH_LOCAL_ENABLE_FLINT": "1",
                     "ORNITH_LES_CPU_CONTROL": "1", "TEST_RUNNER_ORNITH_LES_CPU_CONTROL": "1",
                     "GITHUB_WORKSPACE": str(ROOT)})
-        if stage in ("compile", "visual"):
+        if stage != "native":
             # Verify the host transition before spending time rebuilding native
             # slices. A missing desktop session must remain a visible blocker.
             record["testBootstrap"] = check_gui_context(env, os.getuid())
@@ -251,7 +259,7 @@ def execute(stage):
             print("Starting native check: " + name, flush=True)
             started = time.monotonic()
             with (OUTPUT / (name + ".log")).open("w", encoding="utf-8") as log:
-                if name in ("flint-swift-tests", "mac-visual-tests"):
+                if name in ("flint-swift-tests", "mac-visual-tests", "qpack-ci", "regression-ci"):
                     context = check_gui_context(env, os.getuid())
                     log.write(json.dumps({"testBootstrap": context}) + "\n")
                     log.write("EAS_TEST_BOOTSTRAP manager=Aqua sameUser=true credentialsInherited=false\n")
@@ -286,7 +294,10 @@ def collect():
         ".work/flint-eas-graph/**/*.json", ".work/flint-eas-graph/**/*.log",
         ".work/flint-eas-protocol/**/*.json", ".work/eas-visual/mac/**/*.png",
         ".work/eas-visual/mac/**/*.json", "brand-ios/**/*.png", "brand-ios/**/*.json",
-        "ios-brand*.log"]
+        "brand-macos/**/*.png", "brand-macos/**/*.json", "streaming-tests.log", "parity-tests.log",
+        "app-tests.log", "package-tests.log", "flint-swift-tests.log", "ios-build.log", "flint-device-build.log", "mac-brand.log",
+        ".work/les-*.log", ".work/les-*.json", ".work/ornith-thinking-tokenizer.log",
+        ".work/swiftlet-validation/*.log", "Experiments/OrnithPerformance/*.log", "ios-brand*.log"]
     files = {p for pattern in patterns for p in ROOT.glob(pattern) if p.is_file() and not p.is_symlink()}
     index = []
     with zipfile.ZipFile(OUTPUT / "reports.zip", "w", compression=zipfile.ZIP_DEFLATED) as archive:
@@ -302,7 +313,7 @@ def collect():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--stage", choices=["native", "compile", "visual"], default="native")
+    parser.add_argument("--stage", choices=["native", "compile", "visual", "qpack", "regression"], default="native")
     parser.add_argument("--plan", action="store_true", help="Print commands only; does not execute a build")
     parser.add_argument("--collect", action="store_true")
     parser.add_argument("--prepare-tests", action="store_true")

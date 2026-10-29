@@ -11,7 +11,7 @@ build:
           command -v cmake >/dev/null || brew install cmake
           command -v python3.12 >/dev/null || brew install python@3.12
           python3.12 -m venv .work/eas-python
-          .work/eas-python/bin/python -m pip install -r Experiments/Flint/reference-requirements.txt
+          .work/eas-python/bin/python -m pip install -r Experiments/Flint/eas-requirements.txt
     - run:
         name: Run the selected real native checks
         command: .work/eas-python/bin/python scripts/run_flint_eas.py --stage "$FLASH_LOCAL_EAS_STAGE"

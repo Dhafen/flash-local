@@ -1,0 +1,3 @@
+-r reference-requirements.txt
+# Build orchestration only; does not enter the iPhone app or model runtime.
+PyYAML==6.0.3

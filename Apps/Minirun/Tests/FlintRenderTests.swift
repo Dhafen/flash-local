@@ -53,11 +53,16 @@ final class FlintRenderTests: XCTestCase {
                 window.isHidden = true; window.rootViewController = nil
                 let platform = "ios"
                 #else
-                let host = NSHostingView(rootView: content)
+                // cacheDisplay does not include NSWindow's background. Capture
+                // the real controls over an opaque native background so light
+                // text/alpha cannot disappear when the PNG is reviewed.
+                let host = NSHostingView(rootView: content.background(Color(nsColor: .windowBackgroundColor)))
                 let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 430, height: 1100),
                     styleMask: .borderless, backing: .buffered, defer: false)
                 window.isReleasedWhenClosed = false
                 window.appearance = NSAppearance(named: appearance == .dark ? .darkAqua : .aqua)
+                window.backgroundColor = .windowBackgroundColor
+                host.appearance = window.appearance
                 window.contentView = host; window.orderFront(nil)
                 host.frame = window.contentLayoutRect
                 host.layoutSubtreeIfNeeded()
@@ -65,6 +70,7 @@ final class FlintRenderTests: XCTestCase {
                 host.displayIfNeeded()
                 let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
                 host.cacheDisplay(in: host.bounds, to: bitmap)
+                XCTAssertGreaterThan(try XCTUnwrap(bitmap.colorAt(x: 0, y: 0)).alphaComponent, 0.99)
                 data = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
                 window.close()
                 let platform = "macos"

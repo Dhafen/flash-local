@@ -1,0 +1,186 @@
+{
+  "schemaVersion": 1,
+  "runURL": "https://expo.dev/accounts/dhafgard/projects/flash-local/builds/ced32b44-f365-4080-b3b2-f76d24f19f73",
+  "sourceRevision": "070c545e2ed06814dad13891edcd60a8b7e8d684",
+  "host": {
+    "platform": "macOS",
+    "architecture": "arm64",
+    "xcode": "Xcode 26.2\nBuild version 17C52",
+    "sourceRevision": "070c545e2ed06814dad13891edcd60a8b7e8d684"
+  },
+  "testBootstrap": {
+    "manager": "Aqua",
+    "userID": 501,
+    "credentialsInherited": false
+  },
+  "stage": "integrated-native-app-and-targeted-tests",
+  "status": "passed",
+  "checks": [
+    {
+      "name": "python-tests",
+      "exitCode": 0,
+      "seconds": 6.3234508330000025
+    },
+    {
+      "name": "flint-frameworks",
+      "exitCode": 0,
+      "seconds": 186.106800375
+    },
+    {
+      "name": "flint-graphs",
+      "exitCode": 0,
+      "seconds": 33.993904625
+    },
+    {
+      "name": "flint-metadata",
+      "exitCode": 0,
+      "seconds": 2.214855416999967
+    },
+    {
+      "name": "flint-protocol",
+      "exitCode": 0,
+      "seconds": 1.7137481659999594
+    },
+    {
+      "name": "flint-api-f32",
+      "exitCode": 0,
+      "seconds": 0.7004959579999763
+    },
+    {
+      "name": "flint-api-q4-1",
+      "exitCode": 0,
+      "seconds": 0.640338292000024
+    },
+    {
+      "name": "flint-api-256-experts",
+      "exitCode": 0,
+      "seconds": 0.6240114999999946
+    },
+    {
+      "name": "tokenizer-frameworks",
+      "exitCode": 0,
+      "seconds": 111.49392716699998
+    },
+    {
+      "name": "les-frameworks",
+      "exitCode": 0,
+      "seconds": 158.389510708
+    },
+    {
+      "name": "les-framework-integrity",
+      "exitCode": 0,
+      "seconds": 0.04814908399998785
+    },
+    {
+      "name": "resolve-packages",
+      "exitCode": 0,
+      "seconds": 31.788923416999978
+    },
+    {
+      "name": "mac-app-compile",
+      "exitCode": 0,
+      "seconds": 72.17546445899995
+    },
+    {
+      "name": "iphone-release-compile",
+      "exitCode": 0,
+      "seconds": 223.69064241700005
+    },
+    {
+      "name": "apple-test-host",
+      "exitCode": 0,
+      "seconds": 0.5636725000000524
+    },
+    {
+      "name": "ios-visual-tests",
+      "exitCode": 0,
+      "seconds": 187.86822570799995
+    },
+    {
+      "name": "flint-swift-tests",
+      "exitCode": 0,
+      "seconds": 95.87213391699993
+    },
+    {
+      "name": "mac-visual-tests",
+      "exitCode": 0,
+      "seconds": 30.322611082999856
+    },
+    {
+      "name": "mac-visual-export",
+      "exitCode": 0,
+      "seconds": 0.15000854200002323
+    }
+  ],
+  "executedTargetedXCTestCases": {
+    "FlintPolicyTests": 2,
+    "FlintStreamTests": 7,
+    "LocalFlintProtocolTests": 7,
+    "LocalModelAPITests": 28
+  },
+  "realLocalTCPToolRoundTrip": true,
+  "roundTripUsesTrainedModel": false,
+  "simulatorVisualSuitesPassed": true,
+  "macVisualSuitesPassed": true,
+  "reviewedFlintCaptures": [
+    {
+      "name": "flint-ios-unloaded-Prestanda-dark",
+      "sha256": "35a61ba89da0afdfd1b521114e19f61023a3c1a41b97dd80a5989f8444b79dc8"
+    },
+    {
+      "name": "flint-ios-unloaded-Prestanda-light",
+      "sha256": "41e4a01051672a283b59d6dfaa83dfb1df21fed7e2a9d51b70cfe5ad18fbd347"
+    },
+    {
+      "name": "flint-ios-unloaded-API-dark",
+      "sha256": "45ad885d7b43b43efa4daa5b385de31640fce3627997dd22ea590aa4654b040f"
+    },
+    {
+      "name": "flint-ios-unloaded-API-light",
+      "sha256": "e5b68c9d64f803ca9f3ac50bb33998283e4c7c9a0df3f345da1b811e0facbc4b"
+    },
+    {
+      "name": "flint-ios-unloaded-Chatt-dark",
+      "sha256": "971031037021a1c73870e178a44d230cc132dcc4e4c6be3967f79287d303d38a"
+    },
+    {
+      "name": "flint-ios-unloaded-Chatt-light",
+      "sha256": "f7927fb12cc0241ed2fc5ef5b2cb05051c37162ad1962d34244e53e6860e5f41"
+    },
+    {
+      "name": "flint-macos-unloaded-Prestanda-dark",
+      "sha256": "fed3881b169487ae39084fb546a799158523a28fd8859873c706a031395390c3"
+    },
+    {
+      "name": "flint-macos-unloaded-Prestanda-light",
+      "sha256": "6136574e89ec4c86d9035e61f851ada0c4b9433529eb8abfa988833cdf5a89f6"
+    },
+    {
+      "name": "flint-macos-unloaded-API-dark",
+      "sha256": "f89cdd4a6d5249cbbcb9306682b2d79ffd038e6632e577203270c2e6894544f5"
+    },
+    {
+      "name": "flint-macos-unloaded-API-light",
+      "sha256": "6c1f2cd99c4dc068f7ee553e69222a9ed4377256c70429fcf9d8ef0e0776b4d2"
+    },
+    {
+      "name": "flint-macos-unloaded-Chatt-dark",
+      "sha256": "3948bcf9d42a8ac9ba76b84521b8f29770b87986ae08b6f40d50b65c9775f1cc"
+    },
+    {
+      "name": "flint-macos-unloaded-Chatt-light",
+      "sha256": "b8e1deff6bbfe07132722e8eb445a3cfb6faedeb1ce11efe0b89534dbfbd3e68"
+    }
+  ],
+  "visualReview": {
+    "iOSUnloadedPanes": "readable light/dark; real inactive/unloaded controls, no generated metrics",
+    "macUnloadedPanes": "capture transparency hides text in light appearance; test-host background fix required",
+    "complete": false
+  },
+  "fullQPackLESAndRegressionGatesPassed": false,
+  "trainedModelNumericsVerified": false,
+  "physicalIPhoneInferenceVerified": false,
+  "performanceMeasured": false,
+  "signingAttempted": false,
+  "testFlightUploaded": false
+}

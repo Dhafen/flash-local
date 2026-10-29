@@ -24,6 +24,8 @@ eas account:usage dhafgard --json --non-interactive
 eas build --platform ios --profile flint-native --non-interactive --no-wait
 eas build --platform ios --profile flint-compile --non-interactive --no-wait
 eas build --platform ios --profile flint-visual --non-interactive --no-wait
+eas build --platform ios --profile flint-qpack --non-interactive --no-wait
+eas build --platform ios --profile flint-regression --non-interactive --no-wait
 ```
 
 `flint-native` builds symbol-isolated Mac/iPhone/Simulator frameworks, then
@@ -36,6 +38,22 @@ Release compilation. Models and credentials are excluded by `.easignore`.
 on Mac and Simulator, alongside the four existing visual suites. Its gate
 requires actual capture markers; skipped/empty tests cannot silently pass.
 Inspect the exported PNGs before treating visual review as complete.
+
+The separate `flint-qpack` and `flint-regression` profiles run the checked-in
+QPack/Swiftlet and LES/app/package/parity workflow shell bodies respectively.
+They use separate free jobs to stay within EAS's per-job time limit. The adapter
+retains all selected numerical assertions and pipefail, resolves only the
+reviewed opt-in engine inputs, and fails on credentials or unknown expressions.
+The one host-path adjustment uses EAS's already checked Xcode 26.2 instead of
+GitHub's `/Applications/Xcode_26.2.app`. It does not edit the workflows or select
+their archive/signing/upload steps. PyYAML is a pinned build-only dependency.
+Each actual result records the source revision, shell-body hash and full log.
+Dry-run `--plan` output is never evidence that these checks executed.
+XcodeGen's local-package navigator ID also depends on the checkout basename.
+The generation wrapper uses a temporary source-only `flash-local` layout and
+copies back the canonical project. This retains the actual relative package
+references, schemes, app identities and signing settings while allowing EAS's
+`build` checkout to pass the same committed-project comparison.
 
 EAS build `7290041a-82a5-442d-957c-e377115f9d17` compiled the Mac app and
 package test bundles, then failed before executing XCTest because the worker's
