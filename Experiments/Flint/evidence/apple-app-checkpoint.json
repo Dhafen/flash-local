@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "runURL": "https://expo.dev/accounts/dhafgard/projects/flash-local/builds/97ef75bd-0907-4af4-8d06-003ee7c16a3d",
+  "sourceRevision": "b68cd8496d6f4a9aeee145932ec83b5748104f90",
+  "host": {
+    "platform": "macOS",
+    "architecture": "arm64",
+    "xcode": "Xcode 26.2\nBuild version 17C52",
+    "sourceRevision": "b68cd8496d6f4a9aeee145932ec83b5748104f90"
+  },
+  "stage": "partial-integrated-compile",
+  "checks": [
+    {
+      "name": "python-tests",
+      "exitCode": 0,
+      "seconds": 5.7750540829999935
+    },
+    {
+      "name": "flint-frameworks",
+      "exitCode": 0,
+      "seconds": 179.337816708
+    },
+    {
+      "name": "flint-graphs",
+      "exitCode": 0,
+      "seconds": 34.74712566699998
+    },
+    {
+      "name": "flint-metadata",
+      "exitCode": 0,
+      "seconds": 1.8821929999999725
+    },
+    {
+      "name": "flint-protocol",
+      "exitCode": 0,
+      "seconds": 1.8339563330000033
+    },
+    {
+      "name": "flint-api-f32",
+      "exitCode": 0,
+      "seconds": 0.6641022920000523
+    },
+    {
+      "name": "flint-api-q4-1",
+      "exitCode": 0,
+      "seconds": 0.632185292000031
+    },
+    {
+      "name": "flint-api-256-experts",
+      "exitCode": 0,
+      "seconds": 0.6309814169999868
+    },
+    {
+      "name": "tokenizer-frameworks",
+      "exitCode": 0,
+      "seconds": 113.29122583399999
+    },
+    {
+      "name": "les-frameworks",
+      "exitCode": 0,
+      "seconds": 154.53713029200003
+    },
+    {
+      "name": "les-framework-integrity",
+      "exitCode": 0,
+      "seconds": 0.04339562500001648
+    },
+    {
+      "name": "resolve-packages",
+      "exitCode": 0,
+      "seconds": 29.86204266599998
+    },
+    {
+      "name": "mac-app-compile",
+      "exitCode": 0,
+      "seconds": 67.22136650000004
+    },
+    {
+      "name": "flint-swift-tests",
+      "exitCode": 65,
+      "seconds": 63.45913375000009
+    }
+  ],
+  "macAppCompilePassed": true,
+  "swiftPackageTestsPassed": false,
+  "physicalIPhoneAppCompiled": false,
+  "visualCapturesExecuted": false,
+  "trainedInferenceVerified": false,
+  "iPhoneVerified": false,
+  "signingAttempted": false,
+  "testFlightUploaded": false,
+  "blockingFailure": "Windows source archive retained a Git symlink as a regular text file. Swift test target tried to compile its link target path as code.",
+  "repairRevision": "9978ecf9c8cae3371974c7ef5a80ca98d2a4ffa7",
+  "artifactSHA256": "a584c50face578266ec9639c938d7db5acb6e960a73ab0836e83d91d19af8b92"
+}
