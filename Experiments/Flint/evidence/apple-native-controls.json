@@ -1,0 +1,194 @@
+{
+  "schemaVersion": 1,
+  "runURL": "https://expo.dev/accounts/dhafgard/projects/flash-local/builds/12d8d5c7-da5a-4380-aaa7-4f1967749e83",
+  "sourceRevision": "478b1a7aeb24426bbbfaa883a38a128e819de433",
+  "host": {
+    "platform": "macOS",
+    "architecture": "arm64",
+    "xcode": "Xcode 26.2\nBuild version 17C52",
+    "sourceRevision": "478b1a7aeb24426bbbfaa883a38a128e819de433"
+  },
+  "stage": "native-only",
+  "checks": [
+    {
+      "name": "python-tests",
+      "exitCode": 0,
+      "seconds": 6.002867292000005
+    },
+    {
+      "name": "flint-frameworks",
+      "exitCode": 0,
+      "seconds": 173.065846625
+    },
+    {
+      "name": "flint-graphs",
+      "exitCode": 0,
+      "seconds": 35.456367666999995
+    },
+    {
+      "name": "flint-metadata",
+      "exitCode": 0,
+      "seconds": 2.0720549999999776
+    },
+    {
+      "name": "flint-protocol",
+      "exitCode": 0,
+      "seconds": 1.5727254579999794
+    },
+    {
+      "name": "flint-api-f32",
+      "exitCode": 0,
+      "seconds": 0.6454279170000063
+    },
+    {
+      "name": "flint-api-q4-1",
+      "exitCode": 0,
+      "seconds": 0.5893694590000109
+    },
+    {
+      "name": "flint-api-256-experts",
+      "exitCode": 0,
+      "seconds": 0.6331584160000148
+    }
+  ],
+  "frameworkSlices": [
+    {
+      "platform": "macos",
+      "sha256": "2e2652bb2971af64e956bb012e419807ef939c7f23e6d57d8fa06d7a2c300e25",
+      "exportedSymbols": [
+        "_flf_cancel",
+        "_flf_close",
+        "_flf_configure_sampling",
+        "_flf_copy_logits",
+        "_flf_evaluate",
+        "_flf_evaluate_for_sampling",
+        "_flf_is_eog",
+        "_flf_last_error",
+        "_flf_library_path",
+        "_flf_open",
+        "_flf_render_prompt",
+        "_flf_reset",
+        "_flf_revision",
+        "_flf_routing_json",
+        "_flf_sample",
+        "_flf_snapshot",
+        "_flf_token_piece",
+        "_flf_tokenize",
+        "_flf_trace_routes",
+        "_flf_vocab_size"
+      ],
+      "moduleImportVerified": true,
+      "symbolIsolated": true
+    },
+    {
+      "platform": "ios",
+      "sha256": "3abba53791e361428f455db2a1ed516d2d4e86c258569914b6e5f3e937a61ac8",
+      "exportedSymbols": [
+        "_flf_cancel",
+        "_flf_close",
+        "_flf_configure_sampling",
+        "_flf_copy_logits",
+        "_flf_evaluate",
+        "_flf_evaluate_for_sampling",
+        "_flf_is_eog",
+        "_flf_last_error",
+        "_flf_library_path",
+        "_flf_open",
+        "_flf_render_prompt",
+        "_flf_reset",
+        "_flf_revision",
+        "_flf_routing_json",
+        "_flf_sample",
+        "_flf_snapshot",
+        "_flf_token_piece",
+        "_flf_tokenize",
+        "_flf_trace_routes",
+        "_flf_vocab_size"
+      ],
+      "moduleImportVerified": true,
+      "symbolIsolated": true
+    },
+    {
+      "platform": "ios-simulator",
+      "sha256": "1eb07dfe5ebc6959e3d3ef0f3f4c358680773632e17e9c7322b31111c6d7663d",
+      "exportedSymbols": [
+        "_flf_cancel",
+        "_flf_close",
+        "_flf_configure_sampling",
+        "_flf_copy_logits",
+        "_flf_evaluate",
+        "_flf_evaluate_for_sampling",
+        "_flf_is_eog",
+        "_flf_last_error",
+        "_flf_library_path",
+        "_flf_open",
+        "_flf_render_prompt",
+        "_flf_reset",
+        "_flf_revision",
+        "_flf_routing_json",
+        "_flf_sample",
+        "_flf_snapshot",
+        "_flf_token_piece",
+        "_flf_tokenize",
+        "_flf_trace_routes",
+        "_flf_vocab_size"
+      ],
+      "moduleImportVerified": true,
+      "symbolIsolated": true
+    }
+  ],
+  "nativeFiles": {
+    "FlintPrompt.cpp": "a2ede0ad28064ece9df626eb275c944875002b5f9135b7bbc73c2619a38a2d2f",
+    "FlintTemplate.jinja": "44fd1b0f94b78d9cf554c5a207945e48fef698b279d65863a33a77d787ca411b",
+    "FlintModel.cpp": "897e2f70db93182a2bb91fc6d72c4fc0f2a48e0dd91f388381dadf5b59ffad4b",
+    "CMakeLists.txt": "350d7ebfe5f36a57dd1270d54be258f21d6272043260c46a280a60060a0a5c21",
+    "prompt-control.cpp": "a585789e0a487ba5c5a80e32fb1055587ba34d435265e5ed4a9d5ead8ac245e7",
+    "weight-control.cpp": "8c82366a22865e56c0b115a72e0add5e41b37e89f3c0f8bb97dade2cdc03c25a",
+    "FlashFlint.h": "1daafdb98699c7187dec2c73eda9bf6a171ee09a033a0ba69ae2a102a98f01af",
+    "FlintVocabulary.inc": "86ade582af758b4e03258b1fe10ba57783d734c963b3b93571c8127c610e94ee",
+    "exports.txt": "fa060dfee2bcfcc1bc8551449404055d4273f8163cd15085c9c8a30eec6f5375",
+    "FlintTemplate.h.in": "d5e92071ced557ec23336eed282c719777f51af95f9e2dabc57c3738210f0d5b",
+    "api-control.cpp": "0dba21cc096f665b7442ae341de2985bd365f36f358ef2920584e7e5ab5078c4",
+    "control.cpp": "56c798d534ae968d7a63c1a56e437ea3b585209232eb54c73e495bba3941a873",
+    "FlashFlint.cpp": "a5b520cee58cf5759c71f7790e32fba11030ba2ea9753a227e7af679def6cdc6",
+    "vocab-control.cpp": "2077665257557aedc390595478bc1fe9dcab6c87ea57e0d0b2149d7ca3e1d7fd",
+    "exports.map": "5797899765caabc4c12944901fe023543e8aebc6c1472ce29712c6093f6fb1ea",
+    "quantize-control.cpp": "accffeb064255e8e01ac2205bd14c413c26d579647265834b03bb5a5210fcd3b"
+  },
+  "graphControls": {
+    "cases": 39,
+    "allPassed": true,
+    "maximumAbsoluteErrorFP64": 2.3287371064828477e-06,
+    "syntheticOnly": true
+  },
+  "protocolControls": {
+    "schemaVersion": 1,
+    "vocabularyCases": 93,
+    "promptCases": 8,
+    "allTokenIDsEqual": true,
+    "allPromptBytesEqual": true,
+    "tensorCount": 0,
+    "weightsUsed": false,
+    "trainedInferenceVerified": false,
+    "iPhoneVerified": false,
+    "tokenizerSHA256": "a263cce0b7e2b03f7ee07ce809783ef4b47f160c3f268a4ea1524f638da45b68",
+    "prefixSHA256": "a4a3cfd21a3028b7a92057969f47874d0f1dc32f7cf3dd49988dbdcd5ce34390",
+    "vocabularySHA256": "1c90f0327bc4fef04fa6e9c86eb08a2673fbcd790948e6cdd9181e1ed2de4aed",
+    "tokenizersVersion": "0.23.3",
+    "jinjaVersion": "3.1.4",
+    "templateSHA256": "44fd1b0f94b78d9cf554c5a207945e48fef698b279d65863a33a77d787ca411b"
+  },
+  "pythonTests": {
+    "run": 168,
+    "failed": 0,
+    "skipped": 1,
+    "skipReason": "cryptography absent: independent Apple JWT signature verification"
+  },
+  "artifactSHA256": "a25844f27408c424bcd00d951c958bd2ef311ea65bf3450bcf90fb2b7fd0d41a",
+  "swiftAppCompiled": false,
+  "trainedInferenceVerified": false,
+  "iPhoneVerified": false,
+  "fullReleaseGatesPassed": false,
+  "signingAttempted": false,
+  "testFlightUploaded": false
+}
