@@ -19,7 +19,7 @@ class ProjectGenerationLayoutTests(unittest.TestCase):
                 directory.mkdir(parents=True)
                 (directory / "fixture.txt").write_text(name)
             for name in ("project.yml", "Info-iOS.plist", "Info-macOS.plist", "Minirun-iOS.entitlements", "Minirun-macOS.entitlements"):
-                (root / "Apps/Minirun" / name).write_text(name)
+                (root / "Apps/Minirun" / name).write_bytes((name + "\r\nfixture\r\n").encode())
             (root / "Package.swift").write_text("root fixture")
             experiment = root / "Experiments/OrnithPerformance"
             experiment.mkdir(parents=True)
@@ -31,6 +31,8 @@ class ProjectGenerationLayoutTests(unittest.TestCase):
             self.assertEqual(mirror.name, "flash-local")
             self.assertEqual((app / "Sources/fixture.txt").read_text(), "Sources")
             self.assertEqual((mirror / "Package.swift").read_text(), "root fixture")
+            self.assertEqual((app / "Info-iOS.plist").read_bytes(), b"Info-iOS.plist\nfixture\n")
+            self.assertIn(b"\r\n", (root / "Apps/Minirun/Info-iOS.plist").read_bytes())
             self.assertFalse(list(mirror.rglob("*.gguf")))
             self.assertFalse(list(mirror.rglob("*.p8")))
             self.assertFalse((mirror / ".git").exists())

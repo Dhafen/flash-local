@@ -27,7 +27,10 @@ def generation_tree(root, temporary):
         shutil.copytree(root / "Apps/Minirun" / name, app / name)
     for name in ("project.yml", "Info-iOS.plist", "Info-macOS.plist",
                  "Minirun-iOS.entitlements", "Minirun-macOS.entitlements"):
-        shutil.copyfile(root / "Apps/Minirun" / name, app / name)
+        # Apple's plist merge preserves existing whitespace. CRLF from a
+        # Windows-made archive otherwise becomes CRCRLF during generation.
+        text = (root / "Apps/Minirun" / name).read_text(encoding="utf-8")
+        (app / name).write_text(text, encoding="utf-8", newline="\n")
     shutil.copyfile(root / "Package.swift", mirror / "Package.swift")
     experiment = mirror / "Experiments/OrnithPerformance"
     experiment.mkdir(parents=True)

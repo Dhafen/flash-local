@@ -1,0 +1,153 @@
+{
+  "sourceRevision": "5dc760efab29dd5d5fb771d5f8d28f7852e801b9",
+  "runURL": "https://expo.dev/accounts/dhafgard/projects/flash-local/builds/43a36176-8e06-4cf6-9a62-b6db4cef8836",
+  "status": "partial-regression",
+  "lesChecksPassed": [
+    {
+      "name": "Build isolated Mac runtime for fast numerical controls",
+      "workflow": "ornith-les.yml",
+      "job": "native-controls",
+      "bodySHA256": "5534c64aab32275e698640b7d238a31530303af8da2ba391d249f10a5b51aade",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 66.596493167,
+      "log": "regression-00.log"
+    },
+    {
+      "name": "Actual Metal weight decoding and available projections (untrained only)",
+      "workflow": "ornith-les.yml",
+      "job": "native-controls",
+      "bodySHA256": "ae1d2bd401b73945cd47623126f7962edd4853902035bc6103ea3ac3a0524948",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 8.362947582999993,
+      "log": "regression-01.log"
+    },
+    {
+      "name": "VM page buffers release their touched mappings",
+      "workflow": "ornith-les.yml",
+      "job": "native-controls",
+      "bodySHA256": "d9d055a9f54d4040c97487f94ec1f5cd67fb0fb0d3966b66c0f5b97dddafeda9",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 0.13973879200000283,
+      "log": "regression-02.log"
+    },
+    {
+      "name": "Real checkpoint tensor shapes without trained weights",
+      "workflow": "ornith-les.yml",
+      "job": "native-controls",
+      "bodySHA256": "002f3f937764b9838fdcf1aa8763d277a4e0bce8309c10901c3f3bcdaa685c84",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 18.875951375,
+      "log": "regression-03.log"
+    },
+    {
+      "name": "Generate small untrained Ornith fixture",
+      "workflow": "ornith-les.yml",
+      "job": "native-controls",
+      "bodySHA256": "c2bc3ae6a75b0ec7a118d9a83c5fd1540787de3e7e461c0aa365d049a688414f",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 0.03799333299997443,
+      "log": "regression-04.log"
+    },
+    {
+      "name": "Execute the actual BF16 DFlash encoder, injection and proposal graphs (untrained only)",
+      "workflow": "ornith-les.yml",
+      "job": "native-controls",
+      "bodySHA256": "c56ed24a9970d8b5b5a8c5dfd1fbabb6f79d3f0ef32df490bdd16387ccd997f5",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 0.7301841659999582,
+      "log": "regression-05.log"
+    },
+    {
+      "name": "Compare resident, streamed and lookahead execution with the CPU oracle",
+      "workflow": "ornith-les.yml",
+      "job": "native-controls",
+      "bodySHA256": "c648296040e755ef19cdb1612dfcc1635cb9a5965031df49fcd59249a97a2a9a",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 1.497466166000038,
+      "log": "regression-06.log"
+    },
+    {
+      "name": "Mixed Q4_K/Q6_K expert controls",
+      "workflow": "ornith-les.yml",
+      "job": "native-controls",
+      "bodySHA256": "54acdedf9527565286621b13ec980fb6afa1d9864ceb7ce8c8ab4bf8453446f1",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 2.7181726250000224,
+      "log": "regression-07.log"
+    },
+    {
+      "name": "Real routing cardinality without trained weights",
+      "workflow": "ornith-les.yml",
+      "job": "native-controls",
+      "bodySHA256": "dcd86e177d6a2bbc06e47400ce683ce74ef6b60ff611a9c31efde3a2c22c215a",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 6.465855165999983,
+      "log": "regression-08.log"
+    },
+    {
+      "name": "Compare both complete synthetic graphs with the existing pinned CPU reference",
+      "workflow": "ornith-les.yml",
+      "job": "native-controls",
+      "bodySHA256": "a15314c7d48c7945dc27e9060e637fed11c1c6effc54be7d9ddd9743a11ff440",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 42.957083082999986,
+      "log": "regression-09.log"
+    },
+    {
+      "name": "Both thinking modes against the pinned Ornith template",
+      "workflow": "ornith-les.yml",
+      "job": "native-controls",
+      "bodySHA256": "e9272bbe311ec87e15e78d93e41daf56f8927e695bcd4cf934f87c1bb34e74d6",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 2.099632291999967,
+      "log": "regression-10.log"
+    },
+    {
+      "name": "Build isolated original-math LES runtime (Mac, iPhone, Simulator)",
+      "workflow": "ornith-les.yml",
+      "job": "native-controls",
+      "bodySHA256": "e1154df84192255ab385eb3fdacceba4a3226acf45777b276610af8037db7ffe",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 96.62791429199996,
+      "log": "regression-11.log"
+    },
+    {
+      "name": "Build canonical tokenizer for the Swift adapter checks",
+      "workflow": "ornith-les.yml",
+      "job": "native-controls",
+      "bodySHA256": "90a1c7b16ad08534394064d111bd0e6e2fc7eaa76f87a540a23419b069e8621c",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 97.89696720899997,
+      "log": "regression-12.log"
+    },
+    {
+      "name": "Swift memory, comparison and aggregate export controls",
+      "workflow": "ornith-les.yml",
+      "job": "native-controls",
+      "bodySHA256": "71b584366c2b5564accd51db229d822b77d40b63f78bc9fdfacbf932a61c7b9f",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 99.854277959,
+      "log": "regression-13.log"
+    }
+  ],
+  "artifactIndexHashesVerified": 130,
+  "failure": "Second Flint build correctly refused to overwrite its immutable XCFramework. Verification/reuse mode added; all remaining app/package/parity checks still required.",
+  "fullReleaseGatesPassed": false,
+  "trainedModelInferenceVerified": false,
+  "physicalIPhoneVerified": false,
+  "testFlightUploaded": false
+}

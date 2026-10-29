@@ -1,0 +1,74 @@
+{
+  "group": "qpack",
+  "sourceRevision": "5dc760efab29dd5d5fb771d5f8d28f7852e801b9",
+  "xcode": "Xcode 26.2\nBuild version 17C52",
+  "status": "passed",
+  "steps": [
+    {
+      "name": "Pinned Xcode and isolated Swiftlet source",
+      "workflow": "ornith-performance.yml",
+      "job": "isolated-engine",
+      "bodySHA256": "13bec60beac9a4aa63c5edcea122971a6809de5d5714b995ebd497c66b72de65",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 0.7706188330000003,
+      "log": "qpack-00.log"
+    },
+    {
+      "name": "Bounded metadata inspection logic",
+      "workflow": "ornith-performance.yml",
+      "job": "isolated-engine",
+      "bodySHA256": "574804983001fec010260f0786953cd8c055c4476cdcef9aab8856e8038e2080",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 0.08573441699999762,
+      "log": "qpack-01.log"
+    },
+    {
+      "name": "Swiftlet correctness and KV placement controls (synthetic only)",
+      "workflow": "ornith-performance.yml",
+      "job": "isolated-engine",
+      "bodySHA256": "be3293427b85dbf1c55fd93c3220b29c654c0830e32f8ebfadbe9ff6bf279855",
+      "directory": ".work/swiftlet-validation",
+      "exitCode": 0,
+      "seconds": 59.18618062500002,
+      "log": "qpack-02.log"
+    },
+    {
+      "name": "Pinned Python tokenizer oracle (metadata only)",
+      "workflow": "ornith-performance.yml",
+      "job": "isolated-engine",
+      "bodySHA256": "4970ba50a5e17e250fa70002136d9cd3dd56ef037e911b8e7b398f3dbe213b11",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 13.453715791000008,
+      "log": "qpack-03.log"
+    },
+    {
+      "name": "Ornith metadata, placement and memory admission",
+      "workflow": "ornith-performance.yml",
+      "job": "isolated-engine",
+      "bodySHA256": "83014cac377d5cf564971d63d9da45697b31a4e9c39ac11a5ea6e0eae32c766e",
+      "directory": "Experiments/OrnithPerformance",
+      "exitCode": 0,
+      "seconds": 27.810991458000018,
+      "log": "qpack-04.log"
+    },
+    {
+      "name": "Compile experiment for iOS Simulator",
+      "workflow": "ornith-performance.yml",
+      "job": "isolated-engine",
+      "bodySHA256": "3935779faecc9c2726556abe3f3921d59586f933637f8f5afdb41a7edc5bbd61",
+      "directory": "Experiments/OrnithPerformance",
+      "exitCode": 0,
+      "seconds": 22.08263904200001,
+      "log": "qpack-05.log"
+    }
+  ],
+  "signingAttempted": false,
+  "testFlightUploaded": false,
+  "trainedModelInferenceVerified": false,
+  "physicalIPhoneVerified": false,
+  "runURL": "https://expo.dev/accounts/dhafgard/projects/flash-local/builds/a096e88f-8f37-4ca2-89af-391821ddf437",
+  "artifactIndexHashesVerified": 16
+}

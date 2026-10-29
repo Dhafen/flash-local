@@ -59,6 +59,9 @@ The generation wrapper uses a temporary source-only `flash-local` layout and
 copies back the canonical project. This retains the actual relative package
 references, schemes, app identities and signing settings while allowing EAS's
 `build` checkout to pass the same committed-project comparison.
+Only temporary YAML/plist/entitlement inputs normalize line endings before
+XcodeGen merges them. This prevents CRLF archived on Windows becoming CRCRLF
+on Apple's generator. Property values and original input files are retained.
 
 EAS build `7290041a-82a5-442d-957c-e377115f9d17` compiled the Mac app and
 package test bundles, then failed before executing XCTest because the worker's
