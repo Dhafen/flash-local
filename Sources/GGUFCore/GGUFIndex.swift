@@ -20,13 +20,13 @@ public enum GGUFError: Error, Equatable, CustomStringConvertible, LocalizedError
 
 /// GGML block encodings. These are not MLX affine encodings.
 public enum GGUFQuantization: UInt32, Sendable, CaseIterable {
-    case f32 = 0, f16 = 1, q4_0 = 2, q5_0 = 6, q8_0 = 8
+    case f32 = 0, f16 = 1, q4_0 = 2, q4_1 = 3, q5_0 = 6, q8_0 = 8
     case q4_K = 12, q6_K = 14, bf16 = 30
 
     public var blockElements: UInt64 {
         switch self {
         case .f32, .f16, .bf16: return 1
-        case .q4_0, .q5_0, .q8_0: return 32
+        case .q4_0, .q4_1, .q5_0, .q8_0: return 32
         case .q4_K, .q6_K: return 256
         }
     }
@@ -36,6 +36,7 @@ public enum GGUFQuantization: UInt32, Sendable, CaseIterable {
         case .f32: return 4
         case .f16, .bf16: return 2
         case .q4_0: return 18
+        case .q4_1: return 20
         case .q5_0: return 22
         case .q8_0: return 34
         case .q4_K: return 144

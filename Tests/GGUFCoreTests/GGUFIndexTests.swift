@@ -38,7 +38,7 @@ final class GGUFIndexTests: XCTestCase {
     func testExactGGMLRowSizesForAllPublishedEncodings() throws {
         let cases: [(UInt32, UInt64, UInt64)] = [
             (0, 2560, 10240), (1, 2560, 5120), (30, 2560, 5120),
-            (2, 160, 90), (6, 640, 440), (8, 2560, 2720),
+            (2, 160, 90), (3, 160, 100), (6, 640, 440), (8, 2560, 2720),
             (12, 2560, 1440), (14, 2560, 2100),
         ]
         for (kind, columns, expected) in cases {
@@ -46,6 +46,18 @@ final class GGUFIndexTests: XCTestCase {
             let index = try GGUFIndex.parse(header: header, fileByteCount: size)
             XCTAssertEqual(index.tensors.values.first?.rowBytes, expected)
         }
+    }
+
+    func testFlintQ41LayoutAndTruncation() throws {
+        let (header, size) = fixture(type: 3, dimensions: [2048, 512])
+        let index = try GGUFIndex.parse(header: header, fileByteCount: size)
+        let tensor = try XCTUnwrap(index.tensors.values.first)
+        XCTAssertEqual(tensor.quantization, .q4_1)
+        XCTAssertEqual(tensor.rowBytes, 1280)
+        XCTAssertEqual(tensor.byteCount, 655360)
+        XCTAssertThrowsError(try GGUFIndex.parse(header: header, fileByteCount: index.payloadOffset + tensor.byteCount - 1))
+        let (unaligned, n) = fixture(type: 3, dimensions: [2047, 1])
+        XCTAssertThrowsError(try GGUFIndex.parse(header: unaligned, fileByteCount: n))
     }
 
     func testPublishedExpertStrides() throws {

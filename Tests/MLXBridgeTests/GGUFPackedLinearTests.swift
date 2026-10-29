@@ -23,6 +23,8 @@ final class GGUFPackedLinearTests: XCTestCase {
                 if type == .q5_0 { bytes += [0x59, 0xa6, UInt8(truncatingIfNeeded: block + seed), 0xf1] }
                 let n = type == .q8_0 ? 32 : 16
                 bytes += (0..<n).map { UInt8(truncatingIfNeeded: $0 * 37 + block * 11 + seed) }
+            case .q4_1:
+                bytes += [0, 0x20, 0, 0x10] + Array(repeating: 0, count: 16)
             case .q4_K:
                 bytes += [0, 0x14, 0, 0x10] // small nonzero d and dmin
                 bytes += (0..<12).map { UInt8(truncatingIfNeeded: $0 * 43 + block + seed) }
@@ -40,7 +42,7 @@ final class GGUFPackedLinearTests: XCTestCase {
         let columns = 512, rows = 7, tokens = 3
         let values = (0..<(tokens * columns)).map { Float(($0 * 17) % 67 - 33) / 64 }
         let x = MLXArray(values, [tokens, columns])
-        for type in GGUFQuantization.allCases {
+        for type in GGUFQuantization.allCases where type != .q4_1 {
             let bytes = packed(type, elements: rows * columns)
             var decoded = Array(repeating: Float.nan, count: rows * columns)
             let elements = decoded.count
@@ -61,7 +63,7 @@ final class GGUFPackedLinearTests: XCTestCase {
 
     func testStackedExpertsUseTheirOwnWeightsAndActivationRows() throws {
         let columns = 256, rows = 3, experts = 3
-        for type in GGUFQuantization.allCases {
+        for type in GGUFQuantization.allCases where type != .q4_1 {
             let data = (0..<experts).map { packed(type, elements: columns * rows, seed: $0 * 19) }
             let arrays = data.map { d in d.withUnsafeBytes { MLXArray($0.bindMemory(to: UInt8.self), [d.count]) } }
             let x = MLXArray((0..<(columns*experts)).map { Float(($0 * 11) % 59 - 29) / 64 }, [experts, columns])
@@ -78,6 +80,7 @@ final class GGUFPackedLinearTests: XCTestCase {
 
     func testPackedShapeAndByteBudgetFailBeforeKernelDispatch() throws {
         let x = MLXArray.zeros([1, 256])
+        XCTAssertThrowsError(try GGUFPackedLinear.run(x, packed: MLXArray.zeros([160], dtype: .uint8), type: .q4_1, rows: 1, columns: 256))
         XCTAssertThrowsError(try GGUFPackedLinear.run(x, packed: MLXArray([UInt8(0)]), type: .q4_K, rows: 1, columns: 256))
         XCTAssertThrowsError(try GGUFPackedLinear.run(x, packed: MLXArray.zeros([144]), type: .q4_K, rows: 1, columns: 256))
         XCTAssertThrowsError(try GGUFPackedLinear.run(x, packed: MLXArray.zeros([144], dtype: .uint8), type: .q4_K, rows: 1, columns: 255))

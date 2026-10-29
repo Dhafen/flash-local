@@ -206,6 +206,9 @@ public enum GGUFPackedLinear {
 
     public static func run(_ x: MLXArray, packed: MLXArray, type: GGUFQuantization,
                            rows: Int, columns: Int, stackedWeights: Bool = false) throws -> MLXArray {
+        // Q4_1 is indexed for the isolated native Flint backend; this older
+        // Metal kernel does not implement it. Never interpret it as Q6_K.
+        guard type != .q4_1 else { throw GGUFError.unsupported("Q4_1 in the legacy packed Metal kernel") }
         guard x.ndim == 2, x.shape[0] > 0, x.dtype == .float32, x.shape[1] == columns,
               rows > 0, columns > 0, columns <= 65536,
               columns % Int(type.blockElements) == 0,

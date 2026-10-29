@@ -1,0 +1,15 @@
+{
+  "sourceRevision": "36b3f0f07883b908e0fde4f3ca443b84a67fd45c",
+  "buildNumber": "246",
+  "version": "0.1.0",
+  "ipaSHA256": "1bec948fde538c9cb648a4cbd5860c0af8f8a5df97af819dc0b307be30a66f65",
+  "binaryUploadCommitted": true,
+  "processingVerified": true,
+  "availableToInternalTesters": true,
+  "buildAudienceType": "INTERNAL_ONLY",
+  "groupAssociationVerified": true,
+  "internalBuildState": "IN_BETA_TESTING",
+  "easBuildURL": "https://expo.dev/accounts/dhafgard/projects/flash-local/builds/7528171f-ecc6-4491-8aea-42b94554a5cf",
+  "trainedFlintIPhoneInferenceVerified": false,
+  "reportedIssue": "GGUF type 3 rejected by shared parser"
+}

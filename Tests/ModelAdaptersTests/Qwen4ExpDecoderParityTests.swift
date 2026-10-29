@@ -92,7 +92,7 @@ final class Qwen4ExpDecoderParityTests: XCTestCase {
         let artifact = try VerifiedGGUFArtifact.verify(insideRoot: folder, manifest: expected)
         if mixed {
             XCTAssertEqual(Set(artifact.index.tensors.values.map { $0.quantization.rawValue }),
-                           Set(GGUFQuantization.allCases.map { $0.rawValue }))
+                           Set(GGUFQuantization.allCases.filter { $0 != .q4_1 }.map { $0.rawValue }))
         }
         let decoder = try Qwen4ExpDecoder(artifact: artifact, contextTokens: manifest.contextTokens,
             budgetBytes: 5_500_000_000, rawCacheBytes: 2 << 20)
