@@ -25,6 +25,43 @@ def operation(offset, length):
 
 
 class AppleBuildUploadTests(unittest.TestCase):
+    def test_resume_committed_file_accepts_matching_apple_md5_and_rejects_changes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ipa = root / 'FlashLocal.ipa'; ipa.write_bytes(b'synthetic IPA fixture')
+            source = 'a' * 40
+            sha = hashlib.sha256(ipa.read_bytes()).hexdigest()
+            seal = root / 'seal.json'
+            seal.write_text(json.dumps({'bundleIdentifier': upload.BUNDLE, 'profileType': 'app-store',
+                'sourceRevision': source, 'build': '246', 'workflowRunID': 'unit-run', 'version': '0.1.0',
+                'usesNonExemptEncryption': False, 'signatureVerified': True, 'memoryEntitlementsVerified': True,
+                'privacyManifestVerified': True, 'exportedLocally': True, 'internalTestingOnly': True,
+                'ipaSHA256': sha}))
+            journal = root / 'journal.json'
+            journal.write_text(json.dumps({'sourceRevision': source, 'buildNumber': '246', 'ipaSHA256': sha,
+                'buildUploadID': 'unit-upload', 'fileReservationAttempts': {'ASSET': True}}))
+            api = Mock()
+            api.request.return_value = {'data': {'attributes': {'bundleId': upload.BUNDLE}}}
+            file_attributes = {'assetType': 'ASSET', 'fileName': ipa.name, 'fileSize': ipa.stat().st_size,
+                'uti': 'com.apple.ipa', 'assetDeliveryState': {'state': 'COMPLETE'},
+                'sourceFileChecksums': {'file': {'algorithm': 'MD5',
+                    'hash': hashlib.md5(ipa.read_bytes(), usedforsecurity=False).hexdigest()}}}
+            def all_records(route, query=None):
+                if route.endswith('/buildUploadFiles'):
+                    return [{'id': 'unit-file', 'attributes': file_attributes}]
+                return [{'id': 'unit-upload', 'attributes': {'state': {'state': 'PROCESSING'}}}]
+            api.all.side_effect = all_records
+            args = (api, 'unit-app', ipa, None, seal, source, '246', 'unit-run', journal)
+            with patch.object(upload, 'find_build', return_value=None), patch.object(upload, 'put_file') as put:
+                self.assertTrue(upload.upload_build(*args)['binaryUploadCommitted'])
+                put.assert_not_called()
+                file_attributes['sourceFileChecksums']['file']['hash'] = '0' * 32
+                with self.assertRaisesRegex(ValueError, 'checksum differs'):
+                    upload.upload_build(*args)
+                ipa.write_bytes(b'changed local fixture')
+                with self.assertRaisesRegex(ValueError, 'IPA changed'):
+                    upload.upload_build(*args)
+
     def test_existing_build_never_bypasses_provenance(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -51,6 +88,7 @@ class AppleBuildUploadTests(unittest.TestCase):
                 def __init__(self):
                     self.linked_build = 'unit-build'
                     self.checksum = expected
+                    self.algorithm = 'SHA_256'
                     self.calls = []
 
                 def request(self, route, method='GET', body=None, query=None):
@@ -62,7 +100,7 @@ class AppleBuildUploadTests(unittest.TestCase):
                     self.calls.append(route)
                     return [{'attributes': {'assetType': 'ASSET', 'fileName': ipa.name,
                         'fileSize': ipa.stat().st_size, 'assetDeliveryState': {'state': 'COMPLETE'},
-                        'sourceFileChecksums': {'file': {'algorithm': 'SHA_256', 'hash': self.checksum}}}}]
+                        'sourceFileChecksums': {'file': {'algorithm': self.algorithm, 'hash': self.checksum}}}}]
 
             api = FixtureAPI()
             with self.assertRaisesRegex(ValueError, 'no matching local upload journal'):
@@ -77,6 +115,16 @@ class AppleBuildUploadTests(unittest.TestCase):
                 upload.confirm_build_provenance(api, 'unit-build', report, ipa)
             api.checksum = expected
             upload.confirm_build_provenance(api, 'unit-build', report, ipa)
+            api.algorithm = 'MD5'
+            api.checksum = hashlib.md5(ipa.read_bytes(), usedforsecurity=False).hexdigest()
+            upload.confirm_build_provenance(api, 'unit-build', report, ipa)
+            api.checksum = '0' * 32
+            with self.assertRaisesRegex(ValueError, 'does not match'):
+                upload.confirm_build_provenance(api, 'unit-build', report, ipa)
+            ipa.write_bytes(b'changed local fixture')
+            api.checksum = hashlib.md5(ipa.read_bytes(), usedforsecurity=False).hexdigest()
+            with self.assertRaisesRegex(ValueError, 'SHA-256 export seal'):
+                upload.confirm_build_provenance(api, 'unit-build', report, ipa)
 
     def test_rejects_omitted_overlapping_or_external_upload_instructions(self):
         for operations in ([operation(0, 3)], [operation(0, 3), operation(2, 2)],

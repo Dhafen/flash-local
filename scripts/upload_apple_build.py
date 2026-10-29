@@ -96,11 +96,26 @@ def put_file(path, operations, connection_factory=http.client.HTTPSConnection):
 
 
 def digest(path, algorithm='sha256'):
-    result = hashlib.new(algorithm)
+    # Apple's older delivery service reports MD5 for transfer integrity.
+    # This is not used instead of the sealed SHA-256 identity check.
+    result = hashlib.new(algorithm, usedforsecurity=algorithm.lower() != 'md5')
     with path.open('rb') as stream:
         for chunk in iter(lambda: stream.read(1 << 20), b''):
             result.update(chunk)
     return result.hexdigest()
+
+
+def matches_apple_checksum(path, local_sha256, checksum):
+    if digest(path) != local_sha256:
+        raise ValueError('Local file no longer matches its SHA-256 export seal')
+    algorithm = checksum.get('algorithm')
+    if algorithm == 'SHA_256':
+        expected = local_sha256
+    elif algorithm == 'MD5':
+        expected = digest(path, 'md5')
+    else:
+        raise ValueError('Apple did not provide a supported file checksum')
+    return checksum.get('hash') == expected
 
 
 def confirm_build_provenance(api, build_id, report, ipa):
@@ -122,7 +137,7 @@ def confirm_build_provenance(api, build_id, report, ipa):
     checksum = attrs.get('sourceFileChecksums', {}).get('file') or {}
     if ((attrs.get('fileName'), attrs.get('fileSize')) != (ipa.name, ipa.stat().st_size)
             or attrs.get('assetDeliveryState', {}).get('state') not in ('UPLOAD_COMPLETE', 'COMPLETE')
-            or checksum != {'algorithm': 'SHA_256', 'hash': report['ipaSHA256']}):
+            or not matches_apple_checksum(ipa, report['ipaSHA256'], checksum)):
         raise ValueError('Apple upload binary does not match the sealed export')
 
 
@@ -219,7 +234,7 @@ def upload_build(api, app_id, ipa, metadata, seal_path, source, number, run_id, 
         report['currentFileID'] = file_id
         save()
         if state in ('UPLOAD_COMPLETE', 'COMPLETE'):
-            if attrs.get('sourceFileChecksums', {}).get('file') != {'algorithm': 'SHA_256', 'hash': checksum}:
+            if not matches_apple_checksum(path, checksum, attrs.get('sourceFileChecksums', {}).get('file') or {}):
                 raise ValueError('Existing committed file checksum differs from this export')
             continue
         if state != 'AWAITING_UPLOAD':
