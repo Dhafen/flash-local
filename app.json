@@ -1,0 +1,19 @@
+{
+  "expo": {
+    "name": "Flash Local",
+    "slug": "flash-local",
+    "owner": "dhafgard",
+    "version": "0.1.0",
+    "ios": {
+      "bundleIdentifier": "com.dhafen.flashlocal",
+      "config": {
+        "usesNonExemptEncryption": false
+      }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "dfbc7525-6556-47db-92a4-53e3bf29b917"
+      }
+    }
+  }
+}

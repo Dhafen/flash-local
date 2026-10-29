@@ -1,0 +1,33 @@
+# Keep the same source as GitHub. EAS needs its shallow .git copy for source
+# provenance; credentials and external model data must never enter the upload.
+.DS_Store
+.work/
+.build/
+.swiftpm/
+.test-fixtures/
+DerivedData/
+node_modules/
+xcuserdata/
+*.xcuserstate
+*.xccheckout
+*.xcscmblueprint
+*.mobileprovision
+*.provisionprofile
+*.p12
+*.pem
+*.p8
+*.dpapi
+.env
+.env.*
+credentials.json
+*.gguf
+*.safetensors
+*.bin
+*.log
+*.xcresult/
+/brand-macos/
+/brand-ios/
+/Tests/Fixtures/deepseek-v41/engram/
+/phone-acceptance*.json
+/assessment*.jsonl
+/dry.jsonl

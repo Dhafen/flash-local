@@ -1,0 +1,27 @@
+build:
+  name: Flash Local native validation (no signing or upload)
+  steps:
+    - eas/checkout
+    - run:
+        name: Check the actual Apple host and install small-control dependencies
+        command: |
+          set -eu
+          test "$(uname -m)" = arm64
+          xcodebuild -version
+          command -v cmake >/dev/null || brew install cmake
+          command -v python3.12 >/dev/null || brew install python@3.12
+          python3.12 -m venv .work/eas-python
+          .work/eas-python/bin/python -m pip install -r Experiments/Flint/reference-requirements.txt
+    - run:
+        name: Run the selected real native checks
+        command: .work/eas-python/bin/python scripts/run_flint_eas.py --stage "$FLASH_LOCAL_EAS_STAGE"
+    - run:
+        name: Preserve bounded diagnostics on success or failure
+        if: ${ always() }
+        command: python3 scripts/run_flint_eas.py --collect
+    - eas/upload_artifact:
+        name: Upload diagnostic evidence (never weights or credentials)
+        if: ${ always() }
+        inputs:
+          type: build-artifact
+          path: .work/eas-output/reports.zip

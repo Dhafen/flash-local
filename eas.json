@@ -1,0 +1,32 @@
+{
+  "cli": {
+    "version": "27.1.0",
+    "requireCommit": true,
+    "appVersionSource": "local"
+  },
+  "build": {
+    "flint-native": {
+      "distribution": "store",
+      "environment": "preview",
+      "node": "22.20.0",
+      "env": {
+        "FLASH_LOCAL_EAS_STAGE": "native",
+        "FLASH_LOCAL_ENABLE_LES": "1",
+        "FLASH_LOCAL_ENABLE_FLINT": "1"
+      },
+      "ios": {
+        "config": "flint-validation.yml",
+        "image": "macos-sequoia-15.6-xcode-26.2",
+        "resourceClass": "medium",
+        "withoutCredentials": true,
+        "autoIncrement": false
+      }
+    },
+    "flint-compile": {
+      "extends": "flint-native",
+      "env": {
+        "FLASH_LOCAL_EAS_STAGE": "compile"
+      }
+    }
+  }
+}
