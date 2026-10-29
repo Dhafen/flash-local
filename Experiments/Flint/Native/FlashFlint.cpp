@@ -186,7 +186,9 @@ flf_context * flf_open(int fd, const char * directory, flf_options o, flf_abort 
         c = std::make_unique<flf_context>();
         require(o.context_tokens >= 32 && o.context_tokens <= 65536 && o.evaluation_batch >= 1 && o.evaluation_batch <= 2048 &&
             o.physical_batch >= 1 && o.physical_batch <= 16 && o.physical_batch <= o.evaluation_batch && o.cpu_threads >= 1 &&
-            o.cpu_threads <= 8 && o.process_ceiling_bytes > 0 && o.process_ceiling_bytes <= 5500000000ULL && !(o.metal && o.f32_kv_control),
+            o.cpu_threads <= 8 && o.process_ceiling_bytes > 0 && o.process_ceiling_bytes <= 5500000000ULL &&
+            (!o.metal || !o.f32_kv_control || o.diagnostic_routing) &&
+            (!o.diagnostic_disable_flash || (o.metal && o.diagnostic_routing)),
             "Invalid bounded Flint configuration");
         c->options = o; c->abort = abort; c->progress = progress; c->user = user;
         c->source = fcntl(fd, F_DUPFD_CLOEXEC, 0);
@@ -226,7 +228,7 @@ flf_context * flf_open(int fd, const char * directory, flf_options o, flf_abort 
         cp.n_ctx = o.context_tokens; cp.n_batch = o.evaluation_batch; cp.n_ubatch = o.physical_batch; cp.n_seq_max = 1;
         cp.n_threads = cp.n_threads_batch = o.cpu_threads; cp.swa_full = false;
         cp.type_k = cp.type_v = o.f32_kv_control ? GGML_TYPE_F32 : GGML_TYPE_F16;
-        cp.flash_attn_type = o.metal ? LLAMA_FLASH_ATTN_TYPE_ENABLED : LLAMA_FLASH_ATTN_TYPE_DISABLED;
+        cp.flash_attn_type = o.metal && !o.diagnostic_disable_flash ? LLAMA_FLASH_ATTN_TYPE_ENABLED : LLAMA_FLASH_ATTN_TYPE_DISABLED;
         cp.abort_callback_data = c.get(); cp.abort_callback = [](void * p) { return static_cast<flf_context *>(p)->should_abort(); };
         cp.cb_eval_user_data = c.get();
         cp.cb_eval = o.diagnostic_routing ? +[](ggml_tensor * tensor, bool ask, void * opaque) {

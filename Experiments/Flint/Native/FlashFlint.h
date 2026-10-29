@@ -14,6 +14,9 @@ typedef struct {
     uint64_t process_ceiling_bytes, app_reserve_bytes;
     bool metal, f32_kv_control;
     bool diagnostic_routing; // installs a graph callback; false for serving
+    // Diagnostic only: run Metal attention without the Flash Attention path.
+    // Production contexts reject this flag and retain their existing defaults.
+    bool diagnostic_disable_flash;
 } flf_options;
 typedef struct {
     // Explicit expert pread totals only; not mmap faults/physical NAND traffic.

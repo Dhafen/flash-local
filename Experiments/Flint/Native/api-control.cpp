@@ -20,9 +20,16 @@ int main(int argc, char ** argv) {
         std::filesystem::create_directories(argv[2]);
         const int fd = open(argv[1], O_RDONLY | O_CLOEXEC);
         require(fd >= 0, "Cannot open fixture");
-        flf_options o{256, 32, 4, 2, 5500000000ULL, 400000000ULL, false, true, true};
+        flf_options o{256, 32, 4, 2, 5500000000ULL, 400000000ULL, false, true, true, false};
         auto rejected = o; rejected.process_ceiling_bytes = 1024;
         require(flf_open(fd, argv[2], rejected, nullptr, nullptr, nullptr) == nullptr, "Over-budget load accepted");
+        rejected = o; rejected.metal = true; rejected.diagnostic_routing = false;
+        require(flf_open(fd, argv[2], rejected, nullptr, nullptr, nullptr) == nullptr, "Non-diagnostic Metal F32 KV accepted");
+        rejected = o; rejected.metal = true; rejected.f32_kv_control = false;
+        rejected.diagnostic_routing = false; rejected.diagnostic_disable_flash = true;
+        require(flf_open(fd, argv[2], rejected, nullptr, nullptr, nullptr) == nullptr, "Non-diagnostic Flash override accepted");
+        rejected = o; rejected.diagnostic_disable_flash = true;
+        require(flf_open(fd, argv[2], rejected, nullptr, nullptr, nullptr) == nullptr, "CPU Flash override accepted");
         require(std::filesystem::is_empty(argv[2]), "Rejected load left a manifest");
         c = flf_open(fd, argv[2], o, nullptr, nullptr, nullptr); close(fd);
         if (!c) throw std::runtime_error(flf_last_error());
@@ -98,9 +105,21 @@ int main(int argc, char ** argv) {
         require(flf_evaluate(c, last, 1, state_only.data(), 32) != 0, "Cancellation ignored");
         require(flf_reset(c) == 0 && flf_snapshot(c).cached_tokens == 0, "Cancellation recovery did not reset KV");
         require(flf_evaluate(c, prefix, 4, control.data(), 32) == 0, flf_last_error());
+        const uint64_t f32_kv_bytes = flf_snapshot(c).estimated_kv_bytes;
         flf_close(c); c = nullptr;
         require(std::filesystem::is_empty(argv[2]), "Private manifest not cleaned on unload");
-        std::cout << "FLINT_API_CONTROL memoryAdmission=true duplicateLoadRejected=true descriptorRetained=true stateOnlyPrefill=true noCopyLogits=true greedy=true seededDecode=true staleLogitsRejected=true routingTrace=true kvAppend=true reset=true cancellation=true unload=true\n";
+        const int f16_fd = open(argv[1], O_RDONLY | O_CLOEXEC);
+        require(f16_fd >= 0, "Cannot reopen fixture for F16 KV diagnostic");
+        o.f32_kv_control = false;
+        c = flf_open(f16_fd, argv[2], o, nullptr, nullptr, nullptr); close(f16_fd);
+        if (!c) throw std::runtime_error(flf_last_error());
+        require(flf_snapshot(c).estimated_kv_bytes * 2 == f32_kv_bytes,
+            "F32 and F16 KV budgets do not match their element sizes");
+        require(flf_evaluate(c, prefix, 4, state_only.data(), 32) == 0, flf_last_error());
+        for (float value : state_only) require(std::isfinite(value), "F16 KV diagnostic produced nonfinite logits");
+        flf_close(c); c = nullptr;
+        require(std::filesystem::is_empty(argv[2]), "F16 diagnostic manifest not cleaned on unload");
+        std::cout << "FLINT_API_CONTROL memoryAdmission=true duplicateLoadRejected=true descriptorRetained=true stateOnlyPrefill=true noCopyLogits=true greedy=true seededDecode=true staleLogitsRejected=true routingTrace=true kvAppend=true reset=true cancellation=true diagnosticGuards=true cpuKVF16=true cpuKVF32=true unload=true\n";
         return 0;
     } catch (const std::exception & e) {
         if (c) flf_close(c);

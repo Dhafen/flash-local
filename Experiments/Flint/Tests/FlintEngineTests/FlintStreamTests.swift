@@ -21,6 +21,65 @@ final class FlintStreamTests: XCTestCase {
         XCTAssertFalse(FlintNumericalCheck.sameRoutes([a], [.init(position: 3, layer: 48, experts: [1, 25, 127, 200, 250, 254])]))
         XCTAssertFalse(FlintNumericalCheck.sameRoutes([a], [.init(position: 3, layer: 48, experts: [1, 25, 127, 200, 250, 256])]))
     }
+    func testRouteDiagnosticsReportFirstDifferenceAndMissingRowsWithoutPromptData() throws {
+        let reference: [FlintRouteDecision] = [
+            .init(position: 1, layer: 2, experts: [1, 2, 3, 4, 5, 6]),
+            .init(position: 0, layer: 3, experts: [6, 5, 4, 3, 2, 1]),
+            .init(position: 0, layer: 2, experts: [1, 2, 3, 4, 5, 6]),
+        ]
+        let candidate: [FlintRouteDecision] = [
+            .init(position: 1, layer: 2, experts: [1, 2, 3, 4, 5, 7]),
+            .init(position: 0, layer: 2, experts: [6, 5, 4, 3, 2, 1]),
+            .init(position: 1, layer: 3, experts: [1, 2, 3, 4, 5, 6]),
+        ]
+        let diagnostic = try XCTUnwrap(FlintNumericalCheck.diagnoseRoutes(reference, candidate))
+        XCTAssertEqual(diagnostic.referenceCount, 3)
+        XCTAssertEqual(diagnostic.candidateCount, 3)
+        XCTAssertEqual(diagnostic.mismatchCount, 3)
+        XCTAssertEqual(diagnostic.firstMismatch?.position, 0)
+        XCTAssertEqual(diagnostic.firstMismatch?.layer, 3)
+        XCTAssertEqual(diagnostic.firstMismatch?.referenceExperts, [1, 2, 3, 4, 5, 6])
+        XCTAssertNil(diagnostic.firstMismatch?.candidateExperts)
+        XCTAssertNil(FlintNumericalCheck.diagnoseRoutes([reference[0], reference[0]], candidate))
+        let identical = try XCTUnwrap(FlintNumericalCheck.diagnoseRoutes(reference, reference.reversed()))
+        XCTAssertEqual(identical.mismatchCount, 0)
+        XCTAssertNil(identical.firstMismatch)
+        let encoded = try JSONEncoder().encode(diagnostic)
+        let text = try XCTUnwrap(String(data: encoded, encoding: .utf8))
+        XCTAssertFalse(text.contains("prompt"))
+        XCTAssertFalse(text.contains("tokenID"))
+        let legacy = Data("{\"positions\":[],\"routedTokenLayers\":1,\"exactExpertSets\":false}".utf8)
+        let decoded = try JSONDecoder().decode(FlintNumericalCheck.self, from: legacy)
+        XCTAssertNil(decoded.routeDiagnostics)
+        XCTAssertNil(decoded.matchedMetalControl)
+        XCTAssertFalse(decoded.passed)
+    }
+    func testMatchedControlNeverOverridesFailedAdmission() throws {
+        let good = FlintNumericalCheck.Position(index: 0, maximumAbsoluteError: 0,
+            rmsError: 0, cosineSimilarity: 1, sameTop1: true)
+        let control = FlintNumericalCheck.MatchedMetalControl(positions: [good, good, good, good],
+            exactExpertSets: true, routeDiagnostics: nil)
+        let failed = FlintNumericalCheck(positions: [], routedTokenLayers: 1, exactExpertSets: false,
+            routeDiagnostics: nil, matchedMetalControl: control)
+        XCTAssertFalse(failed.passed)
+        let decoded = try JSONDecoder().decode(FlintNumericalCheck.self, from: JSONEncoder().encode(failed))
+        XCTAssertEqual(decoded.matchedMetalControl?.positions.count, 4)
+        XCTAssertFalse(decoded.passed)
+    }
+    func testPrecisionOverridesAreDiagnosticOnly() throws {
+        var config = FlintConfiguration()
+        config.diagnosticF32KV = true
+        XCTAssertThrowsError(try config.validate())
+        config.diagnosticRouting = true
+        XCTAssertNoThrow(try config.validate())
+        config.backend = .cpuReference
+        XCTAssertThrowsError(try config.validate())
+        config.diagnosticF32KV = false
+        config.diagnosticDisableFlash = true
+        XCTAssertThrowsError(try config.validate())
+        config.backend = .metal
+        XCTAssertNoThrow(try config.validate())
+    }
     func testReasoningAndUTF8AreIdenticalForEveryBytePartition() throws {
         let text = "<think>Räkna 👋: 50+5.</think>Svaret är 55.\n"
         let bytes = Array(text.utf8)

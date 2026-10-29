@@ -18,6 +18,9 @@ public struct FlintConfiguration: Equatable, Sendable {
     public var physicalBatch = 4
     public var cpuThreads = 4
     public var diagnosticRouting = false
+    // Restricted to diagnostic graph runs; ordinary inference keeps its defaults.
+    var diagnosticF32KV = false
+    var diagnosticDisableFlash = false
     public var memoryCeilingBytes: UInt64 = 5_500_000_000
     public init() {}
     public func validate() throws {
@@ -25,6 +28,9 @@ public struct FlintConfiguration: Equatable, Sendable {
               (1...16).contains(physicalBatch), physicalBatch <= evaluationBatch,
               (1...8).contains(cpuThreads), memoryCeilingBytes > 0, memoryCeilingBytes <= 5_500_000_000 else {
             throw FlintFailure.invalid("Invalid bounded Flint configuration")
+        }
+        guard !(diagnosticF32KV || diagnosticDisableFlash) || (backend == .metal && diagnosticRouting) else {
+            throw FlintFailure.invalid("Metal precision overrides require a diagnostic graph")
         }
     }
 }
@@ -166,8 +172,9 @@ public actor FlintSession {
         options.process_ceiling_bytes = limit
         options.app_reserve_bytes = max(memory.footprintBytes, 400_000_000)
         options.metal = configuration.backend == .metal
-        options.f32_kv_control = configuration.backend == .cpuReference
+        options.f32_kv_control = configuration.backend == .cpuReference || configuration.diagnosticF32KV
         options.diagnostic_routing = configuration.diagnosticRouting
+        options.diagnostic_disable_flash = configuration.diagnosticDisableFlash
         let control = Unmanaged.passUnretained(cancellation).toOpaque()
         let pointer = flf_open(fd, directory.path, options, { opaque in
             guard let opaque else { return true }
@@ -498,13 +505,42 @@ extension FlintSession {
                 progress(.init(phase: 4, fraction: Double(number + 1) / Double(positions.count), observedFootprintBytes: ProcessFootprint.current()?.footprintBytes))
             }
             let actualRoutes = try routingDecisions()
-            let check = FlintNumericalCheck(positions: comparisons, routedTokenLayers: referenceRoutes.count,
+            var check = FlintNumericalCheck(positions: comparisons, routedTokenLayers: referenceRoutes.count,
                 // Non-output positions skip the last layer's FFN. Compare
                 // every actually computed top-6 set, including all 47 layers
                 // at each of the four requested logit positions.
-                exactExpertSets: referenceRoutes.count == tokens.count * 46 + positions.count && FlintNumericalCheck.sameRoutes(referenceRoutes, actualRoutes))
+                exactExpertSets: referenceRoutes.count == tokens.count * 46 + positions.count && FlintNumericalCheck.sameRoutes(referenceRoutes, actualRoutes),
+                routeDiagnostics: FlintNumericalCheck.diagnoseRoutes(referenceRoutes, actualRoutes))
             numericalReport = check
             unload()
+            if !check.passed {
+                // Distinguish routing/kernel differences from the original
+                // comparison's KV precision, Flash Attention and batch settings.
+                // Its result never replaces or relaxes the serving admission.
+                do {
+                    try Task.checkCancellation()
+                    var matched = cpu; matched.backend = .metal
+                    matched.diagnosticF32KV = true; matched.diagnosticDisableFlash = true
+                    try load(artifact: artifact, privateRoot: privateRoot, configuration: matched, progress: progress)
+                    try traceRouting(true)
+                    var controlPositions: [FlintNumericalCheck.Position] = []; first = 0
+                    for (number, position) in positions.enumerated() {
+                        try Task.checkCancellation()
+                        let logits = try evaluate(tokens: Array(tokens[first...position]), outputLogits: true)!
+                        controlPositions.append(try FlintNumericalCheck.compare(position: position, reference: references[number], candidate: logits))
+                        first = position + 1
+                    }
+                    let controlRoutes = try routingDecisions()
+                    let control = FlintNumericalCheck.MatchedMetalControl(positions: controlPositions,
+                        exactExpertSets: referenceRoutes.count == tokens.count * 46 + positions.count && FlintNumericalCheck.sameRoutes(referenceRoutes, controlRoutes),
+                        routeDiagnostics: FlintNumericalCheck.diagnoseRoutes(referenceRoutes, controlRoutes))
+                    check = FlintNumericalCheck(positions: comparisons, routedTokenLayers: referenceRoutes.count,
+                        exactExpertSets: check.exactExpertSets, routeDiagnostics: check.routeDiagnostics, matchedMetalControl: control)
+                    numericalReport = check
+                } catch is CancellationError { unload(); throw CancellationError() }
+                catch { /* Preserve the original failed report if this control is unavailable. */ }
+                unload()
+            }
             guard check.passed else { throw FlintFailure.invalid("Flint's CPU/Metal comparison differed; no new chat/API backend was admitted") }
             // Serving has no routing graph callbacks or trace storage.
             try load(artifact: artifact, privateRoot: privateRoot, configuration: configuration, progress: progress)
