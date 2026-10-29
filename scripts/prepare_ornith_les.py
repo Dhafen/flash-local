@@ -201,8 +201,14 @@ def prepare(root, run=None):
         def run(args):
             subprocess.run([str(x) for x in args], cwd=root, check=True)
     if not source.exists():
-        run(["git", "clone", "--filter=blob:none", "--depth", "1", "--single-branch", "--branch", "ios-omni",
-             "--no-recurse-submodules", REPOSITORY, source])
+        # The upstream branch is mutable. Fetch the reviewed object directly
+        # so a fresh build keeps working after that branch advances. Existing
+        # inputs still fail closed below; never reset a caller's checkout.
+        source.mkdir(parents=True)
+        run(["git", "-C", source, "init"])
+        run(["git", "-C", source, "remote", "add", "origin", REPOSITORY])
+        run(["git", "-C", source, "fetch", "--depth", "1", "origin", REVISION])
+        run(["git", "-C", source, "checkout", "--detach", "FETCH_HEAD"])
     actual = subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip()
     if actual != REVISION:
         raise ValueError("LES source moved; refusing an unreviewed revision")
