@@ -64,6 +64,12 @@ class FlintEASTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             eas.plan("delivery")
 
+    def test_metadata_dependency_does_not_add_an_expo_or_react_app_runtime(self):
+        package = json.loads((ROOT / "package.json").read_text())
+        self.assertEqual(package.get("dependencies", {}), {})
+        self.assertEqual(package["devDependencies"], {"expo-modules-autolinking": "2.1.15"})
+        self.assertNotIn("expo", package.get("scripts", {}))
+
 
 if __name__ == "__main__":
     unittest.main()

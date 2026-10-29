@@ -5,6 +5,12 @@ This is a delivery wrapper for the existing Swift application, on the isolated
 prebuild, project relocation, bundle ID change, credential migration or signing.
 The existing GitHub CI and original app are unchanged.
 
+EAS CLI 27.1.0 classifies a project outside `ios/` as managed while resolving
+metadata, even with a custom build. Its entitlement introspector requires the
+pinned **development-only** `expo-modules-autolinking` package. This is only a
+local CLI metadata dependency: no Expo/React Native app runtime, prebuild or
+generated iOS project is used. Run `npm ci --ignore-scripts` before EAS commands.
+
 The linked Expo account must have free iOS builds remaining. Pin EAS CLI 27.1.0
 and the `macos-sequoia-15.6-xcode-26.2` medium worker. The Free plan currently
 allows 15 iOS builds/month and a 45-minute timeout. Check actual account usage
