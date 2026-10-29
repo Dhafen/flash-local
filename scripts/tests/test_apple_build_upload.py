@@ -9,7 +9,7 @@ import sys
 import tempfile
 import threading
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'scripts'))
@@ -25,6 +25,59 @@ def operation(offset, length):
 
 
 class AppleBuildUploadTests(unittest.TestCase):
+    def test_existing_build_never_bypasses_provenance(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ipa = root / 'FlashLocal.ipa'
+            ipa.write_bytes(b'unit fixture')
+            api = Mock()
+            api.request.return_value = {'data': {'attributes': {'bundleId': upload.BUNDLE}}}
+            with patch.object(upload, 'verified_export', return_value={'version': '0.1.0', 'ipaSHA256': 'a' * 64}), \
+                 patch.object(upload, 'find_build', return_value={'id': 'foreign-build'}):
+                with self.assertRaisesRegex(ValueError, 'no matching local upload journal'):
+                    upload.upload_build(api, 'unit-app', ipa, None, root / 'seal.json', 'b' * 40,
+                                        '246', 'unit-run', root / 'journal.json')
+            self.assertEqual(api.request.call_count, 1)  # Read app identity only; no mutation.
+            api.all.assert_not_called()
+
+    def test_existing_build_requires_apple_upload_link_and_exact_binary_checksum(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ipa = Path(tmp) / 'FlashLocal.ipa'
+            ipa.write_bytes(b'synthetic fixture, not a signed application')
+            expected = hashlib.sha256(ipa.read_bytes()).hexdigest()
+            report = {'buildUploadID': 'unit-upload', 'ipaSHA256': expected}
+
+            class FixtureAPI:
+                def __init__(self):
+                    self.linked_build = 'unit-build'
+                    self.checksum = expected
+                    self.calls = []
+
+                def request(self, route, method='GET', body=None, query=None):
+                    self.calls.append(route)
+                    return {'data': {'id': 'unit-upload', 'relationships': {
+                        'build': {'data': {'type': 'builds', 'id': self.linked_build}}}}}
+
+                def all(self, route, query=None):
+                    self.calls.append(route)
+                    return [{'attributes': {'assetType': 'ASSET', 'fileName': ipa.name,
+                        'fileSize': ipa.stat().st_size, 'assetDeliveryState': {'state': 'COMPLETE'},
+                        'sourceFileChecksums': {'file': {'algorithm': 'SHA_256', 'hash': self.checksum}}}}]
+
+            api = FixtureAPI()
+            with self.assertRaisesRegex(ValueError, 'no matching local upload journal'):
+                upload.confirm_build_provenance(api, 'unit-build', {}, ipa)
+            self.assertEqual(api.calls, [])
+            api.linked_build = 'different-build'
+            with self.assertRaisesRegex(ValueError, 'does not belong'):
+                upload.confirm_build_provenance(api, 'unit-build', report, ipa)
+            api.linked_build = 'unit-build'
+            api.checksum = '0' * 64
+            with self.assertRaisesRegex(ValueError, 'does not match'):
+                upload.confirm_build_provenance(api, 'unit-build', report, ipa)
+            api.checksum = expected
+            upload.confirm_build_provenance(api, 'unit-build', report, ipa)
+
     def test_rejects_omitted_overlapping_or_external_upload_instructions(self):
         for operations in ([operation(0, 3)], [operation(0, 3), operation(2, 2)],
                            [operation(1, 4)], [operation(0, 5) | {'method': 'POST'}],

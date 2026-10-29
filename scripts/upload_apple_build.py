@@ -103,6 +103,29 @@ def digest(path, algorithm='sha256'):
     return result.hexdigest()
 
 
+def confirm_build_provenance(api, build_id, report, ipa):
+    """Bind an Apple build to this journal's upload and verified IPA bytes."""
+    build_id = resource_id(build_id)
+    upload_id = report.get('buildUploadID')
+    if not upload_id:
+        raise ValueError('Existing Apple build has no matching local upload journal')
+    upload_id = resource_id(upload_id)
+    upload = api.request('buildUploads/' + upload_id, query={'include': 'build'})['data']
+    linked_build = upload.get('relationships', {}).get('build', {}).get('data') or {}
+    if upload.get('id') != upload_id or linked_build.get('type') != 'builds' or linked_build.get('id') != build_id:
+        raise ValueError('Apple build does not belong to the recorded upload')
+    files = api.all('buildUploads/' + upload_id + '/buildUploadFiles', query={'limit': '200'})
+    binary = [row['attributes'] for row in files if row['attributes'].get('assetType') == 'ASSET']
+    if len(binary) != 1:
+        raise ValueError('Recorded upload does not contain exactly one binary')
+    attrs = binary[0]
+    checksum = attrs.get('sourceFileChecksums', {}).get('file') or {}
+    if ((attrs.get('fileName'), attrs.get('fileSize')) != (ipa.name, ipa.stat().st_size)
+            or attrs.get('assetDeliveryState', {}).get('state') not in ('UPLOAD_COMPLETE', 'COMPLETE')
+            or checksum != {'algorithm': 'SHA_256', 'hash': report['ipaSHA256']}):
+        raise ValueError('Apple upload binary does not match the sealed export')
+
+
 def upload_build(api, app_id, ipa, metadata, seal_path, source, number, run_id, journal):
     """Resume only this exact version and sealed file; never create duplicates."""
     resource_id(app_id)
@@ -127,7 +150,9 @@ def upload_build(api, app_id, ipa, metadata, seal_path, source, number, run_id, 
         journal.write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
 
     save()
-    if find_build(api, app_id, number) is not None:
+    existing_build = find_build(api, app_id, number)
+    if existing_build is not None:
+        confirm_build_provenance(api, existing_build['id'], prior, ipa)
         report['existingBuildObserved'] = True
         save()
         return report
@@ -240,6 +265,7 @@ def main():
 
     deadline = time.monotonic() + 1800
     build = wait_valid(api, app_id, args.build, report['version'], deadline)
+    confirm_build_provenance(api, build['id'], report, args.ipa)
     report.update(processingVerified=True, buildID=build['id'], buildAudienceType='INTERNAL_ONLY')
     save()
     private_target(api, app_id, group_id, allowed)
