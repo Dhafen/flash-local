@@ -14,11 +14,34 @@ MEMORY_KEYS = ('com.apple.developer.kernel.increased-memory-limit',
                'com.apple.developer.kernel.extended-virtual-addressing')
 
 
+def export_options(team, profile_uuid=None):
+    options = {'method': 'app-store-connect', 'destination': 'export',
+               'teamID': team, 'signingStyle': 'manual' if profile_uuid else 'automatic',
+               'signingCertificate': 'Apple Distribution', 'testFlightInternalTestingOnly': True,
+               'manageAppVersionAndBuildNumber': False, 'stripSwiftSymbols': True}
+    if profile_uuid:
+        import uuid
+        uuid.UUID(profile_uuid)
+        options['provisioningProfiles'] = {'com.dhafen.flashlocal': profile_uuid}
+    return options
+
+
+def export_command(archive, root, options_path, environment, manual=False):
+    command = ['xcodebuild', '-exportArchive', '-archivePath', str(archive),
+               '-exportPath', str(root / 'export'), '-exportOptionsPlist', str(options_path)]
+    if not manual:
+        command += ['-allowProvisioningUpdates', '-authenticationKeyPath', environment['ASC_KEY_PATH'],
+                    '-authenticationKeyID', environment['ASC_KEY_ID'],
+                    '-authenticationKeyIssuerID', environment['ASC_ISSUER_ID']]
+    return command
+
+
 def main():
     if sys.platform != 'darwin':
         raise RuntimeError('Xcode export requires macOS')
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('archive', type=pathlib.Path)
+    parser.add_argument('--profile', type=pathlib.Path, help='Use a prevalidated existing App Store profile without an API key')
     args = parser.parse_args()
     root = pathlib.Path(os.environ['RUNNER_TEMP']) / 'flash-local-signing'
     requested_path = pathlib.Path(__file__).resolve().parents[1] / 'Apps/Minirun/Minirun-iOS.entitlements'
@@ -37,17 +60,21 @@ def main():
                            check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).stdout)
     if not all(staged.get(key) is True for key in MEMORY_KEYS):
         raise RuntimeError('Requested memory capabilities did not enter the staged archive')
-    options = {'method': 'app-store-connect', 'destination': 'export',
-               'teamID': os.environ['APPLE_TEAM_ID'], 'signingStyle': 'automatic',
-               'signingCertificate': 'Apple Distribution', 'testFlightInternalTestingOnly': True,
-               'manageAppVersionAndBuildNumber': False, 'stripSwiftSymbols': True}
+    profile_uuid = None
+    if args.profile:
+        profile = plistlib.loads(subprocess.run(['security', 'cms', '-D', '-i', str(args.profile)],
+            check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).stdout)
+        if (profile.get('TeamIdentifier') != [os.environ['APPLE_TEAM_ID']]
+                or profile.get('Entitlements', {}).get('application-identifier') != os.environ['APPLE_TEAM_ID'] + '.com.dhafen.flashlocal'
+                or 'ProvisionedDevices' in profile or profile.get('ProvisionsAllDevices', False)
+                or profile.get('Entitlements', {}).get('get-task-allow', False)
+                or any(profile.get('Entitlements', {}).get(key) is not True for key in MEMORY_KEYS)):
+            raise RuntimeError('Manual profile does not authorize this exact distribution app and memory capabilities')
+        profile_uuid = profile['UUID']
+    options = export_options(os.environ['APPLE_TEAM_ID'], profile_uuid)
     plist = root / 'ExportOptions.plist'
     plist.write_bytes(plistlib.dumps(options))
-    command = ['xcodebuild', '-exportArchive', '-archivePath', str(args.archive),
-               '-exportPath', str(root / 'export'), '-exportOptionsPlist', str(plist),
-               '-allowProvisioningUpdates', '-authenticationKeyPath', os.environ['ASC_KEY_PATH'],
-               '-authenticationKeyID', os.environ['ASC_KEY_ID'],
-               '-authenticationKeyIssuerID', os.environ['ASC_ISSUER_ID']]
+    command = export_command(args.archive, root, plist, os.environ, manual=bool(args.profile))
     with (root / 'export.log').open('wb') as log:
         result = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT)
     if result.returncode:

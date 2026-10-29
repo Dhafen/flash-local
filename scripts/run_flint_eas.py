@@ -214,6 +214,7 @@ def gui_command(command, env, uid):
         "GITHUB_WORKSPACE", "FLASH_LOCAL_ENABLE_LES", "FLASH_LOCAL_ENABLE_FLINT",
         "ORNITH_LES_CPU_CONTROL", "TEST_RUNNER_ORNITH_LES_CPU_CONTROL",
         "EAS_BUILD_ID", "EAS_BUILD_GIT_COMMIT_HASH",
+        "FLINT_SIGNING_INPUT_PATH",
     ) if key in env}
     return ["sudo", "-n", "/bin/launchctl", "asuser", str(uid),
             "sudo", "-n", "-H", "-u", "#" + str(uid), "--", "/usr/bin/env", "-i",

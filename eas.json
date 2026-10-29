@@ -45,6 +45,13 @@
       "env": {
         "FLASH_LOCAL_EAS_STAGE": "regression"
       }
+    },
+    "flint-release": {
+      "extends": "flint-native",
+      "environment": "production",
+      "ios": {
+        "config": "flint-release.yml"
+      }
     }
   }
 }

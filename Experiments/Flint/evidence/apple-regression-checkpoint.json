@@ -1,0 +1,264 @@
+{
+  "group": "regression",
+  "sourceRevision": "3f2fe4d64c868992b5825ef3f37c818ed4d552fe",
+  "xcode": "Xcode 26.2\nBuild version 17C52",
+  "status": "failed",
+  "steps": [
+    {
+      "name": "Build isolated Mac runtime for fast numerical controls",
+      "workflow": "ornith-les.yml",
+      "job": "native-controls",
+      "bodySHA256": "5534c64aab32275e698640b7d238a31530303af8da2ba391d249f10a5b51aade",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 60.711277457999984,
+      "log": "regression-00.log"
+    },
+    {
+      "name": "Actual Metal weight decoding and available projections (untrained only)",
+      "workflow": "ornith-les.yml",
+      "job": "native-controls",
+      "bodySHA256": "ae1d2bd401b73945cd47623126f7962edd4853902035bc6103ea3ac3a0524948",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 7.440184666999983,
+      "log": "regression-01.log"
+    },
+    {
+      "name": "VM page buffers release their touched mappings",
+      "workflow": "ornith-les.yml",
+      "job": "native-controls",
+      "bodySHA256": "d9d055a9f54d4040c97487f94ec1f5cd67fb0fb0d3966b66c0f5b97dddafeda9",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 0.14276412500004199,
+      "log": "regression-02.log"
+    },
+    {
+      "name": "Real checkpoint tensor shapes without trained weights",
+      "workflow": "ornith-les.yml",
+      "job": "native-controls",
+      "bodySHA256": "002f3f937764b9838fdcf1aa8763d277a4e0bce8309c10901c3f3bcdaa685c84",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 17.026842750000014,
+      "log": "regression-03.log"
+    },
+    {
+      "name": "Generate small untrained Ornith fixture",
+      "workflow": "ornith-les.yml",
+      "job": "native-controls",
+      "bodySHA256": "c2bc3ae6a75b0ec7a118d9a83c5fd1540787de3e7e461c0aa365d049a688414f",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 0.060376582999992934,
+      "log": "regression-04.log"
+    },
+    {
+      "name": "Execute the actual BF16 DFlash encoder, injection and proposal graphs (untrained only)",
+      "workflow": "ornith-les.yml",
+      "job": "native-controls",
+      "bodySHA256": "c56ed24a9970d8b5b5a8c5dfd1fbabb6f79d3f0ef32df490bdd16387ccd997f5",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 0.7157129160000295,
+      "log": "regression-05.log"
+    },
+    {
+      "name": "Compare resident, streamed and lookahead execution with the CPU oracle",
+      "workflow": "ornith-les.yml",
+      "job": "native-controls",
+      "bodySHA256": "c648296040e755ef19cdb1612dfcc1635cb9a5965031df49fcd59249a97a2a9a",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 1.583437124999989,
+      "log": "regression-06.log"
+    },
+    {
+      "name": "Mixed Q4_K/Q6_K expert controls",
+      "workflow": "ornith-les.yml",
+      "job": "native-controls",
+      "bodySHA256": "54acdedf9527565286621b13ec980fb6afa1d9864ceb7ce8c8ab4bf8453446f1",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 2.1084710829999835,
+      "log": "regression-07.log"
+    },
+    {
+      "name": "Real routing cardinality without trained weights",
+      "workflow": "ornith-les.yml",
+      "job": "native-controls",
+      "bodySHA256": "dcd86e177d6a2bbc06e47400ce683ce74ef6b60ff611a9c31efde3a2c22c215a",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 5.995979250000005,
+      "log": "regression-08.log"
+    },
+    {
+      "name": "Compare both complete synthetic graphs with the existing pinned CPU reference",
+      "workflow": "ornith-les.yml",
+      "job": "native-controls",
+      "bodySHA256": "a15314c7d48c7945dc27e9060e637fed11c1c6effc54be7d9ddd9743a11ff440",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 37.70663541699997,
+      "log": "regression-09.log"
+    },
+    {
+      "name": "Both thinking modes against the pinned Ornith template",
+      "workflow": "ornith-les.yml",
+      "job": "native-controls",
+      "bodySHA256": "e9272bbe311ec87e15e78d93e41daf56f8927e695bcd4cf934f87c1bb34e74d6",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 1.762496624999983,
+      "log": "regression-10.log"
+    },
+    {
+      "name": "Build isolated original-math LES runtime (Mac, iPhone, Simulator)",
+      "workflow": "ornith-les.yml",
+      "job": "native-controls",
+      "bodySHA256": "e1154df84192255ab385eb3fdacceba4a3226acf45777b276610af8037db7ffe",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 85.33948204199999,
+      "log": "regression-11.log"
+    },
+    {
+      "name": "Build canonical tokenizer for the Swift adapter checks",
+      "workflow": "ornith-les.yml",
+      "job": "native-controls",
+      "bodySHA256": "90a1c7b16ad08534394064d111bd0e6e2fc7eaa76f87a540a23419b069e8621c",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 87.71312783299999,
+      "log": "regression-12.log"
+    },
+    {
+      "name": "Swift memory, comparison and aggregate export controls",
+      "workflow": "ornith-les.yml",
+      "job": "native-controls",
+      "bodySHA256": "71b584366c2b5564accd51db229d822b77d40b63f78bc9fdfacbf932a61c7b9f",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 94.95127170800004,
+      "log": "regression-13.log"
+    },
+    {
+      "name": "Delivery logic tests",
+      "workflow": "ci.yml",
+      "job": "build-and-test",
+      "bodySHA256": "a47e5eb790ffb9d963fec258874c348796263961d659ad94cbf7978e99bda440",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 6.13689204100001,
+      "log": "regression-14.log"
+    },
+    {
+      "name": "Build pinned tokenizer XCFramework (Mac, iPhone, Simulator)",
+      "workflow": "ci.yml",
+      "job": "build-and-test",
+      "bodySHA256": "90a1c7b16ad08534394064d111bd0e6e2fc7eaa76f87a540a23419b069e8621c",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 3.249559958999953,
+      "log": "regression-15.log"
+    },
+    {
+      "name": "Build isolated Flint runtime (Mac, iPhone, Simulator)",
+      "workflow": "ci.yml",
+      "job": "build-and-test",
+      "bodySHA256": "e0d6adbfbb9c01e9eed0ee182ca91244705304226ca3c38c4e56893370f3c820",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 0.2574282089999542,
+      "log": "regression-16.log"
+    },
+    {
+      "name": "Generate fork project with pinned XcodeGen",
+      "workflow": "ci.yml",
+      "job": "build-and-test",
+      "bodySHA256": "622f6d73ad7a2463cb256976e0b63004332716f14246dd8a9788c2aa1c6f3b6b",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 0.7100739999999632,
+      "log": "regression-17.log"
+    },
+    {
+      "name": "Require committed project to match the pinned generator",
+      "workflow": "ci.yml",
+      "job": "build-and-test",
+      "bodySHA256": "06f4fda05495541ad43a8a0daf3f40bc8f02ccc21fa859c355d60230cb461080",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 0.030358083000010083,
+      "log": "regression-18.log"
+    },
+    {
+      "name": "Resolve Swift packages",
+      "workflow": "ci.yml",
+      "job": "build-and-test",
+      "bodySHA256": "5acc4bf410f84f49d761c8ea180905c5a1ebdc59b5f765b712c33753fcfb3bfe",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 36.11480983299998,
+      "log": "regression-19.log"
+    },
+    {
+      "name": "Compile integrated app before numerical gates",
+      "workflow": "ci.yml",
+      "job": "build-and-test",
+      "bodySHA256": "85f4dab6e1dfec07d4a4570259ff83368f9b43bed953038623cd1979d830df35",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 61.02740762499991,
+      "log": "regression-20.log"
+    },
+    {
+      "name": "GGUF parser, state and storage correctness",
+      "workflow": "ci.yml",
+      "job": "build-and-test",
+      "bodySHA256": "325e63d1f231626f6ce0ba2aa1a2dc65811884db8acd00849380ab5e6dd2a8bc",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 84.18307770799993,
+      "log": "regression-21.log"
+    },
+    {
+      "name": "Synthetic full-graph logits against pinned CPU llama.cpp",
+      "workflow": "ci.yml",
+      "job": "build-and-test",
+      "bodySHA256": "b58b511110e3d3fc354bd0be9bfa7315abb97c7ad00bc642f39be25d848055da",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 76.46758158299997,
+      "log": "regression-22.log"
+    },
+    {
+      "name": "App tests (macOS)",
+      "workflow": "ci.yml",
+      "job": "build-and-test",
+      "bodySHA256": "3bd024e23dd8ce2dc6b2409f75082cb392865c5c92534dd77a8d5c22052488fd",
+      "directory": ".",
+      "exitCode": 65,
+      "seconds": 80.60034554200001,
+      "log": "regression-23.log"
+    }
+  ],
+  "signingAttempted": false,
+  "testFlightUploaded": false,
+  "trainedModelInferenceVerified": false,
+  "physicalIPhoneVerified": false,
+  "error": "Existing CI check failed: App tests (macOS)",
+  "runURL": "https://expo.dev/accounts/dhafgard/projects/flash-local/builds/7ac5acf3-7177-494b-9f17-bda92fad2fdf",
+  "artifactIndexHashesVerified": 140,
+  "diagnosis": {
+    "appTestsExecuted": 597,
+    "assertionFailures": 18,
+    "failedTestCases": 3,
+    "cause": "Windows source archive carried CRLF Swift text; line-based static audits expect the canonical Git LF text",
+    "generatorParityPassed": true,
+    "testsWeakened": false,
+    "signingAttempted": false
+  }
+}

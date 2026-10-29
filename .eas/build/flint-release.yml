@@ -1,0 +1,29 @@
+build:
+  name: Flash Local verified app-scoped signing (no upload)
+  steps:
+    - eas/checkout
+    - run:
+        name: Prepare pinned Apple test dependencies
+        command: |
+          set -eu
+          command -v cmake >/dev/null || brew install cmake
+          python3.12 -m venv .work/eas-python
+          .work/eas-python/bin/python -m pip install -r Experiments/Flint/eas-requirements.txt
+    - run:
+        name: Require complete real regression checks before signing
+        command: .work/eas-python/bin/python scripts/run_flint_eas.py --stage regression
+    - run:
+        name: Archive and verify manual export using the existing certificate and app profile
+        command: .work/eas-python/bin/python scripts/sign_flint_eas.py
+    - run:
+        if: ${ always() }
+        name: Preserve bounded validation diagnostics
+        command: |
+          python3 scripts/run_flint_eas.py --collect
+          python3 scripts/sign_flint_eas.py --collect
+    - eas/upload_artifact:
+        if: ${ always() }
+        name: Preserve only the verified app export and public seal
+        inputs:
+          type: build-artifact
+          path: .work/release-output/result.zip

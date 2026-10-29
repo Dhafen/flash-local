@@ -70,5 +70,6 @@
   "trainedModelInferenceVerified": false,
   "physicalIPhoneVerified": false,
   "runURL": "https://expo.dev/accounts/dhafgard/projects/flash-local/builds/a096e88f-8f37-4ca2-89af-391821ddf437",
-  "artifactIndexHashesVerified": 16
+  "artifactIndexHashesVerified": 16,
+  "inputFingerprint": "9c643a5f34e2bb2ad2defa75f7a48b90d412a7dddfc0dc4abbd5b419ad82da1f"
 }

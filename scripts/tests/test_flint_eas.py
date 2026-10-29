@@ -88,6 +88,15 @@ class FlintEASTests(unittest.TestCase):
         self.assertEqual(hashlib.sha256((ROOT / "Apps/Minirun/Resources/QwenModelLicense.txt").read_bytes()).hexdigest(),
                          "a0dc422560841fd68e06d974907f8b4c709bca44a67daad2b528437bdf676c08")
 
+    def test_windows_source_archive_preserves_apple_audit_line_boundaries(self):
+        # CRLF is one Swift Character, so the existing source reader cannot
+        # find a standalone newline after // comments in a CRLF archive.
+        for name in ("RootView.swift", "ConversationView.swift", "DestinationPicker.swift"):
+            path = ROOT / "Apps/Minirun/Sources/Screens" / name
+            self.assertNotIn(b"\r", path.read_bytes(), name)
+        destination = (ROOT / "Apps/Minirun/Sources/Screens/DestinationPicker.swift").read_bytes()
+        self.assertIn(b"#if os(macOS)\n            .frame(minWidth: 560", destination)
+
     def test_profiles_never_sign_autoincrement_or_use_large_paid_workers(self):
         config = json.loads((ROOT / "eas.json").read_text())
         self.assertEqual(config["cli"]["version"], "27.1.0")

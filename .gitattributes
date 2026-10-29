@@ -4,3 +4,6 @@ Apps/Minirun/Resources/QwenModelLicense.txt -text
 # carry the same license bytes as an Apple/Git checkout.
 Apps/Minirun/Resources/OpenSourceNotices.txt text eol=lf
 Apps/Minirun/Resources/Flint-LICENSE.txt text eol=lf
+# Apple source audits parse line boundaries. A source archive prepared on
+# Windows must contain the same Swift text as a normal macOS Git checkout.
+*.swift text eol=lf
