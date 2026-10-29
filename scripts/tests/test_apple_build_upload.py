@@ -217,7 +217,7 @@ class AppleBuildUploadTests(unittest.TestCase):
                 ('buildUploadFiles', 'POST'), ('buildUploadFiles', 'POST'),
                 ('buildUploadFiles/1', 'PATCH'), ('buildUploadFiles/2', 'PATCH')])
             self.assertEqual(mutations[-1][2]['data']['attributes']['sourceFileChecksums']['file'],
-                             {'algorithm': 'SHA_256', 'hash': record['ipaSHA256']})
+                             {'algorithm': 'MD5', 'hash': hashlib.md5(ipa.read_bytes(), usedforsecurity=False).hexdigest()})
             self.assertTrue(result['binaryUploadCommitted'])
             self.assertFalse(result['processingVerified'])
             self.assertFalse(result['availableToInternalTesters'])

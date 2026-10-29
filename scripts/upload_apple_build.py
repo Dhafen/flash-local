@@ -244,7 +244,10 @@ def upload_build(api, app_id, ipa, metadata, seal_path, source, number, run_id, 
             raise ValueError('Local export changed during upload; refusing commit')
         api.request('buildUploadFiles/' + file_id, method='PATCH', body={'data': {
             'type': 'buildUploadFiles', 'id': file_id, 'attributes': {'uploaded': True,
-                'sourceFileChecksums': {'file': {'algorithm': 'SHA_256', 'hash': checksum}}}}})
+                # Apple's build upload endpoint rejected SHA_256 for this
+                # asset. Its transport checksum uses MD5; the immutable local
+                # export remains bound to the verified SHA-256 seal above.
+                'sourceFileChecksums': {'file': {'algorithm': 'MD5', 'hash': digest(path, 'md5')}}}}})
     report['binaryUploadCommitted'] = True
     save()
     return report
