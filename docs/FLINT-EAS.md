@@ -37,6 +37,14 @@ on Mac and Simulator, alongside the four existing visual suites. Its gate
 requires actual capture markers; skipped/empty tests cannot silently pass.
 Inspect the exported PNGs before treating visual review as complete.
 
+EAS build `7290041a-82a5-442d-957c-e377115f9d17` compiled the Mac app and
+package test bundles, then failed before executing XCTest because the worker's
+`com.apple.testmanagerd.control` service was unavailable. Device compilation and
+Simulator controls now precede host XCTest, and the ephemeral worker runs
+Apple's normal `xcodebuild -runFirstLaunch` setup with bounded diagnostics.
+Tests run serially. No security settings are disabled, and a missing service
+still fails the tests and prevents delivery; initialization is not test proof.
+
 Both profiles preserve full logs and a source-bound JSON record in their build
 artifacts, including on failure. A green job is only evidence for its listed
 checks: it is **not** proof of trained inference, a signed IPA, TestFlight,

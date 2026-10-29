@@ -13,6 +13,7 @@ import json
 import os
 import pathlib
 import platform
+import plistlib
 import subprocess
 import sys
 import time
@@ -93,26 +94,66 @@ def plan(stage):
                 "-scheme", "Minirun-macOS", *FLAGS]),
             ("mac-app-compile", ["xcodebuild", "build", "-project", "Apps/Minirun/Minirun.xcodeproj", "-scheme", "Minirun-macOS",
                 "-destination", "platform=macOS", "CODE_SIGNING_ALLOWED=NO", *FLAGS]),
-            ("flint-swift-tests", ["xcodebuild", "test", "-scheme", "minirun-Package", "-destination", "platform=macOS",
-                "-only-testing:FlintEngineTests", "-only-testing:MinirunKitTests/LocalFlintProtocolTests",
-                "-only-testing:MinirunKitTests/LocalModelAPITests", *FLAGS]),
             ("iphone-release-compile", ["xcodebuild", "build", "-project", "Apps/Minirun/Minirun.xcodeproj", "-scheme", "Minirun-iOS",
                 "-configuration", "Release", "-destination", "generic/platform=iOS", "CODE_SIGNING_ALLOWED=NO", *FLAGS]),
+            ("apple-test-host", [py, "scripts/run_flint_eas.py", "--prepare-tests"]),
         ]
     elif stage != "native":
         raise ValueError("Unknown EAS validation stage")
     if stage == "visual":
         steps += [
+            ("ios-visual-tests", [py, "scripts/run_ios_brand_checks.py", "--timeout-seconds", "900", "--attempts", "1"]),
+        ]
+    if stage in ("compile", "visual"):
+        steps += [
+            ("flint-swift-tests", ["xcodebuild", "test", "-scheme", "minirun-Package", "-destination", "platform=macOS",
+                "-parallel-testing-enabled", "NO", "-only-testing:FlintEngineTests",
+                "-only-testing:MinirunKitTests/LocalFlintProtocolTests", "-only-testing:MinirunKitTests/LocalModelAPITests", *FLAGS]),
+        ]
+    if stage == "visual":
+        steps += [
             ("mac-visual-tests", ["xcodebuild", "test", "-project", "Apps/Minirun/Minirun.xcodeproj", "-scheme", "Minirun-macOS",
-                "-destination", "platform=macOS", "CODE_SIGNING_ALLOWED=NO", *FLAGS,
+                "-destination", "platform=macOS", "-parallel-testing-enabled", "NO", "CODE_SIGNING_ALLOWED=NO", *FLAGS,
                 "-only-testing:MinirunTests/ForkBrandRenderTests", "-only-testing:MinirunTests/REAMChatRenderTests",
                 "-only-testing:MinirunTests/OrnithPerformanceRenderTests", "-only-testing:MinirunTests/OrnithLESRenderTests",
                 "-only-testing:MinirunTests/FlintRenderTests", "-resultBundlePath", ".work/eas-visual/mac.xcresult"]),
             ("mac-visual-export", ["xcrun", "xcresulttool", "export", "attachments", "--path", ".work/eas-visual/mac.xcresult",
                 "--output-path", ".work/eas-visual/mac"]),
-            ("ios-visual-tests", [py, "scripts/run_ios_brand_checks.py", "--timeout-seconds", "900", "--attempts", "1"]),
         ]
     return steps
+
+
+def prepare_apple_test_host():
+    """Initialize Apple's installed test components on the ephemeral EAS Mac.
+
+    EAS can compile binaries before testmanagerd has been registered. Use the
+    ordinary Xcode first-launch setup, without changing security permissions,
+    loading hand-written daemons or treating setup as an executed test.
+    """
+    if platform.system() != "Darwin" or not os.environ.get("EAS_BUILD_ID"):
+        raise RuntimeError("Test-host initialization is only for the ephemeral EAS Mac")
+    for command in (["launchctl", "managername"], ["xcodebuild", "-checkFirstLaunchStatus"]):
+        result = subprocess.run(command, capture_output=True, text=True, timeout=90)
+        print(json.dumps({"command": command, "exitCode": result.returncode,
+                          "output": (result.stdout + result.stderr)[-4000:]}), flush=True)
+    # A missing launchd registration can remain even when the status check
+    # says the installed components are current. Re-run Apple's own setup.
+    subprocess.run(["sudo", "-n", "xcodebuild", "-runFirstLaunch"], check=True, timeout=300)
+    for domain in ("user/" + str(os.getuid()), "gui/" + str(os.getuid()), "system"):
+        for label in ("com.apple.dt.testmanagerd", "com.apple.testmanagerd"):
+            result = subprocess.run(["launchctl", "print", domain + "/" + label],
+                                    capture_output=True, text=True, timeout=30)
+            # Do not export launchd environments. Only presence/exit status is
+            # needed to diagnose whether the worker can launch Apple tests.
+            print(json.dumps({"service": domain + "/" + label, "exitCode": result.returncode}), flush=True)
+    for directory in ("/Library/LaunchAgents", "/System/Library/LaunchAgents", "/Library/LaunchDaemons"):
+        for path in sorted(pathlib.Path(directory).glob("*testmanager*.plist")):
+            with path.open("rb") as stream:
+                config = plistlib.load(stream)
+            print(json.dumps({"installedAgent": str(path), "label": config.get("Label"),
+                              "machServices": list(config.get("MachServices", {})),
+                              "sessionTypes": config.get("LimitLoadToSessionType")}), flush=True)
+    print("Apple host preparation completed; no test result is implied", flush=True)
 
 
 def host_check():
@@ -206,9 +247,12 @@ def main():
     parser.add_argument("--stage", choices=["native", "compile", "visual"], default="native")
     parser.add_argument("--plan", action="store_true", help="Print commands only; does not execute a build")
     parser.add_argument("--collect", action="store_true")
+    parser.add_argument("--prepare-tests", action="store_true")
     args = parser.parse_args()
     if args.collect:
         collect()
+    elif args.prepare_tests:
+        prepare_apple_test_host()
     elif args.plan:
         print(json.dumps(plan(args.stage), indent=2))
     else:

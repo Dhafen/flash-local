@@ -35,6 +35,14 @@ class FlintEASTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "real Apple-silicon"):
                 eas.host_check()
 
+    def test_device_compile_and_simulator_controls_precede_host_xctest(self):
+        steps = [name for name, _ in eas.plan("visual")]
+        self.assertLess(steps.index("iphone-release-compile"), steps.index("apple-test-host"))
+        self.assertLess(steps.index("ios-visual-tests"), steps.index("flint-swift-tests"))
+        with patch.object(eas.platform, "system", return_value="Windows"):
+            with self.assertRaisesRegex(RuntimeError, "ephemeral EAS Mac"):
+                eas.prepare_apple_test_host()
+
     def test_profiles_never_sign_autoincrement_or_use_large_paid_workers(self):
         config = json.loads((ROOT / "eas.json").read_text())
         self.assertEqual(config["cli"]["version"], "27.1.0")
