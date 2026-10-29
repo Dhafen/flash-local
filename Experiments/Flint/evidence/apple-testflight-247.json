@@ -1,0 +1,17 @@
+{
+  "sourceRevision": "4a4441616fa10624409184770d86602b1087cc43",
+  "buildNumber": "247",
+  "version": "0.1.0",
+  "ipaSHA256": "ac20b1546b260ea80cff5c24d75f59999a5bbe97ea792fdfb2b1700b976f17bb",
+  "binaryUploadCommitted": true,
+  "processingVerified": true,
+  "availableToInternalTesters": true,
+  "buildAudienceType": "INTERNAL_ONLY",
+  "groupAssociationVerified": true,
+  "internalBuildState": "IN_BETA_TESTING",
+  "easBuildURL": "https://expo.dev/accounts/dhafgard/projects/flash-local/builds/78144fdd-1dbb-4a8e-b739-7a40f85923d7",
+  "realFlintHeaderVerifiedLocally": true,
+  "realFlintHeaderBytesRead": 5469879,
+  "realFlintTensorCount": 779,
+  "physicalIPhoneInferenceVerified": false
+}
