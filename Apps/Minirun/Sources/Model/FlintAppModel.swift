@@ -46,17 +46,26 @@ struct FlintChatTurn: Codable, Identifiable {
 /// create a native context, re-download weights or repeat a benchmark.
 @Observable @MainActor
 final class FlintAppModel {
-    var prompt = "", systemPrompt = ""
+    var prompt = ""
+    var systemPrompt = ""
     var contextProfile: LocalContextProfile = .standard
     var options = LocalModelCapabilities(family: .flint).defaultOptions
     private(set) var history: [FlintChatTurn] = []
-    private(set) var ready = false, isBusy = false, isShuttingDown = false
-    private(set) var sceneIsActive = true, hasModel = false
-    private(set) var status = "Ej laddad", error: String?
-    private(set) var fraction: Double?, loadingStartedAt: Date?
-    private(set) var report: FlintGenerationReport?, reportURL: URL?
+    private(set) var ready = false
+    private(set) var isBusy = false
+    private(set) var isShuttingDown = false
+    private(set) var sceneIsActive = true
+    private(set) var hasModel = false
+    private(set) var status = "Ej laddad"
+    private(set) var error: String?
+    private(set) var fraction: Double?
+    private(set) var loadingStartedAt: Date?
+    private(set) var report: FlintGenerationReport?
+    private(set) var reportURL: URL?
     private(set) var numericalReportURL: URL?
-    private(set) var apiStatus = "Avstängd", apiURLs: [String] = [], apiAccessKey = ""
+    private(set) var apiStatus = "Avstängd"
+    private(set) var apiURLs: [String] = []
+    private(set) var apiAccessKey = ""
     private(set) var apiListening = false
     var apiPort = 8080
     var apiKeyDraft = ""
@@ -69,7 +78,8 @@ final class FlintAppModel {
     @ObservationIgnored private var shutdownOperation: Task<Void, Never>?
     @ObservationIgnored private var activeGeneration: LocalChatGeneration?
     @ObservationIgnored private var apiServer: LocalModelAPIServer?
-    @ObservationIgnored private var apiID: UUID?, operationID: UUID?
+    @ObservationIgnored private var apiID: UUID?
+    @ObservationIgnored private var operationID: UUID?
     private var historyURL: URL { privateRoot.appendingPathComponent("chat-v1.json") }
     var canStart: Bool { sceneIsActive && !isBusy && !isShuttingDown }
     var canSend: Bool { canStart && ready }
