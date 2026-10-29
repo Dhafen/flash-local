@@ -18,6 +18,7 @@ import tempfile
 import zipfile
 
 from run_flint_eas import gui_command, host_check
+from deliver_testflight import verified_export
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / '.work/release-output'
@@ -74,6 +75,27 @@ def private_error_summary(path, redactions):
             tail = tail.replace(value, '[withheld]')
     return '\n'.join(line[:1000] for line in tail.splitlines()
                      if 'error:' in line.lower() or 'error exportarchive:' in line.lower())[-6000:]
+
+
+def package_export(directory, seal_path, output, source, build, run_id):
+    """Keep a verified IPA even when Xcode omits optional export metadata."""
+    files = list(directory.glob('*.ipa'))
+    if len(files) != 1:
+        raise ValueError('Exactly one verified exported IPA is required')
+    verified_export(files[0], seal_path, source, build, run_id)
+    metadata = directory / 'AppStoreInfo.plist'
+    with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+        # Publish the valuable verified binary first. A later metadata issue
+        # must not discard it when the temporary keychain/archive is cleaned.
+        archive.write(files[0], 'FlashLocal.ipa')
+        archive.write(seal_path, 'ios-signing-probe.json')
+        if metadata.is_file():
+            if not 0 < metadata.stat().st_size <= 2 * 1024 * 1024:
+                raise ValueError('Unexpected optional Xcode metadata size; verified IPA has been preserved')
+            if not isinstance(plistlib.loads(metadata.read_bytes()), dict):
+                raise ValueError('Invalid optional Xcode metadata; verified IPA has been preserved')
+            archive.write(metadata, 'AppStoreInfo.plist')
+    return {'appStoreInfoIncluded': metadata.is_file()}
 
 
 def main():
@@ -142,14 +164,8 @@ def main():
                               GITHUB_RUN_ID=os.environ['EAS_BUILD_ID'])
             run([sys.executable, 'scripts/probe_automatic_export.py', archive, '--profile', profile], env=export_env)
         seal = ROOT / 'ios-signing-probe.json'
-        files = list((signing / 'export').glob('*.ipa'))
-        metadata = signing / 'export/AppStoreInfo.plist'
-        if len(files) != 1 or not metadata.is_file(): raise ValueError('Verified IPA and Xcode AppStoreInfo.plist are required')
-        from deliver_testflight import verified_export
-        verified_export(files[0], seal, revision, str(data['build']), os.environ['EAS_BUILD_ID'])
-        with zipfile.ZipFile(OUTPUT / 'release.zip', 'w', compression=zipfile.ZIP_DEFLATED) as out:
-            for path, name in ((files[0], 'FlashLocal.ipa'), (metadata, 'AppStoreInfo.plist'), (seal, 'ios-signing-probe.json')):
-                out.write(path, name)
+        report.update(package_export(signing / 'export', seal, OUTPUT / 'release.zip',
+            revision, str(data['build']), os.environ['EAS_BUILD_ID']))
         report['signedExportVerified'] = True
         print('Verified signed internal-only export prepared; no API private key copied and no TestFlight upload attempted')
     finally:
@@ -164,7 +180,9 @@ def main():
 def collect():
     OUTPUT.mkdir(parents=True, exist_ok=True)
     public_files = [(ROOT / '.work/eas-output/reports.zip', 'validation-reports.zip'),
-                    (OUTPUT / 'release.zip', 'release.zip'), (OUTPUT / 'release-status.json', 'release-status.json')]
+                    (OUTPUT / 'release.zip', 'release.zip'), (OUTPUT / 'release-status.json', 'release-status.json'),
+                    (OUTPUT / 'archive-check.json', 'archive-check.json'),
+                    (ROOT / 'ios-signing-probe.json', 'ios-signing-probe.json')]
     with zipfile.ZipFile(OUTPUT / 'result.zip', 'w', compression=zipfile.ZIP_STORED) as out:
         for path, name in public_files:
             if path.is_file():

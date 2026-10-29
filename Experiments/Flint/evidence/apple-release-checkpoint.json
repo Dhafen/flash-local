@@ -1,0 +1,375 @@
+{
+  "group": "regression",
+  "sourceRevision": "56c62f9474fcf3ac0559ca9824dbb8bd09f20a29",
+  "xcode": "Xcode 26.2\nBuild version 17C52",
+  "status": "passed",
+  "steps": [
+    {
+      "name": "Build isolated Mac runtime for fast numerical controls",
+      "workflow": "ornith-les.yml",
+      "job": "native-controls",
+      "bodySHA256": "5534c64aab32275e698640b7d238a31530303af8da2ba391d249f10a5b51aade",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 67.411230542,
+      "log": "regression-00.log"
+    },
+    {
+      "name": "Actual Metal weight decoding and available projections (untrained only)",
+      "workflow": "ornith-les.yml",
+      "job": "native-controls",
+      "bodySHA256": "ae1d2bd401b73945cd47623126f7962edd4853902035bc6103ea3ac3a0524948",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 7.263535416000025,
+      "log": "regression-01.log"
+    },
+    {
+      "name": "VM page buffers release their touched mappings",
+      "workflow": "ornith-les.yml",
+      "job": "native-controls",
+      "bodySHA256": "d9d055a9f54d4040c97487f94ec1f5cd67fb0fb0d3966b66c0f5b97dddafeda9",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 0.1419694159999949,
+      "log": "regression-02.log"
+    },
+    {
+      "name": "Real checkpoint tensor shapes without trained weights",
+      "workflow": "ornith-les.yml",
+      "job": "native-controls",
+      "bodySHA256": "002f3f937764b9838fdcf1aa8763d277a4e0bce8309c10901c3f3bcdaa685c84",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 17.337330667000003,
+      "log": "regression-03.log"
+    },
+    {
+      "name": "Generate small untrained Ornith fixture",
+      "workflow": "ornith-les.yml",
+      "job": "native-controls",
+      "bodySHA256": "c2bc3ae6a75b0ec7a118d9a83c5fd1540787de3e7e461c0aa365d049a688414f",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 0.043765540999970654,
+      "log": "regression-04.log"
+    },
+    {
+      "name": "Execute the actual BF16 DFlash encoder, injection and proposal graphs (untrained only)",
+      "workflow": "ornith-les.yml",
+      "job": "native-controls",
+      "bodySHA256": "c56ed24a9970d8b5b5a8c5dfd1fbabb6f79d3f0ef32df490bdd16387ccd997f5",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 0.8032296249999717,
+      "log": "regression-05.log"
+    },
+    {
+      "name": "Compare resident, streamed and lookahead execution with the CPU oracle",
+      "workflow": "ornith-les.yml",
+      "job": "native-controls",
+      "bodySHA256": "c648296040e755ef19cdb1612dfcc1635cb9a5965031df49fcd59249a97a2a9a",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 0.9989207090000036,
+      "log": "regression-06.log"
+    },
+    {
+      "name": "Mixed Q4_K/Q6_K expert controls",
+      "workflow": "ornith-les.yml",
+      "job": "native-controls",
+      "bodySHA256": "54acdedf9527565286621b13ec980fb6afa1d9864ceb7ce8c8ab4bf8453446f1",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 1.9983550000000037,
+      "log": "regression-07.log"
+    },
+    {
+      "name": "Real routing cardinality without trained weights",
+      "workflow": "ornith-les.yml",
+      "job": "native-controls",
+      "bodySHA256": "dcd86e177d6a2bbc06e47400ce683ce74ef6b60ff611a9c31efde3a2c22c215a",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 5.5115599999999745,
+      "log": "regression-08.log"
+    },
+    {
+      "name": "Compare both complete synthetic graphs with the existing pinned CPU reference",
+      "workflow": "ornith-les.yml",
+      "job": "native-controls",
+      "bodySHA256": "a15314c7d48c7945dc27e9060e637fed11c1c6effc54be7d9ddd9743a11ff440",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 36.69102287499999,
+      "log": "regression-09.log"
+    },
+    {
+      "name": "Both thinking modes against the pinned Ornith template",
+      "workflow": "ornith-les.yml",
+      "job": "native-controls",
+      "bodySHA256": "e9272bbe311ec87e15e78d93e41daf56f8927e695bcd4cf934f87c1bb34e74d6",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 1.9218370419999928,
+      "log": "regression-10.log"
+    },
+    {
+      "name": "Build isolated original-math LES runtime (Mac, iPhone, Simulator)",
+      "workflow": "ornith-les.yml",
+      "job": "native-controls",
+      "bodySHA256": "e1154df84192255ab385eb3fdacceba4a3226acf45777b276610af8037db7ffe",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 87.39706854100001,
+      "log": "regression-11.log"
+    },
+    {
+      "name": "Build canonical tokenizer for the Swift adapter checks",
+      "workflow": "ornith-les.yml",
+      "job": "native-controls",
+      "bodySHA256": "90a1c7b16ad08534394064d111bd0e6e2fc7eaa76f87a540a23419b069e8621c",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 97.92668904200002,
+      "log": "regression-12.log"
+    },
+    {
+      "name": "Swift memory, comparison and aggregate export controls",
+      "workflow": "ornith-les.yml",
+      "job": "native-controls",
+      "bodySHA256": "71b584366c2b5564accd51db229d822b77d40b63f78bc9fdfacbf932a61c7b9f",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 103.735845875,
+      "log": "regression-13.log"
+    },
+    {
+      "name": "Delivery logic tests",
+      "workflow": "ci.yml",
+      "job": "build-and-test",
+      "bodySHA256": "a47e5eb790ffb9d963fec258874c348796263961d659ad94cbf7978e99bda440",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 5.326959166999927,
+      "log": "regression-14.log"
+    },
+    {
+      "name": "Build pinned tokenizer XCFramework (Mac, iPhone, Simulator)",
+      "workflow": "ci.yml",
+      "job": "build-and-test",
+      "bodySHA256": "90a1c7b16ad08534394064d111bd0e6e2fc7eaa76f87a540a23419b069e8621c",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 4.423940791999939,
+      "log": "regression-15.log"
+    },
+    {
+      "name": "Build isolated Flint runtime (Mac, iPhone, Simulator)",
+      "workflow": "ci.yml",
+      "job": "build-and-test",
+      "bodySHA256": "e0d6adbfbb9c01e9eed0ee182ca91244705304226ca3c38c4e56893370f3c820",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 0.3885021670000697,
+      "log": "regression-16.log"
+    },
+    {
+      "name": "Generate fork project with pinned XcodeGen",
+      "workflow": "ci.yml",
+      "job": "build-and-test",
+      "bodySHA256": "622f6d73ad7a2463cb256976e0b63004332716f14246dd8a9788c2aa1c6f3b6b",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 0.6054761670000062,
+      "log": "regression-17.log"
+    },
+    {
+      "name": "Require committed project to match the pinned generator",
+      "workflow": "ci.yml",
+      "job": "build-and-test",
+      "bodySHA256": "06f4fda05495541ad43a8a0daf3f40bc8f02ccc21fa859c355d60230cb461080",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 0.04530245799992372,
+      "log": "regression-18.log"
+    },
+    {
+      "name": "Resolve Swift packages",
+      "workflow": "ci.yml",
+      "job": "build-and-test",
+      "bodySHA256": "5acc4bf410f84f49d761c8ea180905c5a1ebdc59b5f765b712c33753fcfb3bfe",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 33.466244458000006,
+      "log": "regression-19.log"
+    },
+    {
+      "name": "Compile integrated app before numerical gates",
+      "workflow": "ci.yml",
+      "job": "build-and-test",
+      "bodySHA256": "85f4dab6e1dfec07d4a4570259ff83368f9b43bed953038623cd1979d830df35",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 71.67831424999997,
+      "log": "regression-20.log"
+    },
+    {
+      "name": "GGUF parser, state and storage correctness",
+      "workflow": "ci.yml",
+      "job": "build-and-test",
+      "bodySHA256": "325e63d1f231626f6ce0ba2aa1a2dc65811884db8acd00849380ab5e6dd2a8bc",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 89.188971208,
+      "log": "regression-21.log"
+    },
+    {
+      "name": "Synthetic full-graph logits against pinned CPU llama.cpp",
+      "workflow": "ci.yml",
+      "job": "build-and-test",
+      "bodySHA256": "b58b511110e3d3fc354bd0be9bfa7315abb97c7ad00bc642f39be25d848055da",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 94.98556649999989,
+      "log": "regression-22.log"
+    },
+    {
+      "name": "App tests (macOS)",
+      "workflow": "ci.yml",
+      "job": "build-and-test",
+      "bodySHA256": "3bd024e23dd8ce2dc6b2409f75082cb392865c5c92534dd77a8d5c22052488fd",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 88.34164687499992,
+      "log": "regression-23.log"
+    },
+    {
+      "name": "macOS brand review in light and dark",
+      "workflow": "ci.yml",
+      "job": "build-and-test",
+      "bodySHA256": "dccaec98234ffb44819fc9d2e68531f1f2e601946cdbd097287948c425d0426d",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 16.68534858299995,
+      "log": "regression-24.log"
+    },
+    {
+      "name": "Package tests (MinirunKit)",
+      "workflow": "ci.yml",
+      "job": "build-and-test",
+      "bodySHA256": "5a991daa9d1ef8a2f4dfc1fa48f9483ed7189b57d040e64a114b8926c65e89b1",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 39.74816233299998,
+      "log": "regression-25.log"
+    },
+    {
+      "name": "Flint Swift actor and protocol tests",
+      "workflow": "ci.yml",
+      "job": "build-and-test",
+      "bodySHA256": "fd88597dd47deacae227b259e08705b611f7164d82ad53fd1568f073a7b26b1c",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 6.766554000000042,
+      "log": "regression-26.log"
+    },
+    {
+      "name": "Failing tests, if any",
+      "workflow": "ci.yml",
+      "job": "build-and-test",
+      "bodySHA256": "010ffc4d06ac2bd79d64a5cb6d39b8aa82d8b5caf04c395a291c20fd562b8ebe",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 0.06642420900016077,
+      "log": "regression-27.log"
+    },
+    {
+      "name": "Build the iOS app (Simulator)",
+      "workflow": "ci.yml",
+      "job": "build-and-test",
+      "bodySHA256": "7d209d153487cf3df9bb2229b25d7a5185af0131c94a2b4ecd25602314066e86",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 179.15406966599994,
+      "log": "regression-28.log"
+    },
+    {
+      "name": "Compile the opt-in Flint app for physical iPhone (unsigned)",
+      "workflow": "ci.yml",
+      "job": "build-and-test",
+      "bodySHA256": "13d24a1fa2058d19f490cca0240141aa93a3391d07e6038afac1474707e875d4",
+      "directory": ".",
+      "exitCode": 0,
+      "seconds": 163.60186875,
+      "log": "regression-29.log"
+    }
+  ],
+  "signingAttempted": false,
+  "testFlightUploaded": false,
+  "trainedModelInferenceVerified": false,
+  "physicalIPhoneVerified": false,
+  "runURL": "https://expo.dev/accounts/dhafgard/projects/flash-local/builds/b4262125-c9ff-44ee-981b-557fdd77c9ab",
+  "artifactIndexHashesVerified": 202,
+  "overallEASStatus": "ERRORED",
+  "release": {
+    "build": "246",
+    "testFlightUploaded": false,
+    "signedExportVerified": false,
+    "ipaArtifactPreserved": false,
+    "blocker": "The EAS packaging helper incorrectly required optional AppStoreInfo.plist after Xcode export; cleanup discarded the temporary IPA",
+    "furtherCloudBuildsStarted": false,
+    "temporaryEASSigningSecretRemoved": true
+  },
+  "actualTests": {
+    "macApp": {
+      "executed": 597,
+      "failed": 0
+    },
+    "minirunKit": {
+      "executed": 509,
+      "passed": 500,
+      "skipped": 9,
+      "failed": 0
+    },
+    "streamingCasePasses": 321,
+    "parityCasePasses": 19,
+    "flintSwiftCasePasses": 16,
+    "macVisualCasePasses": 6,
+    "iosSimulatorBuildPassed": true,
+    "unsignedPhysicalIPhoneBuildPassed": true,
+    "iosVisualExecutedInThisRun": false
+  },
+  "macVisualReview": {
+    "reviewed": 6,
+    "status": "passed",
+    "loadedModel": false,
+    "notes": "All three actual unloaded panes readable with opaque backgrounds in light and dark",
+    "captures": [
+      {
+        "name": "flint-macos-unloaded-Prestanda-dark",
+        "sha256": "1500e3affca25796116c803796264b9bd0013e73cb621813b7a509c52b6aade9"
+      },
+      {
+        "name": "flint-macos-unloaded-Prestanda-light",
+        "sha256": "1c0801fd9458c612d1c5735f69e60d7d09a6a60451cb6732454e1685ee7aee69"
+      },
+      {
+        "name": "flint-macos-unloaded-API-dark",
+        "sha256": "28d5248ffe0de88d1460116b311592396ce06cedfafbf91a65cce1f5e6970f45"
+      },
+      {
+        "name": "flint-macos-unloaded-API-light",
+        "sha256": "54aab6aff078bcd116b43afec6cd66b603629b91e31da0a2b481c6051d243a64"
+      },
+      {
+        "name": "flint-macos-unloaded-Chatt-dark",
+        "sha256": "96f443623ec3bb22e3d72e2bc2267ce5730e89a780a3f836924294b92df5efcc"
+      },
+      {
+        "name": "flint-macos-unloaded-Chatt-light",
+        "sha256": "9e3ead925bb81dee3e7fb8fc8474b05d25ac482f6b5279285ccfd9a2723af74c"
+      }
+    ]
+  }
+}

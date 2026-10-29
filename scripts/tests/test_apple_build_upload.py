@@ -121,6 +121,16 @@ class AppleBuildUploadTests(unittest.TestCase):
             self.assertFalse(result['processingVerified'])
             self.assertFalse(result['availableToInternalTesters'])
 
+            ipa_only = FixtureAPI()
+            with patch.object(upload, 'put_file') as put:
+                result = upload.upload_build(ipa_only, 'unit-app', ipa, None, seal, source,
+                    '246', 'unit-run', root / 'ipa-only-journal.json')
+                self.assertEqual(put.call_count, 1)
+            self.assertEqual([body['data']['attributes']['assetType'] for route, method, body in ipa_only.calls
+                              if route == 'buildUploadFiles' and method == 'POST'], ['ASSET'])
+            self.assertTrue(result['binaryUploadCommitted'])
+            self.assertFalse(result['availableToInternalTesters'])
+
             class AmbiguousAPI(FixtureAPI):
                 def request(self, route, method='GET', body=None, query=None):
                     value = super().request(route, method, body, query)

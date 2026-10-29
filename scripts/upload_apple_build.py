@@ -107,12 +107,13 @@ def upload_build(api, app_id, ipa, metadata, seal_path, source, number, run_id, 
     """Resume only this exact version and sealed file; never create duplicates."""
     resource_id(app_id)
     seal = verified_export(ipa, seal_path, source, number, run_id)
-    if not metadata.is_file() or not 0 < metadata.stat().st_size <= 2 * 1024 * 1024:
-        raise ValueError('Bounded Xcode AppStoreInfo.plist export metadata is required')
-    import plistlib
-    parsed = plistlib.loads(metadata.read_bytes())
-    if not isinstance(parsed, dict):
-        raise ValueError('Invalid Xcode export metadata')
+    if metadata is not None:
+        if not metadata.is_file() or not 0 < metadata.stat().st_size <= 2 * 1024 * 1024:
+            raise ValueError('Supplied Xcode metadata must be a bounded regular file')
+        import plistlib
+        parsed = plistlib.loads(metadata.read_bytes())
+        if not isinstance(parsed, dict):
+            raise ValueError('Invalid Xcode export metadata')
     if api.request('apps/' + app_id)['data']['attributes']['bundleId'] != BUNDLE:
         raise ValueError('Wrong App Store app')
     prior = json.loads(journal.read_text(encoding='utf-8')) if journal.is_file() else {}
@@ -152,9 +153,14 @@ def upload_build(api, app_id, ipa, metadata, seal_path, source, number, run_id, 
     report['buildUploadID'] = identifier
     save()
     existing = api.all('buildUploads/' + identifier + '/buildUploadFiles', query={'limit': '200'})
-    specifications = [(metadata, 'ASSET_DESCRIPTION',
-        'com.apple.binary-property-list' if metadata.read_bytes().startswith(b'bplist') else 'com.apple.xml-property-list'),
-        (ipa, 'ASSET', 'com.apple.ipa')]
+    # Apple's Build Uploads API supports an IPA asset without a description
+    # file. AppStoreInfo.plist is mandatory for Windows Transporter, which
+    # this direct API path does not use. Apple processing/audience still gates
+    # any private tester association in main().
+    specifications = [(ipa, 'ASSET', 'com.apple.ipa')]
+    if metadata is not None:
+        specifications.insert(0, (metadata, 'ASSET_DESCRIPTION',
+            'com.apple.binary-property-list' if metadata.read_bytes().startswith(b'bplist') else 'com.apple.xml-property-list'))
     if any(row['attributes'].get('assetType') not in ('ASSET', 'ASSET_DESCRIPTION') for row in existing):
         raise ValueError('Unexpected additional upload assets')
     reserved = []
@@ -213,7 +219,7 @@ def main():
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--ipa', type=Path, required=True)
-    parser.add_argument('--metadata', type=Path, required=True)
+    parser.add_argument('--metadata', type=Path, help='Optional AppStoreInfo.plist, when emitted by Xcode')
     parser.add_argument('--seal', type=Path, required=True)
     parser.add_argument('--source', required=True)
     parser.add_argument('--build', required=True)
