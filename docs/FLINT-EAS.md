@@ -10,6 +10,9 @@ metadata, even with a custom build. Its entitlement introspector requires the
 pinned **development-only** `expo-modules-autolinking` package. This is only a
 local CLI metadata dependency: no Expo/React Native app runtime, prebuild or
 generated iOS project is used. Run `npm ci --ignore-scripts` before EAS commands.
+Windows can archive tracked symlinks as text. The Apple bootstrap restores only
+Git-declared links whose unchanged target text points to a file inside this
+source tree; modified content and escaping targets are rejected before repair.
 
 The linked Expo account must have free iOS builds remaining. Pin EAS CLI 27.1.0
 and the `macos-sequoia-15.6-xcode-26.2` medium worker. The Free plan currently

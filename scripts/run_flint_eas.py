@@ -23,6 +23,51 @@ OUTPUT = ROOT / ".work/eas-output"
 FLAGS = ["-skipPackagePluginValidation", "-skipMacroValidation"]
 
 
+def git_symlink_plan(root):
+    """Validate the Git-declared links before repairing a Windows-made archive."""
+    root = root.resolve()
+    entries = subprocess.check_output(["git", "-C", str(root), "ls-files", "--stage", "-z"])
+    links = []
+    for entry in entries.split(b"\0"):
+        if not entry.startswith(b"120000 "):
+            continue
+        header, raw_name = entry.split(b"\t", 1)
+        if header.split()[2] != b"0":
+            raise RuntimeError("Unmerged symbolic link in build source")
+        name = raw_name.decode("utf-8")
+        path = root / name
+        if not path.parent.resolve().is_relative_to(root):
+            raise RuntimeError("Build link parent escapes source")
+        target_bytes = subprocess.check_output(["git", "-C", str(root), "show", ":" + name])
+        target = target_bytes.decode("utf-8")
+        if not target or "\0" in target or "\\" in target or pathlib.PurePosixPath(target).is_absolute():
+            raise RuntimeError("Build link target must be a relative source path")
+        destination = (path.parent / target).resolve()
+        if not destination.is_relative_to(root) or not destination.is_file():
+            raise RuntimeError("Build link must reference an existing file inside source")
+        if path.is_symlink():
+            if os.readlink(path) != target:
+                raise RuntimeError("Existing build symbolic link was modified")
+        elif not path.is_file() or path.read_bytes() != target_bytes:
+            raise RuntimeError("Refusing to replace modified build link content")
+        links.append((name, target))
+    return links
+
+
+def restore_git_symlinks(root):
+    links = git_symlink_plan(root)
+    if links:
+        # Only this ephemeral Apple checkout changes. Windows and the original
+        # app checkout keep their existing Git configuration and file contents.
+        subprocess.run(["git", "-C", str(root), "config", "core.symlinks", "true"], check=True)
+        for name, target in links:
+            subprocess.run(["git", "-C", str(root), "checkout-index", "--force", "--", name], check=True)
+            path = root / name
+            if not path.is_symlink() or os.readlink(path) != target:
+                raise RuntimeError("Git source link restoration failed")
+    return [name for name, _ in links]
+
+
 def plan(stage):
     py = sys.executable
     steps = [
@@ -96,6 +141,7 @@ def execute(stage):
     save()
     try:
         record["host"] = host_check()
+        record["restoredSymbolicLinks"] = restore_git_symlinks(ROOT)
         if stage == "visual":
             (ROOT / ".work/eas-visual").mkdir(parents=True, exist_ok=True)
         env = os.environ.copy()
