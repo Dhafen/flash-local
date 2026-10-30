@@ -12,6 +12,17 @@ not include Splash, lookahead expert prefetch, or Flint DFlash2. Splash uses
 model-shaped kernels, asynchronous expert reads and speculative verification.
 Its reported results are from Macs and do not establish iPhone performance.
 
+The pinned Q4_1 GGUF header describes 47 routed layers after two dense layers.
+Each expert's gate, up and down matrices occupy 655,360 bytes apiece. Six
+selected experts therefore represent 554,434,560 logical weight bytes for a
+single decoded token across all routed layers. This is derived from tensor
+geometry, not a measurement of physical disk traffic; an OS or app cache may
+serve repeated reads. Keeping one complete expert per routed layer would need
+about 92.4 MB of payload; six per layer would need about 554.4 MB, excluding
+metadata, staging, alignment and temporary buffers. Such a cache must be
+budgeted with the actual context, KV allocation and memory pressure, and its
+hit rate and speed must be measured on the iPhone.
+
 Splash's Flint draft consumes target activations after layers 1, 12, 24, 35
 and 47 and proposes a block containing an anchor and up to seven tokens. Our
 native interface currently exposes final logits, KV reset and route diagnostics,
