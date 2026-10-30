@@ -31,6 +31,8 @@ jobs:
         run: |
           test "$(uname -m)" = arm64
           sudo xcode-select -s /Applications/Xcode_26.2.app
+      - name: Verify the live pinned range transport before building Flint
+        run: python3 scripts/probe_gguf_range_transport.py
       - name: Install pinned small-control dependencies
         run: python3 -m pip install -r Experiments/Flint/reference-requirements.txt
       - name: Build isolated Mac Flint framework and control binaries

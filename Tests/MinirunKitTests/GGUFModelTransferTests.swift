@@ -9,7 +9,17 @@ final class GGUFModelTransferTests: XCTestCase {
         guard (env["FLASH_LOCAL_TEST_RANGE"] ?? env["TEST_RUNNER_FLASH_LOCAL_TEST_RANGE"]) == "1" else {
             throw XCTSkip("Opt in to the eight-byte published-header HTTP test with FLASH_LOCAL_TEST_RANGE=1")
         }
-        let source = PinnedGGUFDownload.primaryREAM
+        // The original REAM endpoint is currently unavailable. Keep it as
+        // the default for explicit checks, while CI exercises the identical
+        // transport against the still-available pinned Ornith artifact.
+        let sourceName = env["FLASH_LOCAL_TEST_RANGE_SOURCE"] ??
+            env["TEST_RUNNER_FLASH_LOCAL_TEST_RANGE_SOURCE"] ?? "ream"
+        let source: PinnedGGUFDownload
+        switch sourceName {
+        case "ream": source = .primaryREAM
+        case "ornith": source = .primaryOrnith
+        default: XCTFail("Unknown pinned range test source"); return
+        }
         let transport = GGUFHTTPRangeTransport()
         defer { transport.close() }
         let first = try await transport.fetch(url: source.url, range: 0..<4,
@@ -25,7 +35,7 @@ final class GGUFModelTransferTests: XCTestCase {
                 totalBytes: source.manifest.fileByteCount, etag: first.etag)
             XCTFail("Closed transport must refuse another request")
         } catch { XCTAssertTrue(error is CancellationError) }
-        print("REAM_URLSESSION_RANGE bytes=8 exact206=true sameETag=true closed=true noTensorPayload=true")
+        print("GGUF_URLSESSION_RANGE source=\(sourceName) bytes=8 exact206=true sameETag=true closed=true noTensorPayload=true")
     }
 
     private final class Flag: @unchecked Sendable {

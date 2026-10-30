@@ -161,6 +161,12 @@ does not contain weights. The restore and the fetch script independently check
 the pinned SHA-256. Forks without the secret need the original pinned header
 or accessible upstream; tests must not be skipped as a substitute. Set
 `GGUF_HEADER_FIXTURE` to `.test-fixtures/ream.header`.
+The live eight-byte URLSession range/ETag integration check defaults to the
+original REAM source when explicitly enabled. CI currently sets
+`FLASH_LOCAL_TEST_RANGE_SOURCE=ornith` to test the same production transport
+against the pinned Ornith source; this does not certify the unavailable REAM
+download URL. A restored REAM source can be checked explicitly with
+`FLASH_LOCAL_TEST_RANGE=1` and `FLASH_LOCAL_TEST_RANGE_SOURCE=ream`.
 The published-header test checks all 1,224 tensors and byte totals, including
 the last expert slice and compact PLE geometry. It skips explicitly without
 that fixture; CI fetches it and rejects a skipped published-header test.
