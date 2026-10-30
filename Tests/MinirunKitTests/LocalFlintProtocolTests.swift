@@ -106,7 +106,7 @@ final class LocalFlintProtocolTests: XCTestCase {
         XCTAssertEqual(parsed.messages.first?.content, content)
 
         // Verify the actual incremental HTTP parser, not just JSON decoding.
-        let header = Data(("POST /v1/chat/completions HTTP/1.1\\r\\nHost: localhost\\r\\nContent-Length: \\(flint.count)\\r\\n\\r\\n").utf8)
+        let header = Data(("POST /v1/chat/completions HTTP/1.1\r\nHost: localhost\r\nContent-Length: \(flint.count)\r\n\r\n").utf8)
         var request = header; request.append(flint)
         var flintParser = LocalHTTPParser(maximumBodyBytes: 2 << 20)
         let split = 16_384
@@ -123,7 +123,7 @@ final class LocalFlintProtocolTests: XCTestCase {
             XCTAssertEqual(($0 as? LocalAPIError)?.status, 400)
         }
         var oversized = LocalHTTPParser(maximumBodyBytes: 2 << 20)
-        let tooLongHeader = Data("POST /v1/chat/completions HTTP/1.1\\r\\nHost: localhost\\r\\nContent-Length: 2097153\\r\\n\\r\\n".utf8)
+        let tooLongHeader = Data("POST /v1/chat/completions HTTP/1.1\r\nHost: localhost\r\nContent-Length: 2097153\r\n\r\n".utf8)
         XCTAssertThrowsError(try oversized.append(tooLongHeader)) {
             XCTAssertEqual(($0 as? LocalAPIError)?.status, 413)
         }
