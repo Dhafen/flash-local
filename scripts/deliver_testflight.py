@@ -128,19 +128,32 @@ def attach_and_confirm(api, build, group_id, deadline):
     # List beta groups using the documented build filter instead. This also
     # observes every group, so unexpected access still refuses association.
     query = {'filter[builds]': identifier, 'limit': '200'}
-    groups = {item['id'] for item in api.all('betaGroups', query=query)}
-    if groups - {group_id}: raise ValueError('Build already has unexpected group access')
-    if group_id not in groups:
-        api.request('betaGroups/' + group_id + '/relationships/builds', method='POST',
-            body={'data': [{'type': 'builds', 'id': identifier}]})
+    posted = False
+    not_found = 0
     while time.monotonic() < deadline:
         groups = {item['id'] for item in api.all('betaGroups', query=query)}
-        if groups - {group_id}: raise ValueError('Unexpected group access appeared after association')
-        detail = api.request('builds/' + identifier + '/buildBetaDetail')['data']['attributes']
-        state = detail.get('internalBuildState')
-        if groups == {group_id} and state == 'IN_BETA_TESTING': return state
-        if state in ['EXPIRED', 'PROCESSING_EXCEPTION', 'MISSING_EXPORT_COMPLIANCE']:
-            raise RuntimeError('Apple internal testing is blocked: ' + str(state))
+        if groups - {group_id}: raise ValueError('Build has unexpected group access')
+        if group_id not in groups and not posted:
+            try:
+                api.request('betaGroups/' + group_id + '/relationships/builds', method='POST',
+                    body={'data': [{'type': 'builds', 'id': identifier}]})
+            except RuntimeError as error:
+                # Apple can briefly return a definitive NOT_FOUND immediately
+                # after a VALID build appears. Re-read exact group membership
+                # before a bounded retry. An uncertain network failure or any
+                # other error is never retried as a write.
+                if str(error) != 'Apple API HTTP 404, codes=NOT_FOUND' or not_found >= 9:
+                    raise
+                not_found += 1
+            else:
+                posted = True
+                continue  # Observe immediately; never POST again after 204.
+        elif group_id in groups:
+            detail = api.request('builds/' + identifier + '/buildBetaDetail')['data']['attributes']
+            state = detail.get('internalBuildState')
+            if state == 'IN_BETA_TESTING': return state
+            if state in ['EXPIRED', 'PROCESSING_EXCEPTION', 'MISSING_EXPORT_COMPLIANCE']:
+                raise RuntimeError('Apple internal testing is blocked: ' + str(state))
         time.sleep(min(20, max(0, deadline - time.monotonic())))
     raise TimeoutError('Build/group availability has not been confirmed by Apple')
 

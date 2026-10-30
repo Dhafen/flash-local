@@ -6,6 +6,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 SCRIPTS = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS))
@@ -87,6 +88,80 @@ class PrivateDeliveryTests(unittest.TestCase):
         self.assertEqual(len(api.posts), 1, 'An observed existing association must not be resent')
         api.linked.append({'id': 'unexpected-group'})
         with self.assertRaises(ValueError): delivery.attach_and_confirm(api, build, 'group-one', time.monotonic() + 1)
+
+    def test_apple_404_rechecks_membership_before_a_bounded_retry(self):
+        class EventuallyAvailable(FakeApple):
+            def __init__(self): super().__init__(); self.attempts = 0
+            def request(self, route, method='GET', body=None):
+                if method == 'POST':
+                    self.attempts += 1
+                    if self.attempts == 1:
+                        raise RuntimeError('Apple API HTTP 404, codes=NOT_FOUND')
+                return super().request(route, method, body)
+        api = EventuallyAvailable()
+        with patch.object(delivery.time, 'sleep'):
+            self.assertEqual(delivery.attach_and_confirm(api, api.builds[0], 'group-one', time.monotonic() + 1), 'IN_BETA_TESTING')
+        self.assertEqual(api.attempts, 2)
+        self.assertGreaterEqual(len(api.group_lookups), 3)
+        self.assertEqual(len(api.posts), 1)
+
+    def test_group_post_with_uncertain_failure_is_not_retried(self):
+        class Uncertain(FakeApple):
+            def __init__(self): super().__init__(); self.attempts = 0
+            def request(self, route, method='GET', body=None):
+                if method == 'POST':
+                    self.attempts += 1
+                    raise RuntimeError('Apple API connection unavailable; no mutation retry was attempted')
+                return super().request(route, method, body)
+        api = Uncertain()
+        with self.assertRaisesRegex(RuntimeError, 'no mutation retry'):
+            delivery.attach_and_confirm(api, api.builds[0], 'group-one', time.monotonic() + 1)
+        self.assertEqual(api.attempts, 1)
+
+    def test_404_retry_stops_if_an_unexpected_group_appears(self):
+        class ChangedAccess(FakeApple):
+            def __init__(self): super().__init__(); self.attempts = 0
+            def request(self, route, method='GET', body=None):
+                if method == 'POST':
+                    self.attempts += 1
+                    self.linked = [{'id': 'unexpected-group'}]
+                    raise RuntimeError('Apple API HTTP 404, codes=NOT_FOUND')
+                return super().request(route, method, body)
+        api = ChangedAccess()
+        with patch.object(delivery.time, 'sleep'), self.assertRaisesRegex(ValueError, 'unexpected group access'):
+            delivery.attach_and_confirm(api, api.builds[0], 'group-one', time.monotonic() + 1)
+        self.assertEqual(api.attempts, 1)
+
+    def test_repeated_404_retries_are_bounded(self):
+        class NotReady(FakeApple):
+            def __init__(self): super().__init__(); self.attempts = 0
+            def request(self, route, method='GET', body=None):
+                if method == 'POST':
+                    self.attempts += 1
+                    raise RuntimeError('Apple API HTTP 404, codes=NOT_FOUND')
+                return super().request(route, method, body)
+        api = NotReady()
+        with patch.object(delivery.time, 'sleep'), self.assertRaisesRegex(RuntimeError, '404'):
+            delivery.attach_and_confirm(api, api.builds[0], 'group-one', time.monotonic() + 1)
+        self.assertEqual(api.attempts, 10)
+
+    def test_successful_group_post_is_not_repeated_during_read_lag(self):
+        class DelayedRead(FakeApple):
+            def __init__(self): super().__init__(); self.reads_after_post = 0
+            def request(self, route, method='GET', body=None):
+                if method == 'POST':
+                    self.posts.append((route, body)); return {}
+                return super().request(route, method, body)
+            def all(self, route, query=None):
+                if route == 'betaGroups' and self.posts:
+                    self.reads_after_post += 1
+                    if self.reads_after_post >= 2: self.linked = [{'id': 'group-one'}]
+                return super().all(route, query)
+        api = DelayedRead()
+        with patch.object(delivery.time, 'sleep'):
+            self.assertEqual(delivery.attach_and_confirm(api, api.builds[0], 'group-one', time.monotonic() + 1), 'IN_BETA_TESTING')
+        self.assertEqual(len(api.posts), 1)
+        self.assertGreaterEqual(api.reads_after_post, 2)
 
     def test_expired_failed_wrong_audience_and_ambiguous_builds_refused(self):
         for change in [{'expired': True}, {'processingState': 'FAILED'}, {'buildAudienceType': 'APP_STORE_ELIGIBLE'}]:

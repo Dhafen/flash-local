@@ -1,0 +1,21 @@
+{
+  "sourceRevision": "1c60f14048cb0b2f1055b302c5c0ee7673e49027",
+  "buildNumber": "250",
+  "version": "0.1.0",
+  "ipaSHA256": "83311a9bb183e0da57c6687bd599dbd97f10d0286484a25e43abad681cdf242f",
+  "githubRunURL": "https://github.com/Dhafen/flash-local/actions/runs/41074813971",
+  "githubRunConclusion": "failure",
+  "githubRunFailure": "Apple group association returned HTTP 404 after the binary was processed; the existing uploaded build was subsequently associated without another build or upload",
+  "allPriorBuildAndTestStepsPassed": true,
+  "signatureAndMemoryEntitlementsVerified": true,
+  "binaryUploadCommitted": true,
+  "processingVerified": true,
+  "availableToInternalTesters": true,
+  "buildAudienceType": "INTERNAL_ONLY",
+  "groupAssociationVerified": true,
+  "associatedGroupCount": 1,
+  "internalBuildState": "IN_BETA_TESTING",
+  "diagnosticBuild": true,
+  "fullFlintNumericsVerified": false,
+  "physicalIPhoneInferenceVerified": false
+}
