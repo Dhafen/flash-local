@@ -8,6 +8,7 @@ import plistlib
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from unittest.mock import Mock, patch
 
@@ -174,6 +175,86 @@ class AppleBuildUploadTests(unittest.TestCase):
             api.checksum = hashlib.md5(ipa.read_bytes(), usedforsecurity=False).hexdigest()
             with self.assertRaisesRegex(ValueError, 'SHA-256 export seal'):
                 upload.confirm_build_provenance(api, 'unit-build', report, ipa)
+
+    def test_processed_build_waits_for_apple_upload_relationship_then_checks_binary(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ipa = Path(tmp) / 'FlashLocal.ipa'; ipa.write_bytes(b'synthetic fixture')
+            sha = hashlib.sha256(ipa.read_bytes()).hexdigest()
+            report = {'buildUploadID': 'unit-upload', 'ipaSHA256': sha}
+            api = Mock()
+            api.request.side_effect = [
+                {'data': {'id': 'unit-upload', 'relationships': {'build': {'data': None}}}},
+                {'data': {'id': 'unit-upload', 'relationships': {'build': {'data': {'type': 'builds', 'id': 'unit-build'}}}}},
+            ]
+            api.all.return_value = [{'attributes': {'assetType': 'ASSET', 'fileName': ipa.name,
+                'fileSize': ipa.stat().st_size, 'assetDeliveryState': {'state': 'COMPLETE'},
+                'sourceFileChecksums': {'file': {'algorithm': 'SHA_256', 'hash': sha}}}}]
+            with patch.object(upload.time, 'sleep') as sleep:
+                upload.confirm_build_provenance(api, 'unit-build', report, ipa, deadline=time.monotonic() + 60)
+            self.assertEqual(api.request.call_count, 2)
+            sleep.assert_called_once()
+            api.all.assert_called_once()
+
+    def test_missing_relationship_times_out_without_publishing_or_adopting_a_build(self):
+        api = Mock()
+        api.request.return_value = {'data': {'id': 'unit-upload', 'relationships': {'build': {'data': None}}}}
+        clock = [0.0]
+        def advance(seconds): clock[0] += seconds
+        with patch.object(upload.time, 'monotonic', side_effect=lambda: clock[0]), \
+             patch.object(upload.time, 'sleep', side_effect=advance):
+            with self.assertRaisesRegex(TimeoutError, 'relationship'):
+                upload.confirm_build_provenance(api, 'unit-build', {'buildUploadID': 'unit-upload'},
+                                                Path('unused.ipa'), deadline=20)
+        self.assertGreater(api.request.call_count, 1)
+        api.all.assert_not_called()
+        self.assertTrue(all(call.kwargs.get('method', 'GET') == 'GET' for call in api.request.call_args_list))
+
+    def test_waiting_for_relationship_never_bypasses_binary_checksum(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ipa = Path(tmp) / 'FlashLocal.ipa'; ipa.write_bytes(b'synthetic fixture')
+            sha = hashlib.sha256(ipa.read_bytes()).hexdigest()
+            api = Mock()
+            api.request.side_effect = [
+                {'data': {'id': 'unit-upload', 'relationships': {'build': {'data': None}}}},
+                {'data': {'id': 'unit-upload', 'relationships': {'build': {'data': {'type': 'builds', 'id': 'unit-build'}}}}},
+            ]
+            api.all.return_value = [{'attributes': {'assetType': 'ASSET', 'fileName': ipa.name,
+                'fileSize': ipa.stat().st_size, 'assetDeliveryState': {'state': 'COMPLETE'},
+                'sourceFileChecksums': {'file': {'algorithm': 'SHA_256', 'hash': '0' * 64}}}}]
+            with patch.object(upload.time, 'sleep'):
+                with self.assertRaisesRegex(ValueError, 'does not match'):
+                    upload.confirm_build_provenance(api, 'unit-build', {'buildUploadID': 'unit-upload', 'ipaSHA256': sha},
+                                                    ipa, deadline=time.monotonic() + 60)
+            self.assertEqual(api.request.call_count, 2)
+            api.all.assert_called_once()
+
+    def test_conflicting_upload_link_is_rejected_immediately_without_retry(self):
+        api = Mock()
+        api.request.return_value = {'data': {'id': 'unit-upload', 'relationships': {
+            'build': {'data': {'type': 'builds', 'id': 'other-build'}}}}}
+        with patch.object(upload.time, 'sleep') as sleep:
+            with self.assertRaisesRegex(ValueError, 'does not belong'):
+                upload.confirm_build_provenance(api, 'unit-build', {'buildUploadID': 'unit-upload'},
+                                                Path('unused.ipa'), deadline=time.monotonic() + 60)
+        api.request.assert_called_once()
+        api.all.assert_not_called()
+        sleep.assert_not_called()
+
+    def test_malformed_or_different_upload_is_not_treated_as_a_pending_link(self):
+        for data in [
+            {'id': 'different-upload', 'relationships': {}},
+            {'id': 'unit-upload', 'relationships': {'build': None}},
+            {'id': 'unit-upload', 'relationships': {'build': {'data': []}}},
+            {'id': 'unit-upload', 'relationships': {'build': {'data': {}}}},
+        ]:
+            api = Mock(); api.request.return_value = {'data': data}
+            with patch.object(upload.time, 'sleep') as sleep:
+                with self.assertRaises(ValueError):
+                    upload.confirm_build_provenance(api, 'unit-build', {'buildUploadID': 'unit-upload'},
+                                                    Path('unused.ipa'), deadline=time.monotonic() + 60)
+            api.request.assert_called_once()
+            api.all.assert_not_called()
+            sleep.assert_not_called()
 
     def test_rejects_omitted_overlapping_or_external_upload_instructions(self):
         for operations in ([operation(0, 3)], [operation(0, 3), operation(2, 2)],

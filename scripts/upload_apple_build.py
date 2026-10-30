@@ -118,17 +118,39 @@ def matches_apple_checksum(path, local_sha256, checksum):
     return checksum.get('hash') == expected
 
 
-def confirm_build_provenance(api, build_id, report, ipa):
-    """Bind an Apple build to this journal's upload and verified IPA bytes."""
+def confirm_build_provenance(api, build_id, report, ipa, deadline=None):
+    """Bind an Apple build to this journal's upload and verified IPA bytes.
+
+    A processed build can be visible before Apple populates its upload/build
+    relationship. Retry the read only, within a bounded deadline. A conflicting
+    identity, malformed relationship or different binary remains a hard stop.
+    """
     build_id = resource_id(build_id)
     upload_id = report.get('buildUploadID')
     if not upload_id:
         raise ValueError('Existing Apple build has no matching local upload journal')
     upload_id = resource_id(upload_id)
-    upload = api.request('buildUploads/' + upload_id, query={'include': 'build'})['data']
-    linked_build = upload.get('relationships', {}).get('build', {}).get('data') or {}
-    if upload.get('id') != upload_id or linked_build.get('type') != 'builds' or linked_build.get('id') != build_id:
-        raise ValueError('Apple build does not belong to the recorded upload')
+    deadline = time.monotonic() + 300 if deadline is None else deadline
+    announced = False
+    while True:
+        upload = api.request('buildUploads/' + upload_id, query={'include': 'build'})['data']
+        if upload.get('id') != upload_id:
+            raise ValueError('Apple build does not belong to the recorded upload')
+        relationships = upload.get('relationships', {})
+        if not isinstance(relationships, dict) or not isinstance(relationships.get('build', {}), dict):
+            raise ValueError('Invalid Apple upload relationship')
+        linked_build = relationships.get('build', {}).get('data')
+        if linked_build is not None:
+            if not isinstance(linked_build, dict) or linked_build.get('type') != 'builds' or linked_build.get('id') != build_id:
+                raise ValueError('Apple build does not belong to the recorded upload')
+            break
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError('Apple upload/build relationship is not yet available; do not re-upload blindly')
+        if not announced:
+            print('Waiting for Apple to link the processed build to its recorded upload.')
+            announced = True
+        time.sleep(min(10, remaining))
     files = api.all('buildUploads/' + upload_id + '/buildUploadFiles', query={'limit': '200'})
     binary = [row['attributes'] for row in files if row['attributes'].get('assetType') == 'ASSET']
     if len(binary) != 1:
@@ -297,7 +319,7 @@ def main():
 
     deadline = time.monotonic() + 1800
     build = wait_valid(api, app_id, args.build, report['version'], deadline)
-    confirm_build_provenance(api, build['id'], report, args.ipa)
+    confirm_build_provenance(api, build['id'], report, args.ipa, deadline=deadline)
     report.update(processingVerified=True, buildID=build['id'], buildAudienceType='INTERNAL_ONLY')
     save()
     private_target(api, app_id, group_id, allowed)
