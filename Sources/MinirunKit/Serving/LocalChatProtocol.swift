@@ -43,7 +43,8 @@ public struct LocalChatRequest: Sendable {
         // 2 MiB request matching its native template/tokenizer input limits.
         let maximumRequestBytes = capabilities.family == .flint ? 2 << 20 : 262144
         guard data.count <= maximumRequestBytes, let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw LocalAPIError.invalid("body", "Expected a JSON object within the selected model's request limit")
+            let limit = capabilities.family == .flint ? "2 MiB" : "256 KiB"
+            throw LocalAPIError.invalid("body", "Expected a JSON object, at most \(limit)")
         }
         let allowed: Set<String> = ["model", "messages", "stream", "stream_options", "max_tokens", "max_completion_tokens",
             "temperature", "top_p", "seed", "enable_thinking", "thinking_budget", "chat_template_kwargs", "n",
