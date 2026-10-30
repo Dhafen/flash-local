@@ -29,6 +29,14 @@ public struct FlintNumericalCheck: Codable, Sendable {
         public let exactExpertSets: Bool
         public let routeDiagnostics: RouteDiagnostics?
     }
+    public struct MatchedMetalQ4F32Control: Codable, Sendable {
+        /// CPU Q4_1/F32 reference versus Metal with F32 KV, Flash Attention
+        /// disabled and CPU-sized batches. Diagnostic only: unlike the
+        /// original serving Metal candidate, this configuration never serves.
+        public let positions: [Position]
+        public let exactExpertSets: Bool
+        public let routeDiagnostics: RouteDiagnostics?
+    }
     public struct Q4F32Reference: Codable, Sendable {
         /// Complete original Metal candidate vs. CPU Q4_1/F32 activation
         /// reference, accumulated in double. No weight or route changes.
@@ -64,12 +72,16 @@ public struct FlintNumericalCheck: Codable, Sendable {
     public let routeDiagnostics: RouteDiagnostics?
     public let matchedMetalControl: MatchedMetalControl?
     public let q4F32Reference: Q4F32Reference?
+    /// Optional to preserve decoding of older JSON reports and admission seals.
+    public let matchedMetalQ4F32Control: MatchedMetalQ4F32Control?
     init(positions: [Position], routedTokenLayers: Int, exactExpertSets: Bool,
          routeDiagnostics: RouteDiagnostics?, matchedMetalControl: MatchedMetalControl? = nil,
-         q4F32Reference: Q4F32Reference? = nil) {
+         q4F32Reference: Q4F32Reference? = nil,
+         matchedMetalQ4F32Control: MatchedMetalQ4F32Control? = nil) {
         self.positions = positions; self.routedTokenLayers = routedTokenLayers
         self.exactExpertSets = exactExpertSets; self.routeDiagnostics = routeDiagnostics
         self.matchedMetalControl = matchedMetalControl; self.q4F32Reference = q4F32Reference
+        self.matchedMetalQ4F32Control = matchedMetalQ4F32Control
     }
     private static func validControl(_ positions: [Position], _ routedTokenLayers: Int, _ exactExpertSets: Bool) -> Bool {
         guard positions.count == 4, let last = positions.last?.index, (7..<63).contains(last) else { return false }
