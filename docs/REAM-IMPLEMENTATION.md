@@ -152,7 +152,15 @@ TestFlight delivery remain unfinished; no real-model/iPhone result is claimed.
 Run `python3 scripts/fetch_ream_metadata.py` to obtain exactly 11,023,104 header
 bytes from RemySkye revision `28a55fecdca51a498900aeb34a4e7e8338977cd3`.
 The request checks HTTP 206, Content-Range, length and SHA-256; it never fetches
-weight payload. Set `GGUF_HEADER_FIXTURE` to `.test-fixtures/ream.header`.
+weight payload. If an already available `.test-fixtures/ream.header` has the
+exact pinned size and SHA-256, the script uses it without a network request.
+The upstream artifact returned HTTP 401 during the October 2026 Flint delivery.
+CI can restore an authenticated, encrypted backup of this metadata-only
+header using the repository's `FLASH_LOCAL_REAM_HEADER_KEY` secret; the backup
+does not contain weights. The restore and the fetch script independently check
+the pinned SHA-256. Forks without the secret need the original pinned header
+or accessible upstream; tests must not be skipped as a substitute. Set
+`GGUF_HEADER_FIXTURE` to `.test-fixtures/ream.header`.
 The published-header test checks all 1,224 tensors and byte totals, including
 the last expert slice and compact PLE geometry. It skips explicitly without
 that fixture; CI fetches it and rejects a skipped published-header test.

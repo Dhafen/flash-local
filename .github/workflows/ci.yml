@@ -79,6 +79,14 @@ jobs:
         env:
           FLINT_CI_INPUTS: ${{ toJSON(inputs) }}
         run: python3 scripts/check_flint_ci_inputs.py
+      - name: Verify the encrypted REAM header backup before using a Mac
+        env:
+          FLASH_LOCAL_REAM_HEADER_KEY: ${{ secrets.FLASH_LOCAL_REAM_HEADER_KEY }}
+        run: |
+          test -n "$FLASH_LOCAL_REAM_HEADER_KEY"
+          node --test scripts/tests/test_ream_header_backup.mjs
+          trap 'rm -f "$RUNNER_TEMP/flash-local-ream-header-control"' EXIT
+          node scripts/ream_header_backup.mjs restore .github/fixtures/ream-header.enc "$RUNNER_TEMP/flash-local-ream-header-control"
       - name: Verify private Apple target and select an unused build number
         if: ${{ inputs.upload_private_testflight }}
         id: apple-build
@@ -206,6 +214,16 @@ jobs:
           test "$(uname -m)" = arm64
           sudo xcode-select -s /Applications/Xcode_26.2.app
           xcodebuild -version
+
+      - name: Restore pinned REAM metadata backup when available
+        if: ${{ !inputs.provisioning_only && !inputs.check_delivery_tools && !inputs.regenerate_project_only }}
+        env:
+          FLASH_LOCAL_REAM_HEADER_KEY: ${{ secrets.FLASH_LOCAL_REAM_HEADER_KEY }}
+        run: |
+          node --test scripts/tests/test_ream_header_backup.mjs
+          if test -n "$FLASH_LOCAL_REAM_HEADER_KEY"; then
+            node scripts/ream_header_backup.mjs restore .github/fixtures/ream-header.enc .test-fixtures/ream.header
+          fi
 
       - name: Delivery logic tests
         run: python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
