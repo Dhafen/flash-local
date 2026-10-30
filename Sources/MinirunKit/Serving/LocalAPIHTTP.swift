@@ -10,9 +10,20 @@ struct LocalHTTPRequest {
 /// compression, chunked uploads or pipelining enters the inference owner.
 struct LocalHTTPParser {
     private var buffer = Data()
+    private let maximumBodyBytes: Int
+
+    init(maximumBodyBytes: Int = 262144) {
+        precondition((1...(2 << 20)).contains(maximumBodyBytes))
+        self.maximumBodyBytes = maximumBodyBytes
+    }
+
     mutating func append(_ data: Data) throws -> LocalHTTPRequest? {
+        // The 16 KiB header budget is independent of the model-specific
+        // request budget. Do not allocate an unbounded HTTP body.
+        guard data.count <= maximumBodyBytes + 16384 - buffer.count else {
+            throw LocalAPIError(status: 413, message: "Request too large")
+        }
         buffer.append(data)
-        guard buffer.count <= 262144 + 16384 else { throw LocalAPIError(status: 413, message: "Request too large") }
         guard let boundary = buffer.range(of: Data([13, 10, 13, 10])) else {
             if buffer.count > 16384 { throw LocalAPIError(status: 431, message: "Headers too large") }
             return nil
@@ -45,7 +56,7 @@ struct LocalHTTPParser {
         let length: Int
         if let field = headers["content-length"] {
             guard !field.isEmpty, field.utf8.allSatisfy({ (48...57).contains($0) }),
-                  let count = Int(field), count <= 262144 else { throw LocalAPIError(status: 413, message: "Invalid body length") }
+                  let count = Int(field), count <= maximumBodyBytes else { throw LocalAPIError(status: 413, message: "Invalid body length") }
             length = count
         } else {
             guard start[0] == "GET" else { throw LocalAPIError(status: 411, message: "Content-Length is required") }
