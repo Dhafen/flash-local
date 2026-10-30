@@ -36,6 +36,7 @@ public final class LocalModelAPIServer: @unchecked Sendable {
         try defaults.validate()
         self.key = key; self.handler = handler; self.onState = onState; self.loopbackOnly = loopbackOnly; self.defaults = defaults
         self.capabilities = capabilities
+        self.parser = LocalHTTPParser(maximumBodyBytes: capabilities.family == .flint ? 2 << 20 : 262144)
         self.canServe = canServe
         let parameters = NWParameters.tcp
         parameters.prohibitedInterfaceTypes = [.cellular]
@@ -131,7 +132,7 @@ private final class LocalAPISession: @unchecked Sendable {
     private let capabilities: LocalModelCapabilities
     private let canServe: @Sendable () -> Bool
     private let onClose: () -> Void
-    private var parser = LocalHTTPParser()
+    private var parser: LocalHTTPParser
     private var finished = false
     private var timer: DispatchWorkItem?
     private var generation: LocalChatGeneration?
