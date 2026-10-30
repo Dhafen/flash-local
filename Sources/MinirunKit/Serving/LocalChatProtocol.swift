@@ -38,8 +38,12 @@ public struct LocalChatRequest: Sendable {
 
     public init(data: Data, defaults: LocalGenerationOptions? = nil, capabilities: LocalModelCapabilities = .init()) throws {
         let defaults = defaults ?? capabilities.defaultOptions
-        guard data.count <= 262144, let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw LocalAPIError.invalid("body", "Expected a JSON object, at most 256 KiB")
+        // Flint can legitimately receive a 65K-token prompt over the LAN.
+        // Preserve the existing 256 KiB limit for Ornith; Flint gets a bounded
+        // 2 MiB request matching its native template/tokenizer input limits.
+        let maximumRequestBytes = capabilities.family == .flint ? 2 << 20 : 262144
+        guard data.count <= maximumRequestBytes, let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw LocalAPIError.invalid("body", "Expected a JSON object within the selected model's request limit")
         }
         let allowed: Set<String> = ["model", "messages", "stream", "stream_options", "max_tokens", "max_completion_tokens",
             "temperature", "top_p", "seed", "enable_thinking", "thinking_budget", "chat_template_kwargs", "n",
@@ -211,7 +215,7 @@ public struct LocalChatRequest: Sendable {
                 }
             } else if value["tool_call_id"] != nil { throw LocalAPIError.invalid("messages", "Only tool results have tool_call_id") }
             size += content.utf8.count + (reasoning?.utf8.count ?? 0) + calls.reduce(0) { $0 + $1.function.arguments.utf8.count }
-            guard size <= 262144 else { throw LocalAPIError(status: 413, message: "Conversation is too large") }
+            guard size <= maximumRequestBytes else { throw LocalAPIError(status: 413, message: "Conversation is too large") }
             parsed.append(.init(role: role, content: content, reasoning: reasoning, toolCalls: calls, toolCallID: toolCallID))
             switch role {
             case "user": expected = "assistant"
