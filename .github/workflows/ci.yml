@@ -446,6 +446,11 @@ jobs:
           IOS_DISTRIBUTION_P12_B64: ${{ secrets.IOS_DISTRIBUTION_P12_B64 }}
           IOS_DISTRIBUTION_P12_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_P12_PASSWORD }}
           APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          APP_STORE_APP_ID: ${{ vars.APP_STORE_APP_ID }}
+          TESTFLIGHT_INTERNAL_GROUP_ID: ${{ vars.TESTFLIGHT_INTERNAL_GROUP_ID }}
+          TESTFLIGHT_ALLOWED_TESTER_IDS: ${{ vars.TESTFLIGHT_ALLOWED_TESTER_IDS }}
+          FLASH_LOCAL_BUILD_NUMBER: ${{ needs.flint-inputs.outputs.delivery-build-number }}
+          FLASH_LOCAL_CAPTURE_XCODE_RESERVATION: ${{ inputs.flint && inputs.upload_private_testflight && '1' || '0' }}
         run: |
           bash scripts/prepare_flash_signing.sh
           export ASC_KEY_PATH="$RUNNER_TEMP/flash-local-signing/AuthKey.p8"

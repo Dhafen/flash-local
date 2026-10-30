@@ -14,6 +14,51 @@ MEMORY_KEYS = ('com.apple.developer.kernel.increased-memory-limit',
                'com.apple.developer.kernel.extended-virtual-addressing')
 
 
+def matching_uploads(api, app_id, version, build):
+    return api.all('apps/' + app_id + '/buildUploads', query={'filter[cfBundleVersion]': build,
+        'filter[cfBundleShortVersionString]': version, 'filter[platform]': 'IOS', 'limit': '200'})
+
+
+def require_fresh_export_number(api, app_id, version, build):
+    from deliver_testflight import find_build
+    if find_build(api, app_id, build) is not None or matching_uploads(api, app_id, version, build):
+        raise ValueError('Build number became occupied before export')
+
+
+def capture_export_reservation(api, app_id, version, build, started, ended):
+    """Bind only a new, empty Xcode-created reservation to this export.
+
+    The final Apple file checksum and linked build still prove the IPA identity
+    before any TestFlight association. Any ambiguous reservation fails closed.
+    """
+    from apple_api import resource_id
+    rows = matching_uploads(api, app_id, version, build)
+    if not rows:
+        return None  # Some Xcode versions do not reserve during export.
+    if len(rows) != 1:
+        raise ValueError('Ambiguous upload reservations after export')
+    row = rows[0]; attrs = row.get('attributes', {})
+    if (attrs.get('cfBundleVersion'), attrs.get('cfBundleShortVersionString'), attrs.get('platform')) != (build, version, 'IOS'):
+        raise ValueError('Xcode reservation identity differs from export')
+    if attrs.get('state', {}).get('state') != 'AWAITING_UPLOAD':
+        raise ValueError('Xcode reservation is not empty and awaiting upload')
+    try:
+        created = datetime.datetime.fromisoformat(attrs['createdDate'].replace('Z', '+00:00'))
+        if created.tzinfo is None:
+            raise ValueError('Missing timezone')
+        created = created.astimezone(datetime.timezone.utc)
+    except (KeyError, ValueError, TypeError):
+        raise ValueError('Xcode reservation has no trustworthy creation time') from None
+    # Account for small service/runner clock skew without accepting stale rows.
+    margin = datetime.timedelta(seconds=60)
+    if not started - margin <= created <= ended + margin:
+        raise ValueError('Xcode reservation was not created during this export')
+    identifier = resource_id(row.get('id'))
+    if api.all('buildUploads/' + identifier + '/buildUploadFiles', query={'limit': '200'}):
+        raise ValueError('Xcode reservation already contains files')
+    return identifier
+
+
 def export_options(team, profile_uuid=None):
     options = {'method': 'app-store-connect', 'destination': 'export',
                'teamID': team, 'signingStyle': 'manual' if profile_uuid else 'automatic',
@@ -75,8 +120,24 @@ def main():
     plist = root / 'ExportOptions.plist'
     plist.write_bytes(plistlib.dumps(options))
     command = export_command(args.archive, root, plist, os.environ, manual=bool(args.profile))
+    reservation_api = None
+    reservation_id = None
+    if os.environ.get('FLASH_LOCAL_CAPTURE_XCODE_RESERVATION') == '1':
+        from apple_api import AppleAPI, resource_id
+        from deliver_testflight import private_target
+        archive_info = plistlib.loads((app_in_archive / 'Info.plist').read_bytes())
+        planned_version, planned_build = archive_info['CFBundleShortVersionString'], archive_info['CFBundleVersion']
+        if planned_build != os.environ['FLASH_LOCAL_BUILD_NUMBER']:
+            raise ValueError('Archive build differs from the preflight-selected number')
+        app_id = resource_id(os.environ['APP_STORE_APP_ID'])
+        reservation_api = AppleAPI(os.environ['ASC_KEY_PATH'], os.environ['ASC_KEY_ID'], os.environ['ASC_ISSUER_ID'])
+        private_target(reservation_api, app_id, os.environ['TESTFLIGHT_INTERNAL_GROUP_ID'],
+                       json.loads(os.environ['TESTFLIGHT_ALLOWED_TESTER_IDS']))
+        require_fresh_export_number(reservation_api, app_id, planned_version, planned_build)
+    export_started = datetime.datetime.now(datetime.timezone.utc)
     with (root / 'export.log').open('wb') as log:
         result = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT)
+    export_ended = datetime.datetime.now(datetime.timezone.utc)
     if result.returncode:
         # Credential files and the full signing log stay off public artifacts.
         # Apple errors describe the blocker without printing private key data.
@@ -85,6 +146,9 @@ def main():
         for line in errors[-12:]:
             print(line[:2000])
         raise SystemExit('Automatic export failed. No build was uploaded.')
+    if reservation_api is not None:
+        reservation_id = capture_export_reservation(reservation_api, app_id, planned_version, planned_build,
+                                                     export_started, export_ended)
     ipas = list((root / 'export').glob('*.ipa'))
     if len(ipas) != 1:
         raise RuntimeError('Expected exactly one locally exported IPA')
@@ -147,6 +211,7 @@ def main():
         'ipaSHA256': digest.hexdigest(), 'sourceRevision': os.environ.get('GITHUB_SHA', 'unknown'),
         'workflowRunID': os.environ.get('GITHUB_RUN_ID'),
         'usesNonExemptEncryption': False,
+        'xcodeReservedUploadID': reservation_id, 'xcodeReservationVerified': reservation_id is not None,
         'version': app_info['CFBundleShortVersionString'], 'build': app_info['CFBundleVersion']}, indent=2) + '\n', encoding='utf-8')
     print('Automatic distribution export verified both memory entitlements. No build was uploaded.')
 

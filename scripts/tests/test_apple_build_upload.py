@@ -91,6 +91,41 @@ class AppleBuildUploadTests(unittest.TestCase):
                                         '248', 'unit-run', root / 'journal.json')
             self.assertEqual(api.request.call_count, 1)
 
+    def test_empty_reservation_bound_to_export_can_be_used_but_foreign_files_cannot(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ipa = root / 'FlashLocal.ipa'; ipa.write_bytes(b'unit fixture')
+            sha = hashlib.sha256(ipa.read_bytes()).hexdigest()
+            seal = {'version': '0.1.0', 'ipaSHA256': sha, 'xcodeReservationVerified': True,
+                    'xcodeReservedUploadID': 'own-upload'}
+            api = Mock()
+            reservation = {'id': 'own-upload', 'attributes': {'state': {'state': 'AWAITING_UPLOAD'}}}
+            api.all.side_effect = lambda route, query=None: [] if route.endswith('/buildUploadFiles') else [reservation]
+            def request(route, method='GET', body=None, query=None):
+                if route == 'apps/unit-app': return {'data': {'attributes': {'bundleId': upload.BUNDLE}}}
+                if route == 'buildUploadFiles':
+                    attrs = dict(body['data']['attributes'], assetDeliveryState={'state': 'AWAITING_UPLOAD'},
+                                 uploadOperations=[operation(0, ipa.stat().st_size)])
+                    return {'data': {'id': 'file-one', 'attributes': attrs}}
+                if method == 'PATCH': return {'data': {}}
+                raise AssertionError(route)
+            api.request.side_effect = request
+            args = (api, 'unit-app', ipa, None, root / 'seal.json', 'b' * 40, '249', 'unit-run', root / 'journal.json')
+            with patch.object(upload, 'verified_export', return_value=seal), \
+                 patch.object(upload, 'find_build', return_value=None), patch.object(upload, 'put_file') as put:
+                report = upload.upload_build(*args)
+                self.assertTrue(report['xcodeReservationAdopted'])
+                self.assertTrue(report['binaryUploadCommitted'])
+                put.assert_called_once()
+            self.assertEqual(report['buildUploadID'], 'own-upload')
+            foreign = Mock()
+            foreign.request.return_value = {'data': {'attributes': {'bundleId': upload.BUNDLE}}}
+            foreign.all.side_effect = lambda route, query=None: [{'id': 'unexpected-file'}] if route.endswith('/buildUploadFiles') else [reservation]
+            with patch.object(upload, 'verified_export', return_value=seal), patch.object(upload, 'find_build', return_value=None):
+                with self.assertRaisesRegex(ValueError, 'unexpected files'):
+                    upload.upload_build(foreign, *args[1:-1], root / 'foreign-journal.json')
+            self.assertEqual(foreign.request.call_count, 1)
+
     def test_existing_build_requires_apple_upload_link_and_exact_binary_checksum(self):
         with tempfile.TemporaryDirectory() as tmp:
             ipa = Path(tmp) / 'FlashLocal.ipa'

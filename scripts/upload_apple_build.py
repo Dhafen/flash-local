@@ -176,15 +176,21 @@ def upload_build(api, app_id, ipa, metadata, seal_path, source, number, run_id, 
         'filter[platform]': 'IOS', 'limit': '200'})
     if len(found) > 1:
         raise ValueError('Existing build upload is ambiguous; inspect Apple before retry')
+    xcode_reservation = False
     if found:
         upload = found[0]
         # A matching number does not establish identity. Only resume a record
-        # created by this sealed export's journal, including an uncertain POST.
+        # created by this sealed export's journal, including an uncertain POST,
+        # or the new empty reservation independently bound by the Xcode export.
         expected = prior.get('buildUploadID')
-        if expected != upload.get('id') and not (expected is None and prior.get('createUploadAttempted') is True):
+        xcode_reservation = (not prior and seal.get('xcodeReservationVerified') is True and
+                             seal.get('xcodeReservedUploadID') == upload.get('id'))
+        if expected != upload.get('id') and not (expected is None and prior.get('createUploadAttempted') is True) and not xcode_reservation:
             raise ValueError('Existing Apple upload has no matching local delivery journal')
         if upload['attributes'].get('state', {}).get('state') == 'FAILED':
             raise RuntimeError('Existing Apple build upload failed; inspect its errors before retry')
+        if xcode_reservation and upload['attributes'].get('state', {}).get('state') != 'AWAITING_UPLOAD':
+            raise ValueError('Xcode reservation is no longer awaiting upload')
     else:
         if prior.get('createUploadAttempted'):
             raise RuntimeError('Previous upload creation is uncertain; inspect Apple before another creation attempt')
@@ -195,9 +201,12 @@ def upload_build(api, app_id, ipa, metadata, seal_path, source, number, run_id, 
                 'cfBundleVersion': number, 'platform': 'IOS'},
             'relationships': {'app': {'data': {'type': 'apps', 'id': app_id}}}}})['data']
     identifier = resource_id(upload['id'])
-    report['buildUploadID'] = identifier
-    save()
     existing = api.all('buildUploads/' + identifier + '/buildUploadFiles', query={'limit': '200'})
+    if xcode_reservation and existing:
+        raise ValueError('Xcode reservation acquired unexpected files')
+    report['buildUploadID'] = identifier
+    if xcode_reservation: report['xcodeReservationAdopted'] = True
+    save()
     # Apple's Build Uploads API supports an IPA asset without a description
     # file. AppStoreInfo.plist is mandatory for Windows Transporter, which
     # this direct API path does not use. Apple processing/audience still gates
