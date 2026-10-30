@@ -77,6 +77,20 @@ class AppleBuildUploadTests(unittest.TestCase):
             self.assertEqual(api.request.call_count, 1)  # Read app identity only; no mutation.
             api.all.assert_not_called()
 
+    def test_existing_upload_never_adopted_without_matching_journal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ipa = root / 'FlashLocal.ipa'; ipa.write_bytes(b'unit fixture')
+            api = Mock()
+            api.request.return_value = {'data': {'attributes': {'bundleId': upload.BUNDLE}}}
+            api.all.return_value = [{'id': 'foreign-upload', 'attributes': {'state': {'state': 'PROCESSING'}}}]
+            with patch.object(upload, 'verified_export', return_value={'version': '0.1.0', 'ipaSHA256': 'a' * 64}), \
+                 patch.object(upload, 'find_build', return_value=None):
+                with self.assertRaisesRegex(ValueError, 'no matching local delivery journal'):
+                    upload.upload_build(api, 'unit-app', ipa, None, root / 'seal.json', 'b' * 40,
+                                        '248', 'unit-run', root / 'journal.json')
+            self.assertEqual(api.request.call_count, 1)
+
     def test_existing_build_requires_apple_upload_link_and_exact_binary_checksum(self):
         with tempfile.TemporaryDirectory() as tmp:
             ipa = Path(tmp) / 'FlashLocal.ipa'

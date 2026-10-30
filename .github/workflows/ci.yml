@@ -69,6 +69,8 @@ jobs:
     if: ${{ inputs.flint }}
     runs-on: ubuntu-latest
     timeout-minutes: 2
+    outputs:
+      delivery-build-number: ${{ steps.apple-build.outputs.number }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -77,6 +79,17 @@ jobs:
         env:
           FLINT_CI_INPUTS: ${{ toJSON(inputs) }}
         run: python3 scripts/check_flint_ci_inputs.py
+      - name: Verify private Apple target and select an unused build number
+        if: ${{ inputs.upload_private_testflight }}
+        id: apple-build
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_PRIVATE_KEY_B64: ${{ secrets.ASC_PRIVATE_KEY_B64 }}
+          APP_STORE_APP_ID: ${{ vars.APP_STORE_APP_ID }}
+          TESTFLIGHT_INTERNAL_GROUP_ID: ${{ vars.TESTFLIGHT_INTERNAL_GROUP_ID }}
+          TESTFLIGHT_ALLOWED_TESTER_IDS: ${{ vars.TESTFLIGHT_ALLOWED_TESTER_IDS }}
+        run: python3 scripts/select_flint_build_number.py
   flint-validation:
     needs: [flint-inputs]
     if: ${{ inputs.flint }}
@@ -143,8 +156,8 @@ jobs:
           retention-days: 7
 
   build-and-test:
-    needs: [qpack-validation, les-validation, flint-validation]
-    if: ${{ !cancelled() && !inputs.check_delivery_tools && !inputs.regenerate_project_only && (needs.qpack-validation.result == 'success' || inputs.provisioning_only) && (!inputs.ornith_les || needs.les-validation.result == 'success') && (!inputs.flint || needs.flint-validation.result == 'success') }}
+    needs: [qpack-validation, les-validation, flint-validation, flint-inputs]
+    if: ${{ !cancelled() && !inputs.check_delivery_tools && !inputs.regenerate_project_only && (needs.qpack-validation.result == 'success' || inputs.provisioning_only) && (!inputs.ornith_les || needs.les-validation.result == 'success') && (!inputs.flint || (needs.flint-inputs.result == 'success' && needs.flint-validation.result == 'success')) }}
     name: ${{ inputs.provisioning_only && 'device archive · signing probe (no test coverage)' || 'streaming tests · app tests · package tests · iOS build' }}
     runs-on: ${{ (github.event_name != 'workflow_dispatch' || inputs.use_macos15) && 'macos-15' || 'macos-26' }}
     timeout-minutes: ${{ inputs.upload_private_testflight && 120 || 90 }}
@@ -413,12 +426,14 @@ jobs:
 
       - name: Archive and inspect Release for device iOS
         if: github.event_name == 'workflow_dispatch' && inputs.release_archive
+        env:
+          FLASH_LOCAL_BUILD_NUMBER: ${{ inputs.flint && needs.flint-inputs.outputs.delivery-build-number || github.run_number }}
         run: |
           python3 -m unittest discover -s scripts/tests -p 'test_check_ios_archive.py' -v
           xcodebuild archive -project Apps/Minirun/Minirun.xcodeproj $XCODEBUILD_FLAGS \
             -scheme Minirun-iOS -configuration Release -destination 'generic/platform=iOS' \
             -archivePath "$RUNNER_TEMP/FlashLocal.xcarchive" CODE_SIGNING_ALLOWED=NO \
-            CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
+            CURRENT_PROJECT_VERSION="$FLASH_LOCAL_BUILD_NUMBER" \
             2>&1 | tee ios-archive.log | tail -60
           python3 scripts/check_ios_archive.py "$RUNNER_TEMP/FlashLocal.xcarchive" --output ios-archive-check.json
 
@@ -437,7 +452,7 @@ jobs:
           python3 scripts/probe_automatic_export.py "$RUNNER_TEMP/FlashLocal.xcarchive"
 
       - name: Upload and verify the own-tester private TestFlight build
-        if: github.event_name == 'workflow_dispatch' && inputs.upload_private_testflight
+        if: github.event_name == 'workflow_dispatch' && inputs.upload_private_testflight && !inputs.flint
         env:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
@@ -445,6 +460,25 @@ jobs:
           TESTFLIGHT_INTERNAL_GROUP_ID: ${{ vars.TESTFLIGHT_INTERNAL_GROUP_ID }}
           TESTFLIGHT_ALLOWED_TESTER_IDS: ${{ vars.TESTFLIGHT_ALLOWED_TESTER_IDS }}
         run: python3 scripts/deliver_testflight.py
+
+      - name: Upload and verify the sealed Flint build through Apple's Build Uploads API
+        if: github.event_name == 'workflow_dispatch' && inputs.upload_private_testflight && inputs.flint
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          APP_STORE_APP_ID: ${{ vars.APP_STORE_APP_ID }}
+          TESTFLIGHT_INTERNAL_GROUP_ID: ${{ vars.TESTFLIGHT_INTERNAL_GROUP_ID }}
+          TESTFLIGHT_ALLOWED_TESTER_IDS: ${{ vars.TESTFLIGHT_ALLOWED_TESTER_IDS }}
+          FLASH_LOCAL_BUILD_NUMBER: ${{ needs.flint-inputs.outputs.delivery-build-number }}
+        run: |
+          shopt -s nullglob
+          ipas=("$RUNNER_TEMP/flash-local-signing/export/"*.ipa)
+          test "${#ipas[@]}" -eq 1
+          args=(--ipa "${ipas[0]}" --seal ios-signing-probe.json --source "$GITHUB_SHA"
+                --build "$FLASH_LOCAL_BUILD_NUMBER" --export-run "$GITHUB_RUN_ID" --journal testflight-delivery.json)
+          metadata="$RUNNER_TEMP/flash-local-signing/export/AppStoreInfo.plist"
+          if test -f "$metadata"; then args+=(--metadata "$metadata"); fi
+          python3 scripts/upload_apple_build.py "${args[@]}"
 
       - name: Remove temporary signing material and local IPA
         if: always() && github.event_name == 'workflow_dispatch' && inputs.probe_automatic_signing

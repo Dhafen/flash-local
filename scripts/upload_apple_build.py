@@ -178,6 +178,11 @@ def upload_build(api, app_id, ipa, metadata, seal_path, source, number, run_id, 
         raise ValueError('Existing build upload is ambiguous; inspect Apple before retry')
     if found:
         upload = found[0]
+        # A matching number does not establish identity. Only resume a record
+        # created by this sealed export's journal, including an uncertain POST.
+        expected = prior.get('buildUploadID')
+        if expected != upload.get('id') and not (expected is None and prior.get('createUploadAttempted') is True):
+            raise ValueError('Existing Apple upload has no matching local delivery journal')
         if upload['attributes'].get('state', {}).get('state') == 'FAILED':
             raise RuntimeError('Existing Apple build upload failed; inspect its errors before retry')
     else:
