@@ -86,6 +86,34 @@ def main():
                     "maximumSelectedExpertID": maximum_expert,
                     "maximumAbsoluteError": maximum, "exactRouting": True, "passed": True})
                 print(f"PASS {name}/Q4_1/{label}: maxLogitError={maximum:.9g}", flush=True)
+            # The portable F32-activation reference is independently checked
+            # against the full NumPy/FP64 graph, not against GGML's Q8_1 CPU
+            # activations. It must preserve actual routing and top-1. The
+            # ordinary CPU controls above continue to exercise unchanged math.
+            for physical, streaming, steps in [(1, False, 40), (1, True, 40), (4, True, 40),
+                                               (8, True, 40)] + ([(4, True, 300)] if name == "normal" else []):
+                label = f"{'stream' if streaming else 'resident'}-{physical}-{steps}"
+                result = run([args.control, path(qt), path(quantized / "manifest.json") if streaming else "-",
+                              str(steps), str(physical), "q4-f32-reference"])
+                (quantized / f"f32-reference-{label}.log").write_text(result.stderr, encoding="utf-8")
+                if result.returncode: raise RuntimeError(f"{name}/F32-reference/{label}: {result.stderr[-2000:]}")
+                out = json.loads(result.stdout)
+                if out.get("q4F32Reference") is not True:
+                    raise RuntimeError("Diagnostic did not select the Q4_1/F32 reference")
+                actual = np.asarray(out.pop("logits"), dtype=np.float64)
+                actual_routes = sorted(out.pop("routes"), key=lambda x: (x["position"], x["layer"]))
+                oracle, oracle_routes = evaluate(qt, [1 + i % 31 for i in range(steps)])
+                oracle_routes = sorted(oracle_routes, key=lambda x: (x["position"], x["layer"]))
+                maximum = float(np.max(np.abs(actual - oracle)))
+                rms = float(np.sqrt(np.mean((actual - oracle) ** 2)))
+                same_top1 = bool(np.array_equal(actual.argmax(axis=-1), oracle.argmax(axis=-1)))
+                if maximum > 2e-4 or not same_top1 or actual_routes != oracle_routes:
+                    raise RuntimeError(f"{name}/F32-reference/{label} differs from the FP64 oracle: max={maximum} rms={rms}")
+                if streaming and out["ioBytes"] == 0: raise RuntimeError("Q4_1 F32 reference performed no streaming reads")
+                cases.append({"fixture": name + "-q4_1-f32-reference", **out, "expertCount": experts,
+                    "reference": "independent-q4_1-f32-numpy-fp64", "maximumAbsoluteError": maximum,
+                    "rmsError": rms, "allTop1Equal": same_top1, "exactRouting": True, "passed": True})
+                print(f"PASS {name}/Q4_1-F32/{label}: maxLogitError={maximum:.9g}", flush=True)
     root = pathlib.Path(__file__).resolve().parents[1]
     native = root / "Experiments/Flint/Native"
     source = json.loads((root / ".work/flint-source/flash-local-flint-source.json").read_text(encoding="utf-8"))

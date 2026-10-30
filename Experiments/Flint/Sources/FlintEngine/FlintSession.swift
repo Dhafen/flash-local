@@ -21,6 +21,7 @@ public struct FlintConfiguration: Equatable, Sendable {
     // Restricted to diagnostic graph runs; ordinary inference keeps its defaults.
     var diagnosticF32KV = false
     var diagnosticDisableFlash = false
+    var diagnosticQ4F32Reference = false
     public var memoryCeilingBytes: UInt64 = 5_500_000_000
     public init() {}
     public func validate() throws {
@@ -31,6 +32,9 @@ public struct FlintConfiguration: Equatable, Sendable {
         }
         guard !(diagnosticF32KV || diagnosticDisableFlash) || (backend == .metal && diagnosticRouting) else {
             throw FlintFailure.invalid("Metal precision overrides require a diagnostic graph")
+        }
+        guard !diagnosticQ4F32Reference || (backend == .cpuReference && diagnosticRouting) else {
+            throw FlintFailure.invalid("Q4/F32 reference requires a CPU diagnostic graph")
         }
     }
 }
@@ -175,6 +179,7 @@ public actor FlintSession {
         options.f32_kv_control = configuration.backend == .cpuReference || configuration.diagnosticF32KV
         options.diagnostic_routing = configuration.diagnosticRouting
         options.diagnostic_disable_flash = configuration.diagnosticDisableFlash
+        options.diagnostic_q4_f32_reference = configuration.diagnosticQ4F32Reference
         let control = Unmanaged.passUnretained(cancellation).toOpaque()
         let pointer = flf_open(fd, directory.path, options, { opaque in
             guard let opaque else { return true }
@@ -468,7 +473,7 @@ extension FlintSession {
             "executable": try FileDigestComputer.digest(ofFileAt: executable, algorithm: .sha256).hex,
             "os": ProcessInfo.processInfo.operatingSystemVersionString, "context": String(configuration.contextTokens),
             "evaluation": String(configuration.evaluationBatch), "physical": String(configuration.physicalBatch),
-            "policy": "flint-cpu-f32kv-metal-f16kv-four-position-expert-sets-v1"]
+            "policy": "flint-q4-f32-cpu-and-metal-four-position-expert-sets-v2"]
         let url = privateRoot.appendingPathComponent("numerical-admission-v1.json")
         let key = try LocalAPIKeyStore(service: "com.dhafen.flashlocal.flint-admission.v1").loadOrCreate()
         if let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= 2 << 20,
@@ -497,9 +502,10 @@ extension FlintSession {
             var metal = configuration; metal.diagnosticRouting = true
             try load(artifact: artifact, privateRoot: privateRoot, configuration: metal, progress: progress)
             try traceRouting(true)
-            var comparisons: [FlintNumericalCheck.Position] = []; first = 0
+            var comparisons: [FlintNumericalCheck.Position] = [], candidateLogits: [[Float]] = []; first = 0
             for (number, position) in positions.enumerated() {
                 let logits = try evaluate(tokens: Array(tokens[first...position]), outputLogits: true)!
+                candidateLogits.append(logits)
                 comparisons.append(try FlintNumericalCheck.compare(position: position, reference: references[number], candidate: logits))
                 first = position + 1
                 progress(.init(phase: 4, fraction: Double(number + 1) / Double(positions.count), observedFootprintBytes: ProcessFootprint.current()?.footprintBytes))
@@ -539,6 +545,59 @@ extension FlintSession {
                     numericalReport = check
                 } catch is CancellationError { unload(); throw CancellationError() }
                 catch { /* Preserve the original failed report if this control is unavailable. */ }
+                unload()
+                // The standard CPU Q4_1 dot product rounds F32 activations to
+                // Q8_1. Compare the *original serving Metal candidate* with a
+                // separately validated Q4_1/F32 CPU reference before deciding
+                // whether that precision difference caused the rejection.
+                // All four full logit vectors and every computed top-six set
+                // must satisfy the same existing thresholds. No candidate
+                // configuration, weights, or expert choices are modified.
+                do {
+                    try Task.checkCancellation()
+                    var exact = cpu; exact.diagnosticQ4F32Reference = true
+                    try load(artifact: artifact, privateRoot: privateRoot, configuration: exact, progress: progress)
+                    try traceRouting(true)
+                    var exactPositions: [FlintNumericalCheck.Position] = []; first = 0
+                    for (number, position) in positions.enumerated() {
+                        try Task.checkCancellation()
+                        let logits = try evaluate(tokens: Array(tokens[first...position]), outputLogits: true)!
+                        exactPositions.append(try FlintNumericalCheck.compare(position: position, reference: logits, candidate: candidateLogits[number]))
+                        first = position + 1
+                        progress(.init(phase: 4, fraction: Double(number + 1) / Double(positions.count), observedFootprintBytes: ProcessFootprint.current()?.footprintBytes))
+                    }
+                    let exactRoutes = try routingDecisions()
+                    var exactCheck = FlintNumericalCheck.Q4F32Reference(positions: exactPositions,
+                        routedTokenLayers: exactRoutes.count,
+                        exactExpertSets: exactRoutes.count == tokens.count * 46 + positions.count && FlintNumericalCheck.sameRoutes(exactRoutes, actualRoutes),
+                        routeDiagnostics: FlintNumericalCheck.diagnoseRoutes(exactRoutes, actualRoutes))
+                    check = FlintNumericalCheck(positions: comparisons, routedTokenLayers: referenceRoutes.count,
+                        exactExpertSets: check.exactExpertSets, routeDiagnostics: check.routeDiagnostics,
+                        matchedMetalControl: check.matchedMetalControl, q4F32Reference: exactCheck)
+                    numericalReport = check
+                    if exactCheck.referencePassed {
+                        // Routing callbacks affect the evaluation graph. Verify
+                        // the real callback-free serving path as well; never
+                        // serve based only on a diagnostic graph's output.
+                        unload(); try Task.checkCancellation()
+                        try load(artifact: artifact, privateRoot: privateRoot, configuration: configuration, progress: progress)
+                        var servingPositions: [FlintNumericalCheck.Position] = []; first = 0
+                        for (number, position) in positions.enumerated() {
+                            try Task.checkCancellation()
+                            let logits = try evaluate(tokens: Array(tokens[first...position]), outputLogits: true)!
+                            servingPositions.append(try FlintNumericalCheck.compare(position: position, reference: candidateLogits[number], candidate: logits))
+                            first = position + 1
+                        }
+                        exactCheck = .init(positions: exactPositions, routedTokenLayers: exactCheck.routedTokenLayers,
+                            exactExpertSets: exactCheck.exactExpertSets, routeDiagnostics: exactCheck.routeDiagnostics,
+                            servingPositions: servingPositions)
+                        check = FlintNumericalCheck(positions: comparisons, routedTokenLayers: referenceRoutes.count,
+                            exactExpertSets: check.exactExpertSets, routeDiagnostics: check.routeDiagnostics,
+                            matchedMetalControl: check.matchedMetalControl, q4F32Reference: exactCheck)
+                        numericalReport = check
+                    }
+                } catch is CancellationError { unload(); throw CancellationError() }
+                catch { /* Preserve the failed comparison if the exact reference cannot complete. */ }
                 unload()
             }
             guard check.passed else { throw FlintFailure.invalid("Flint's CPU/Metal comparison differed; no new chat/API backend was admitted") }

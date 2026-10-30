@@ -30,6 +30,12 @@ int main(int argc, char ** argv) {
         require(flf_open(fd, argv[2], rejected, nullptr, nullptr, nullptr) == nullptr, "Non-diagnostic Flash override accepted");
         rejected = o; rejected.diagnostic_disable_flash = true;
         require(flf_open(fd, argv[2], rejected, nullptr, nullptr, nullptr) == nullptr, "CPU Flash override accepted");
+        rejected = o; rejected.metal = true; rejected.diagnostic_q4_f32_reference = true;
+        require(flf_open(fd, argv[2], rejected, nullptr, nullptr, nullptr) == nullptr, "Metal Q4 F32 CPU reference accepted");
+        rejected = o; rejected.diagnostic_routing = false; rejected.diagnostic_q4_f32_reference = true;
+        require(flf_open(fd, argv[2], rejected, nullptr, nullptr, nullptr) == nullptr, "Non-diagnostic Q4 F32 reference accepted");
+        rejected = o; rejected.f32_kv_control = false; rejected.diagnostic_q4_f32_reference = true;
+        require(flf_open(fd, argv[2], rejected, nullptr, nullptr, nullptr) == nullptr, "Q4 F32 reference with F16 KV accepted");
         require(std::filesystem::is_empty(argv[2]), "Rejected load left a manifest");
         c = flf_open(fd, argv[2], o, nullptr, nullptr, nullptr); close(fd);
         if (!c) throw std::runtime_error(flf_last_error());
@@ -119,7 +125,32 @@ int main(int argc, char ** argv) {
         for (float value : state_only) require(std::isfinite(value), "F16 KV diagnostic produced nonfinite logits");
         flf_close(c); c = nullptr;
         require(std::filesystem::is_empty(argv[2]), "F16 diagnostic manifest not cleaned on unload");
-        std::cout << "FLINT_API_CONTROL memoryAdmission=true duplicateLoadRejected=true descriptorRetained=true stateOnlyPrefill=true noCopyLogits=true greedy=true seededDecode=true staleLogitsRejected=true routingTrace=true kvAppend=true reset=true cancellation=true diagnosticGuards=true cpuKVF16=true cpuKVF32=true unload=true\n";
+        // The precision switch belongs only to an exclusively owned CPU
+        // diagnostic context. Closing it must restore the standard Q8_1 path.
+        o.f32_kv_control = true; o.diagnostic_q4_f32_reference = true;
+        const int exact_fd = open(argv[1], O_RDONLY | O_CLOEXEC);
+        require(exact_fd >= 0, "Cannot reopen exact-reference fixture");
+        c = flf_open(exact_fd, argv[2], o, nullptr, nullptr, nullptr); close(exact_fd);
+        if (!c) throw std::runtime_error(flf_last_error());
+        require(flf_evaluate(c, prefix, 4, state_only.data(), 32) == 0, flf_last_error());
+        float max_difference = 0;
+        for (int i = 0; i < 32; ++i) {
+            require(std::isfinite(state_only[i]), "Q4 F32 reference produced nonfinite logits");
+            max_difference = std::max(max_difference, std::abs(control[i] - state_only[i]));
+        }
+        if (std::string(argv[1]).find("q4_1") != std::string::npos)
+            require(max_difference > 1e-8f, "Quantized fixture did not exercise the alternate CPU reference");
+        flf_close(c); c = nullptr;
+        o.diagnostic_q4_f32_reference = false;
+        const int ordinary_fd = open(argv[1], O_RDONLY | O_CLOEXEC);
+        require(ordinary_fd >= 0, "Cannot reopen ordinary fixture");
+        c = flf_open(ordinary_fd, argv[2], o, nullptr, nullptr, nullptr); close(ordinary_fd);
+        if (!c) throw std::runtime_error(flf_last_error());
+        require(flf_evaluate(c, prefix, 4, state_only.data(), 32) == 0, flf_last_error());
+        for (int i = 0; i < 32; ++i) require(control[i] == state_only[i], "Diagnostic precision leaked into ordinary CPU execution");
+        flf_close(c); c = nullptr;
+        require(std::filesystem::is_empty(argv[2]), "Precision diagnostic manifest not cleaned on unload");
+        std::cout << "FLINT_API_CONTROL memoryAdmission=true duplicateLoadRejected=true descriptorRetained=true stateOnlyPrefill=true noCopyLogits=true greedy=true seededDecode=true staleLogitsRejected=true routingTrace=true kvAppend=true reset=true cancellation=true diagnosticGuards=true cpuKVF16=true cpuKVF32=true q4F32Scoped=true unload=true\n";
         return 0;
     } catch (const std::exception & e) {
         if (c) flf_close(c);

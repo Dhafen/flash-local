@@ -12,9 +12,13 @@
 #include <cmath>
 #include <filesystem>
 
+extern "C" void ggml_flint_set_q4_reference(bool enabled);
+
 int main(int argc, char ** argv) {
     try {
-        if (argc != 5) throw std::runtime_error("model.gguf manifest-or-- steps physical-batch");
+        if (argc != 5 && argc != 6) throw std::runtime_error("model.gguf manifest-or-- steps physical-batch [q4-f32-reference]");
+        const bool q4_reference = argc == 6 && std::string(argv[5]) == "q4-f32-reference";
+        if (argc == 6 && !q4_reference) throw std::runtime_error("Unknown diagnostic precision policy");
         const int steps = std::stoi(argv[3]), physical = std::stoi(argv[4]);
         if (steps < 1 || steps > 512 || physical < 1 || physical > 32 || std::filesystem::file_size(argv[1]) > (64u << 20))
             throw std::runtime_error("Invalid control geometry; only small random fixtures under 64 MiB are admitted");
@@ -22,6 +26,7 @@ int main(int argc, char ** argv) {
         for (const char * key : {"LLAMA_MOE_DECODE_WINDOW", "LLAMA_MOE_LOOKAHEAD_PREFETCH", "LLAMA_MOE_PREFETCH_READ",
              "LLAMA_MOE_SKIP_READ", "LLAMA_MOE_DUMMY_READ", "LLAMA_MOE_MATMUL_SPLIT", "LLAMA_MOE_F_NOCACHE"}) setenv(key, "0", 1);
         unsetenv("LLAMA_MOE_LAYER_WINDOWS");
+        ggml_flint_set_q4_reference(q4_reference);
         llama_backend_init();
         llama_model_params mp = llama_model_default_params();
         mp.n_gpu_layers = 0;
@@ -82,7 +87,7 @@ int main(int argc, char ** argv) {
         }
         uint64_t bytes = 0, reads = 0;
         if (auto * slots = ctx->flash_local_slots()) { auto s = slots->counters_snapshot(); bytes = s.all_bytes; reads = s.all_calls; }
-        std::cout << nlohmann::json{{"synthetic", true}, {"streaming", streaming}, {"physicalBatch", physical},
+        std::cout << nlohmann::json{{"synthetic", true}, {"streaming", streaming}, {"q4F32Reference", q4_reference}, {"physicalBatch", physical},
             {"steps", steps}, {"ioBytes", bytes}, {"ioCalls", reads}, {"routes", trace.rows}, {"logits", rows}}.dump() << std::endl;
         return 0;
     } catch (const std::exception & e) { std::cerr << "Flint control: " << e.what() << std::endl; return 1; }

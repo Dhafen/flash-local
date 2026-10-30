@@ -35,6 +35,7 @@ void flint_set_error(const std::string & value) { error_text = value; }
 static std::atomic<bool> leased{false};
 static std::once_flag initialized;
 static void require(bool ok, const char * text) { if (!ok) throw std::runtime_error(text); }
+extern "C" void ggml_flint_set_q4_reference(bool enabled);
 struct flf_context {
     int source = -1;
     FILE * stream = nullptr;
@@ -66,6 +67,9 @@ struct flf_context {
         if (stream) fclose(stream);
         if (source >= 0) close(source);
         if (!manifest.empty()) unlink(manifest.c_str());
+        // The isolated runtime has a single exclusive owner. Do not allow a
+        // diagnostic CPU precision policy to leak into the next context.
+        ggml_flint_set_q4_reference(false);
         leased.store(false);
     }
     bool should_abort() const { return cancelled.load() || (abort && abort(user)); }
@@ -188,9 +192,11 @@ flf_context * flf_open(int fd, const char * directory, flf_options o, flf_abort 
             o.physical_batch >= 1 && o.physical_batch <= 16 && o.physical_batch <= o.evaluation_batch && o.cpu_threads >= 1 &&
             o.cpu_threads <= 8 && o.process_ceiling_bytes > 0 && o.process_ceiling_bytes <= 5500000000ULL &&
             (!o.metal || !o.f32_kv_control || o.diagnostic_routing) &&
-            (!o.diagnostic_disable_flash || (o.metal && o.diagnostic_routing)),
+            (!o.diagnostic_disable_flash || (o.metal && o.diagnostic_routing)) &&
+            (!o.diagnostic_q4_f32_reference || (!o.metal && o.diagnostic_routing && o.f32_kv_control)),
             "Invalid bounded Flint configuration");
         c->options = o; c->abort = abort; c->progress = progress; c->user = user;
+        ggml_flint_set_q4_reference(o.diagnostic_q4_f32_reference);
         c->source = fcntl(fd, F_DUPFD_CLOEXEC, 0);
         require(c->source >= 0 && fstat(c->source, &c->identity) == 0 && S_ISREG(c->identity.st_mode) && c->identity.st_size > 0,
             "Flint requires a verified open regular file");
@@ -405,7 +411,7 @@ flf_metrics flf_snapshot(const flf_context * c) {
     return out;
 }
 const char * flf_last_error() { return error_text.c_str(); }
-const char * flf_revision() { return "96bbf617+flint-a37cc461-backport-2"; }
+const char * flf_revision() { return "96bbf617+flint-a37cc461-backport-3-q4f32-reference"; }
 const char * flf_library_path() {
     Dl_info info{};
     if (!dladdr(reinterpret_cast<const void *>(&flf_revision), &info) || !info.dli_fname) {

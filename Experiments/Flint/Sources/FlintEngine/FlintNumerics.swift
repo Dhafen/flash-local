@@ -29,19 +29,57 @@ public struct FlintNumericalCheck: Codable, Sendable {
         public let exactExpertSets: Bool
         public let routeDiagnostics: RouteDiagnostics?
     }
+    public struct Q4F32Reference: Codable, Sendable {
+        /// Complete original Metal candidate vs. CPU Q4_1/F32 activation
+        /// reference, accumulated in double. No weight or route changes.
+        public let positions: [Position]
+        public let routedTokenLayers: Int
+        public let exactExpertSets: Bool
+        public let routeDiagnostics: RouteDiagnostics?
+        /// Compare the callback-free serving graph with the traced candidate.
+        /// A missing or failed comparison cannot admit the new reference path.
+        public let servingPositions: [Position]?
+        init(positions: [Position], routedTokenLayers: Int, exactExpertSets: Bool,
+             routeDiagnostics: RouteDiagnostics?, servingPositions: [Position]? = nil) {
+            self.positions = positions; self.routedTokenLayers = routedTokenLayers
+            self.exactExpertSets = exactExpertSets; self.routeDiagnostics = routeDiagnostics
+            self.servingPositions = servingPositions
+        }
+        var referencePassed: Bool {
+            guard let routes = routeDiagnostics, routes.referenceCount == routedTokenLayers,
+                  routes.candidateCount == routedTokenLayers, routes.mismatchCount == 0,
+                  routes.firstMismatch == nil else { return false }
+            return FlintNumericalCheck.validControl(positions, routedTokenLayers, exactExpertSets)
+        }
+        var passed: Bool {
+            guard referencePassed, let servingPositions else { return false }
+            return servingPositions.map(\.index) == positions.map(\.index) &&
+                FlintNumericalCheck.validControl(servingPositions, routedTokenLayers, exactExpertSets)
+        }
+    }
     public let positions: [Position]
     public let routedTokenLayers: Int
     public let exactExpertSets: Bool
     /// Absent for older saved admissions or malformed/oversized traces.
     public let routeDiagnostics: RouteDiagnostics?
     public let matchedMetalControl: MatchedMetalControl?
+    public let q4F32Reference: Q4F32Reference?
     init(positions: [Position], routedTokenLayers: Int, exactExpertSets: Bool,
-         routeDiagnostics: RouteDiagnostics?, matchedMetalControl: MatchedMetalControl? = nil) {
+         routeDiagnostics: RouteDiagnostics?, matchedMetalControl: MatchedMetalControl? = nil,
+         q4F32Reference: Q4F32Reference? = nil) {
         self.positions = positions; self.routedTokenLayers = routedTokenLayers
         self.exactExpertSets = exactExpertSets; self.routeDiagnostics = routeDiagnostics
-        self.matchedMetalControl = matchedMetalControl
+        self.matchedMetalControl = matchedMetalControl; self.q4F32Reference = q4F32Reference
     }
-    public var passed: Bool { positions.count == 4 && positions.allSatisfy(\.passed) && routedTokenLayers > 0 && exactExpertSets }
+    private static func validControl(_ positions: [Position], _ routedTokenLayers: Int, _ exactExpertSets: Bool) -> Bool {
+        guard positions.count == 4, let last = positions.last?.index, (7..<63).contains(last) else { return false }
+        let tokenCount = last + 1
+        return positions.map(\.index) == [0, 3, tokenCount / 2, tokenCount - 1] &&
+            positions.allSatisfy(\.passed) && routedTokenLayers == tokenCount * 46 + 4 && exactExpertSets
+    }
+    public var passed: Bool {
+        Self.validControl(positions, routedTokenLayers, exactExpertSets) || q4F32Reference?.passed == true
+    }
     public static func compare(position: Int, reference: [Float], candidate: [Float]) throws -> Position {
         guard !reference.isEmpty, reference.count == candidate.count, reference.count <= 300000,
               reference.allSatisfy(\.isFinite), candidate.allSatisfy(\.isFinite) else { throw ComparisonFailure.invalidLogits }

@@ -52,6 +52,7 @@ final class FlintStreamTests: XCTestCase {
         let decoded = try JSONDecoder().decode(FlintNumericalCheck.self, from: legacy)
         XCTAssertNil(decoded.routeDiagnostics)
         XCTAssertNil(decoded.matchedMetalControl)
+        XCTAssertNil(decoded.q4F32Reference)
         XCTAssertFalse(decoded.passed)
     }
     func testMatchedControlNeverOverridesFailedAdmission() throws {
@@ -66,6 +67,43 @@ final class FlintStreamTests: XCTestCase {
         XCTAssertEqual(decoded.matchedMetalControl?.positions.count, 4)
         XCTAssertFalse(decoded.passed)
     }
+    func testQ4F32ReferenceRequiresFourRealPositionsAndCompleteMatchingRoutes() throws {
+        func positions(_ indices: [Int], top1: Bool = true) -> [FlintNumericalCheck.Position] {
+            indices.map { .init(index: $0, maximumAbsoluteError: 0, rmsError: 0, cosineSimilarity: 1, sameTop1: top1) }
+        }
+        let diagnostics = FlintNumericalCheck.RouteDiagnostics(referenceCount: 556, candidateCount: 556,
+            mismatchCount: 0, firstMismatch: nil)
+        func admission(_ rows: [FlintNumericalCheck.Position], _ count: Int = 556,
+                       _ exact: Bool = true, _ routes: FlintNumericalCheck.RouteDiagnostics? = nil,
+                       serving: [FlintNumericalCheck.Position]? = nil) -> FlintNumericalCheck {
+            let alternative = FlintNumericalCheck.Q4F32Reference(positions: rows, routedTokenLayers: count,
+                exactExpertSets: exact, routeDiagnostics: routes, servingPositions: serving ?? rows)
+            return FlintNumericalCheck(positions: [], routedTokenLayers: 0, exactExpertSets: false,
+                routeDiagnostics: nil, q4F32Reference: alternative)
+        }
+        let valid = admission(positions([0, 3, 6, 11]), 556, true, diagnostics)
+        XCTAssertTrue(valid.passed)
+        XCTAssertTrue(try JSONDecoder().decode(FlintNumericalCheck.self, from: JSONEncoder().encode(valid)).passed)
+        XCTAssertFalse(admission(positions([0, 3, 6, 11]), 556, true, nil).passed)
+        XCTAssertFalse(admission(positions([0, 3, 6, 11]), 555, true, diagnostics).passed)
+        XCTAssertFalse(admission(positions([0, 3, 6, 11]), 556, false, diagnostics).passed)
+        XCTAssertFalse(admission(positions([0, 3, 6, 11], top1: false), 556, true, diagnostics).passed)
+        XCTAssertFalse(admission(positions([0, 3, 3, 11]), 556, true, diagnostics).passed)
+        XCTAssertFalse(admission(positions([0, 3, 6, 11]), 556, true, diagnostics,
+            serving: positions([0, 3, 6, 11], top1: false)).passed)
+        XCTAssertFalse(admission(positions([0, 3, 6, 11]), 556, true, diagnostics,
+            serving: positions([0, 3, 6])).passed)
+        let incomplete = FlintNumericalCheck.Q4F32Reference(positions: positions([0, 3, 6, 11]),
+            routedTokenLayers: 556, exactExpertSets: true, routeDiagnostics: diagnostics)
+        XCTAssertTrue(incomplete.referencePassed)
+        XCTAssertFalse(incomplete.passed)
+        XCTAssertFalse(try JSONDecoder().decode(FlintNumericalCheck.Q4F32Reference.self,
+            from: JSONEncoder().encode(incomplete)).passed)
+        let mismatch = FlintNumericalCheck.RouteDiagnostics(referenceCount: 556, candidateCount: 556,
+            mismatchCount: 1, firstMismatch: .init(position: 0, layer: 6,
+                referenceExperts: [1, 2, 3, 4, 5, 6], candidateExperts: [1, 2, 3, 4, 5, 7]))
+        XCTAssertFalse(admission(positions([0, 3, 6, 11]), 556, true, mismatch).passed)
+    }
     func testPrecisionOverridesAreDiagnosticOnly() throws {
         var config = FlintConfiguration()
         config.diagnosticF32KV = true
@@ -79,6 +117,12 @@ final class FlintStreamTests: XCTestCase {
         XCTAssertThrowsError(try config.validate())
         config.backend = .metal
         XCTAssertNoThrow(try config.validate())
+        config.diagnosticQ4F32Reference = true
+        XCTAssertThrowsError(try config.validate())
+        config.backend = .cpuReference; config.diagnosticDisableFlash = false
+        XCTAssertNoThrow(try config.validate())
+        config.diagnosticRouting = false
+        XCTAssertThrowsError(try config.validate())
     }
     func testReasoningAndUTF8AreIdenticalForEveryBytePartition() throws {
         let text = "<think>Räkna 👋: 50+5.</think>Svaret är 55.\n"

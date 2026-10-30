@@ -17,6 +17,9 @@ typedef struct {
     // Diagnostic only: run Metal attention without the Flash Attention path.
     // Production contexts reject this flag and retain their existing defaults.
     bool diagnostic_disable_flash;
+    // Diagnostic CPU reference: Q4_1 weights times F32 activations, with
+    // double accumulation. Not valid for a Metal or serving context.
+    bool diagnostic_q4_f32_reference;
 } flf_options;
 typedef struct {
     // Explicit expert pread totals only; not mmap faults/physical NAND traffic.

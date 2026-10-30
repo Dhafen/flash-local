@@ -99,6 +99,25 @@ struct llama_model_flint : public llama_model_base {
          "#if defined(__APPLE__)\n        std::lock_guard<std::mutex> lock(fd_mutex);\n        for (const auto & kv : fds)")
     edit("src/llama-graph.cpp", "    if (moe_decode_phase &&\n        moe_slots && moe_slots->uses_layer(il) && moe_slots->matmul_split() > 0 &&",
          "    if (arch != LLM_ARCH_FLINT && moe_decode_phase &&\n        moe_slots && moe_slots->uses_layer(il) && moe_slots->matmul_split() > 0 &&")
+    # Diagnostic reference only: keep ordinary Q4_1/Q8_1 CPU arithmetic by
+    # default and let the exclusively owned Flint diagnostic select an F32
+    # activation reference. Change every CPU matmul planner/executor lookup,
+    # so its workspace and selected dot product agree. GPU kernels are intact.
+    cpu = "ggml/src/ggml-cpu/ggml-cpu.c"
+    edit(cpu, "static const struct ggml_type_traits_cpu type_traits_cpu[GGML_TYPE_COUNT] = {",
+         '#include "flint-q41-reference.inc"\n\n'
+         "static const struct ggml_type_traits_cpu type_traits_cpu[GGML_TYPE_COUNT] = {")
+    edit(cpu, "    return &type_traits_cpu[type];",
+         "    if (type == GGML_TYPE_Q4_1 && atomic_load_explicit(&flint_q4_reference_enabled, memory_order_acquire)) {\n"
+         "        return &flint_q4_1_f32_traits;\n"
+         "    }\n"
+         "    return &type_traits_cpu[type];")
+    edit(cpu, "type_traits_cpu[type].vec_dot_type", "ggml_get_type_traits_cpu(type)->vec_dot_type", 3)
+    edit(cpu, "type_traits_cpu[type].vec_dot;", "ggml_get_type_traits_cpu(type)->vec_dot;", 2)
+    edit(cpu, "type_traits_cpu[src0->type].vec_dot_type", "ggml_get_type_traits_cpu(src0->type)->vec_dot_type", 2)
+    edit(cpu, "type_traits_cpu[src0->type].nrows", "ggml_get_type_traits_cpu(src0->type)->nrows")
+    edit(cpu, "type_traits_cpu[node->src[0]->type].vec_dot_type", "ggml_get_type_traits_cpu(node->src[0]->type)->vec_dot_type")
+    result["ggml/src/ggml-cpu/flint-q41-reference.inc"] = (NATIVE / "FlintQ41Reference.inc").read_text(encoding="utf-8")
     vocab = (NATIVE / "FlintVocabulary.inc").read_text(encoding="utf-8")
     edit("src/llama-vocab.h", "enum llama_vocab_pre_type {", "enum llama_vocab_pre_type {\n    LLAMA_VOCAB_PRE_TYPE_FLINT = 1000,")
     edit("src/llama-vocab.cpp", "        switch (vocab.get_pre_type()) {",
