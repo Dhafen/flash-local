@@ -131,7 +131,7 @@ private final class LocalAPISession: @unchecked Sendable {
     private let capabilities: LocalModelCapabilities
     private let canServe: @Sendable () -> Bool
     private let onClose: () -> Void
-    private var parser = LocalHTTPParser()
+    private var parser: LocalHTTPParser
     private var finished = false
     private var timer: DispatchWorkItem?
     private var generation: LocalChatGeneration?
@@ -141,6 +141,7 @@ private final class LocalAPISession: @unchecked Sendable {
          handler: @escaping LocalModelAPIServer.Handler, onClose: @escaping () -> Void) {
         self.connection = connection; self.queue = queue; self.key = key; self.defaults = defaults; self.handler = handler; self.onClose = onClose
         self.capabilities = capabilities
+        self.parser = LocalHTTPParser(maximumBodyBytes: capabilities.family == .flint ? 2 << 20 : 262144)
         self.canServe = canServe
     }
     func start() {

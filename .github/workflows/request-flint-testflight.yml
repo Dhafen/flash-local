@@ -1,0 +1,37 @@
+# One-shot, branch-scoped launcher for the existing signed Flint delivery CI.
+# Only a push that creates/changes THIS workflow on this exact branch starts it.
+# No Apple credentials are read here; ci.yml retains every validation gate.
+name: Request Flint iPhone validation and private TestFlight delivery
+on:
+  push:
+    branches:
+      - codex/flint-65k-streaming-quality-20261030
+    paths:
+      - .github/workflows/request-flint-testflight.yml
+permissions:
+  contents: read
+  actions: write
+jobs:
+  request:
+    if: github.repository == 'Dhafen/flash-local' && github.ref == 'refs/heads/codex/flint-65k-streaming-quality-20261030'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Dispatch the project's existing all-gates, signed internal-TestFlight workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          gh workflow run ci.yml --repo "$GH_REPO" --ref "$BRANCH" \
+            -f use_macos15=true \
+            -f ornith_les=true \
+            -f flint=true \
+            -f release_archive=true \
+            -f probe_automatic_signing=true \
+            -f upload_private_testflight=true \
+            -f provisioning_only=false \
+            -f check_delivery_tools=false \
+            -f regenerate_project_only=false
+          echo "Requested the existing fail-closed Flint delivery CI for $BRANCH."

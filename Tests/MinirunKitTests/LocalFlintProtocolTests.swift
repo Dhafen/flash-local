@@ -90,6 +90,44 @@ final class LocalFlintProtocolTests: XCTestCase {
         XCTAssertThrowsError(try LocalFlintToolOutput.parse(valid, tools: tools, choice: .named("different"), parallel: true))
         XCTAssertEqual(try LocalFlintToolOutput.parse(valid, tools: tools, choice: .none, parallel: false).calls.count, 0)
     }
+    func testLargeFlintLANRequestRemainsBoundedAndDoesNotRelaxOrnith() throws {
+        // A long text prompt can be much bigger than 256 KiB even when
+        // tokenization stays within the model's selected context window.
+        let content = String(repeating: "a", count: 350_000)
+        func body(model: String) throws -> Data {
+            try JSONSerialization.data(withJSONObject: [
+                "model": model, "messages": [["role": "user", "content": content]]
+            ])
+        }
+        let flint = try body(model: capabilities.modelID)
+        XCTAssertGreaterThan(flint.count, 262144)
+        XCTAssertLessThan(flint.count, 2 << 20)
+        let parsed = try LocalChatRequest(data: flint, capabilities: capabilities)
+        XCTAssertEqual(parsed.messages.first?.content, content)
+
+        // Verify the actual incremental HTTP parser, not just JSON decoding.
+        let header = Data(("POST /v1/chat/completions HTTP/1.1\r\nHost: localhost\r\nContent-Length: \(flint.count)\r\n\r\n").utf8)
+        var request = header; request.append(flint)
+        var flintParser = LocalHTTPParser(maximumBodyBytes: 2 << 20)
+        let split = 16_384
+        XCTAssertNil(try flintParser.append(Data(request.prefix(split))))
+        let completed = try XCTUnwrap(flintParser.append(Data(request.dropFirst(split))))
+        XCTAssertEqual(completed.body, flint)
+
+        var ordinaryParser = LocalHTTPParser()
+        XCTAssertThrowsError(try ordinaryParser.append(request)) {
+            XCTAssertEqual(($0 as? LocalAPIError)?.status, 413)
+        }
+        let ordinaryBody = try body(model: LocalChatRequest.modelID)
+        XCTAssertThrowsError(try LocalChatRequest(data: ordinaryBody, capabilities: .init())) {
+            XCTAssertEqual(($0 as? LocalAPIError)?.status, 400)
+        }
+        var oversized = LocalHTTPParser(maximumBodyBytes: 2 << 20)
+        let tooLongHeader = Data("POST /v1/chat/completions HTTP/1.1\r\nHost: localhost\r\nContent-Length: 2097153\r\n\r\n".utf8)
+        XCTAssertThrowsError(try oversized.append(tooLongHeader)) {
+            XCTAssertEqual(($0 as? LocalAPIError)?.status, 413)
+        }
+    }
     func testSSEUsesSelectedModelAndKeepsLegacyDefault() throws {
         let selected = String(decoding: try LocalAPIWire.chunk(id: "fixture", created: 0, model: capabilities.modelID, delta: ["content": "55"]), as: UTF8.self)
         XCTAssertTrue(selected.contains(capabilities.modelID)); XCTAssertFalse(selected.contains(LocalChatRequest.modelID))

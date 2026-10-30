@@ -519,6 +519,11 @@ extension FlintSession {
                 routeDiagnostics: FlintNumericalCheck.diagnoseRoutes(referenceRoutes, actualRoutes))
             numericalReport = check
             unload()
+            // Retain only four bounded logit vectors from the matched Metal
+            // diagnostic, to cross-compare later against the Q4/F32 CPU path.
+            // This is not a serving backend or a changed inference policy.
+            var matchedMetalLogits: [[Float]]?
+            var matchedMetalRoutes: [FlintRouteDecision]?
             if !check.passed {
                 // Distinguish routing/kernel differences from the original
                 // comparison's KV precision, Flash Attention and batch settings.
@@ -529,14 +534,16 @@ extension FlintSession {
                     matched.diagnosticF32KV = true; matched.diagnosticDisableFlash = true
                     try load(artifact: artifact, privateRoot: privateRoot, configuration: matched, progress: progress)
                     try traceRouting(true)
-                    var controlPositions: [FlintNumericalCheck.Position] = []; first = 0
+                    var controlPositions: [FlintNumericalCheck.Position] = [], controlLogits: [[Float]] = []; first = 0
                     for (number, position) in positions.enumerated() {
                         try Task.checkCancellation()
                         let logits = try evaluate(tokens: Array(tokens[first...position]), outputLogits: true)!
                         controlPositions.append(try FlintNumericalCheck.compare(position: position, reference: references[number], candidate: logits))
+                        controlLogits.append(logits)
                         first = position + 1
                     }
                     let controlRoutes = try routingDecisions()
+                    matchedMetalLogits = controlLogits; matchedMetalRoutes = controlRoutes
                     let control = FlintNumericalCheck.MatchedMetalControl(positions: controlPositions,
                         exactExpertSets: referenceRoutes.count == tokens.count * 46 + positions.count && FlintNumericalCheck.sameRoutes(referenceRoutes, controlRoutes),
                         routeDiagnostics: FlintNumericalCheck.diagnoseRoutes(referenceRoutes, controlRoutes))
@@ -558,22 +565,44 @@ extension FlintSession {
                     var exact = cpu; exact.diagnosticQ4F32Reference = true
                     try load(artifact: artifact, privateRoot: privateRoot, configuration: exact, progress: progress)
                     try traceRouting(true)
-                    var exactPositions: [FlintNumericalCheck.Position] = []; first = 0
+                    var exactPositions: [FlintNumericalCheck.Position] = [], exactLogits: [[Float]] = []; first = 0
                     for (number, position) in positions.enumerated() {
                         try Task.checkCancellation()
                         let logits = try evaluate(tokens: Array(tokens[first...position]), outputLogits: true)!
                         exactPositions.append(try FlintNumericalCheck.compare(position: position, reference: logits, candidate: candidateLogits[number]))
+                        exactLogits.append(logits)
                         first = position + 1
                         progress(.init(phase: 4, fraction: Double(number + 1) / Double(positions.count), observedFootprintBytes: ProcessFootprint.current()?.footprintBytes))
                     }
                     let exactRoutes = try routingDecisions()
+                    var matchedQ4Control: FlintNumericalCheck.MatchedMetalQ4F32Control?
+                    if let rows = matchedMetalLogits, let routes = matchedMetalRoutes,
+                       rows.count == positions.count {
+                        // A 2x2 precision/control comparison: this isolates
+                        // F16 KV / Flash Attention / batch from Q4_1 activation
+                        // rounding. It does not replace full candidate admission.
+                        var crossPositions: [FlintNumericalCheck.Position] = []
+                        for (number, position) in positions.enumerated() {
+                            if let row = try? FlintNumericalCheck.compare(position: position,
+                                reference: exactLogits[number], candidate: rows[number]) {
+                                crossPositions.append(row)
+                            }
+                        }
+                        if crossPositions.count == positions.count {
+                            matchedQ4Control = .init(positions: crossPositions,
+                                exactExpertSets: exactRoutes.count == tokens.count * 46 + positions.count &&
+                                    FlintNumericalCheck.sameRoutes(exactRoutes, routes),
+                                routeDiagnostics: FlintNumericalCheck.diagnoseRoutes(exactRoutes, routes))
+                        }
+                    }
                     var exactCheck = FlintNumericalCheck.Q4F32Reference(positions: exactPositions,
                         routedTokenLayers: exactRoutes.count,
                         exactExpertSets: exactRoutes.count == tokens.count * 46 + positions.count && FlintNumericalCheck.sameRoutes(exactRoutes, actualRoutes),
                         routeDiagnostics: FlintNumericalCheck.diagnoseRoutes(exactRoutes, actualRoutes))
                     check = FlintNumericalCheck(positions: comparisons, routedTokenLayers: referenceRoutes.count,
                         exactExpertSets: check.exactExpertSets, routeDiagnostics: check.routeDiagnostics,
-                        matchedMetalControl: check.matchedMetalControl, q4F32Reference: exactCheck)
+                        matchedMetalControl: check.matchedMetalControl, q4F32Reference: exactCheck,
+                        matchedMetalQ4F32Control: matchedQ4Control)
                     numericalReport = check
                     if exactCheck.referencePassed {
                         // Routing callbacks affect the evaluation graph. Verify
@@ -593,7 +622,8 @@ extension FlintSession {
                             servingPositions: servingPositions)
                         check = FlintNumericalCheck(positions: comparisons, routedTokenLayers: referenceRoutes.count,
                             exactExpertSets: check.exactExpertSets, routeDiagnostics: check.routeDiagnostics,
-                            matchedMetalControl: check.matchedMetalControl, q4F32Reference: exactCheck)
+                            matchedMetalControl: check.matchedMetalControl, q4F32Reference: exactCheck,
+                            matchedMetalQ4F32Control: check.matchedMetalQ4F32Control)
                         numericalReport = check
                     }
                 } catch is CancellationError { unload(); throw CancellationError() }
