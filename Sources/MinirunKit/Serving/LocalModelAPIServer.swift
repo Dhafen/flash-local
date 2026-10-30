@@ -36,7 +36,6 @@ public final class LocalModelAPIServer: @unchecked Sendable {
         try defaults.validate()
         self.key = key; self.handler = handler; self.onState = onState; self.loopbackOnly = loopbackOnly; self.defaults = defaults
         self.capabilities = capabilities
-        self.parser = LocalHTTPParser(maximumBodyBytes: capabilities.family == .flint ? 2 << 20 : 262144)
         self.canServe = canServe
         let parameters = NWParameters.tcp
         parameters.prohibitedInterfaceTypes = [.cellular]
@@ -142,6 +141,7 @@ private final class LocalAPISession: @unchecked Sendable {
          handler: @escaping LocalModelAPIServer.Handler, onClose: @escaping () -> Void) {
         self.connection = connection; self.queue = queue; self.key = key; self.defaults = defaults; self.handler = handler; self.onClose = onClose
         self.capabilities = capabilities
+        self.parser = LocalHTTPParser(maximumBodyBytes: capabilities.family == .flint ? 2 << 20 : 262144)
         self.canServe = canServe
     }
     func start() {
