@@ -191,8 +191,10 @@ flf_context * flf_open(int fd, const char * directory, flf_options o, flf_abort 
         require(o.context_tokens >= 32 && o.context_tokens <= 65536 && o.evaluation_batch >= 1 && o.evaluation_batch <= 2048 &&
             o.physical_batch >= 1 && o.physical_batch <= 16 && o.physical_batch <= o.evaluation_batch && o.cpu_threads >= 1 &&
             o.cpu_threads <= 8 && o.process_ceiling_bytes > 0 && o.process_ceiling_bytes <= 5500000000ULL &&
-            (!o.metal || !o.f32_kv_control || o.diagnostic_routing) &&
-            (!o.diagnostic_disable_flash || (o.metal && o.diagnostic_routing)) &&
+            (!o.conservative_metal || (o.metal && !o.diagnostic_routing && o.f32_kv_control &&
+                o.diagnostic_disable_flash && o.physical_batch == 1 && !o.diagnostic_q4_f32_reference)) &&
+            (!o.metal || !o.f32_kv_control || o.diagnostic_routing || o.conservative_metal) &&
+            (!o.diagnostic_disable_flash || (o.metal && (o.diagnostic_routing || o.conservative_metal))) &&
             (!o.diagnostic_q4_f32_reference || (!o.metal && o.diagnostic_routing && o.f32_kv_control)),
             "Invalid bounded Flint configuration");
         c->options = o; c->abort = abort; c->progress = progress; c->user = user;
@@ -411,7 +413,7 @@ flf_metrics flf_snapshot(const flf_context * c) {
     return out;
 }
 const char * flf_last_error() { return error_text.c_str(); }
-const char * flf_revision() { return "96bbf617+flint-a37cc461-backport-3-q4f32-reference"; }
+const char * flf_revision() { return "96bbf617+flint-a37cc461-backport-4-validated-metal"; }
 const char * flf_library_path() {
     Dl_info info{};
     if (!dladdr(reinterpret_cast<const void *>(&flf_revision), &info) || !info.dli_fname) {

@@ -14,12 +14,15 @@ typedef struct {
     uint64_t process_ceiling_bytes, app_reserve_bytes;
     bool metal, f32_kv_control;
     bool diagnostic_routing; // installs a graph callback; false for serving
-    // Diagnostic only: run Metal attention without the Flash Attention path.
-    // Production contexts reject this flag and retain their existing defaults.
+    // Metal attention without Flash Attention; allowed for diagnostics or the
+    // explicitly bounded conservative candidate below.
     bool diagnostic_disable_flash;
     // Diagnostic CPU reference: Q4_1 weights times F32 activations, with
     // double accumulation. Not valid for a Metal or serving context.
     bool diagnostic_q4_f32_reference;
+    // Bounded callback-free Metal candidate: F32 KV, Flash Attention off and
+    // physical batch 1. The caller must independently admit its numerics.
+    bool conservative_metal;
 } flf_options;
 typedef struct {
     // Explicit expert pread totals only; not mmap faults/physical NAND traffic.

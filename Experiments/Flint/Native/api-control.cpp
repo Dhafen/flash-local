@@ -10,8 +10,77 @@
 #include <limits>
 #include <nlohmann/json.hpp>
 #include <set>
+#if defined(__APPLE__)
+#include <sys/sysctl.h>
+#endif
 
 static void require(bool ok, const char * text) { if (!ok) throw std::runtime_error(text); }
+
+struct small_capture {
+    std::vector<std::vector<float>> logits;
+    nlohmann::json routes;
+};
+
+// Four separately requested logit positions exercise KV append and the
+// physical-batch-one route offsets used by the conservative candidate.
+static small_capture capture_small(flf_context * context, bool trace) {
+    const int32_t tokens[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
+    const int positions[] = {0, 3, 6, 11};
+    small_capture result;
+    if (trace) require(flf_trace_routes(context, true) == 0, flf_last_error());
+    int first = 0;
+    for (const int position : positions) {
+        std::vector<float> values(32);
+        require(flf_evaluate(context, tokens + first, position - first + 1, values.data(), 32) == 0, flf_last_error());
+        for (float value : values) require(std::isfinite(value), "Small precision control produced nonfinite logits");
+        result.logits.push_back(std::move(values));
+        first = position + 1;
+    }
+    require(flf_snapshot(context).cached_tokens == 12 && flf_snapshot(context).io_bytes > 0,
+        "Small precision control did not use actual KV append and expert streaming");
+    if (trace) {
+        const int needed = flf_routing_json(context, nullptr, 0);
+        require(needed < 0 && needed > -(4 << 20), "Missing physical-batch-one routing diagnostics");
+        std::vector<char> raw(-needed);
+        require(flf_routing_json(context, raw.data(), raw.size()) == -needed, flf_last_error());
+        result.routes = nlohmann::json::parse(raw.begin(), raw.end());
+        std::set<std::pair<int, int>> visited;
+        for (auto & row : result.routes) {
+            const int position = row.at("position"), layer = row.at("layer");
+            require(position >= 0 && position < 12 && layer >= 2 && layer < 6 &&
+                visited.emplace(position, layer).second && row.at("experts").size() == 6,
+                "Invalid physical-batch-one routing decision");
+            std::sort(row["experts"].begin(), row["experts"].end());
+        }
+        require(visited.size() == 40 && visited.count({0, 5}) == 1 && visited.count({3, 5}) == 1 &&
+            visited.count({6, 5}) == 1 && visited.count({11, 5}) == 1 && visited.count({4, 5}) == 0,
+            "Physical-batch-one trace omitted or duplicated routed positions");
+        std::sort(result.routes.begin(), result.routes.end(), [](const auto & a, const auto & b) {
+            return std::make_pair(a.at("position").template get<int>(), a.at("layer").template get<int>()) <
+                   std::make_pair(b.at("position").template get<int>(), b.at("layer").template get<int>());
+        });
+    }
+    return result;
+}
+
+#if defined(__APPLE__)
+static void compare_small_logits(const small_capture & reference, const small_capture & candidate) {
+    require(reference.logits.size() == 4 && candidate.logits.size() == 4, "Missing logit positions");
+    for (int p = 0; p < 4; ++p) {
+        const auto & a = reference.logits[p]; const auto & b = candidate.logits[p];
+        double maximum = 0, squared = 0, dot = 0, left = 0, right = 0;
+        for (int i = 0; i < 32; ++i) {
+            const double x = a[i], y = b[i], d = x - y;
+            maximum = std::max(maximum, std::abs(d)); squared += d*d; dot += x*y; left += x*x; right += y*y;
+        }
+        const double cosine = left > 0 && right > 0 ? dot / std::sqrt(left * right) : (a == b ? 1 : 0);
+        require(maximum <= 0.1 && std::sqrt(squared / 32) <= 0.02 && cosine >= 0.9999 &&
+            std::max_element(a.begin(), a.end()) - a.begin() == std::max_element(b.begin(), b.end()) - b.begin(),
+            "Small CPU/Metal precision control differed");
+    }
+}
+#endif
+
 int main(int argc, char ** argv) {
     flf_context * c = nullptr;
     try {
@@ -36,6 +105,17 @@ int main(int argc, char ** argv) {
         require(flf_open(fd, argv[2], rejected, nullptr, nullptr, nullptr) == nullptr, "Non-diagnostic Q4 F32 reference accepted");
         rejected = o; rejected.f32_kv_control = false; rejected.diagnostic_q4_f32_reference = true;
         require(flf_open(fd, argv[2], rejected, nullptr, nullptr, nullptr) == nullptr, "Q4 F32 reference with F16 KV accepted");
+        rejected = o; rejected.conservative_metal = true;
+        require(flf_open(fd, argv[2], rejected, nullptr, nullptr, nullptr) == nullptr, "CPU conservative Metal accepted");
+        rejected = o; rejected.metal = true; rejected.conservative_metal = true;
+        require(flf_open(fd, argv[2], rejected, nullptr, nullptr, nullptr) == nullptr, "Diagnostic conservative serving accepted");
+        rejected = o; rejected.metal = true; rejected.diagnostic_routing = false;
+        rejected.diagnostic_disable_flash = true; rejected.conservative_metal = true;
+        require(flf_open(fd, argv[2], rejected, nullptr, nullptr, nullptr) == nullptr, "Multi-token conservative Metal accepted");
+        rejected.physical_batch = 1; rejected.f32_kv_control = false;
+        require(flf_open(fd, argv[2], rejected, nullptr, nullptr, nullptr) == nullptr, "Conservative Metal with F16 KV accepted");
+        rejected.f32_kv_control = true; rejected.diagnostic_disable_flash = false;
+        require(flf_open(fd, argv[2], rejected, nullptr, nullptr, nullptr) == nullptr, "Conservative Metal with Flash Attention accepted");
         require(std::filesystem::is_empty(argv[2]), "Rejected load left a manifest");
         c = flf_open(fd, argv[2], o, nullptr, nullptr, nullptr); close(fd);
         if (!c) throw std::runtime_error(flf_last_error());
@@ -150,7 +230,67 @@ int main(int argc, char ** argv) {
         for (int i = 0; i < 32; ++i) require(control[i] == state_only[i], "Diagnostic precision leaked into ordinary CPU execution");
         flf_close(c); c = nullptr;
         require(std::filesystem::is_empty(argv[2]), "Precision diagnostic manifest not cleaned on unload");
-        std::cout << "FLINT_API_CONTROL memoryAdmission=true duplicateLoadRejected=true descriptorRetained=true stateOnlyPrefill=true noCopyLogits=true greedy=true seededDecode=true staleLogitsRejected=true routingTrace=true kvAppend=true reset=true cancellation=true diagnosticGuards=true cpuKVF16=true cpuKVF32=true q4F32Scoped=true unload=true\n";
+
+        // Test the exact CPU reference and one-token microbatch trace with a
+        // small untrained model; the full trained model never enters CI.
+        o.physical_batch = 1; o.diagnostic_routing = true; o.f32_kv_control = true;
+        o.diagnostic_q4_f32_reference = true;
+        const int one_fd = open(argv[1], O_RDONLY | O_CLOEXEC);
+        require(one_fd >= 0, "Cannot reopen one-token precision fixture");
+        c = flf_open(one_fd, argv[2], o, nullptr, nullptr, nullptr); close(one_fd);
+        if (!c) throw std::runtime_error(flf_last_error());
+        const auto exact = capture_small(c, true);
+        flf_close(c); c = nullptr;
+        require(std::filesystem::is_empty(argv[2]), "One-token precision manifest not cleaned on unload");
+
+        const char * metal_result = "unavailable";
+#if defined(__APPLE__)
+        // When this host provides a Metal GPU, also compare the exact CPU
+        // graph, the traced Metal graph, and callback-free Metal execution.
+        // This is not evidence of iPhone numerical correctness.
+        // GitHub's virtualized Apple runners may expose a paravirtual Metal
+        // device that cannot allocate the model's output.weight buffer. That
+        // is not evidence of CPU/Metal numerical parity. Keep the CPU tests
+        // mandatory and report the GPU comparison as unavailable on a VM;
+        // physical Apple hosts must still execute the full Metal comparison.
+        int virtualized = 0;
+        size_t virtualized_size = sizeof(virtualized);
+        const bool virtual_host = sysctlbyname("kern.hv_vmm_present", &virtualized,
+            &virtualized_size, nullptr, 0) == 0 && virtualized_size == sizeof(virtualized) && virtualized != 0;
+        if (virtual_host) {
+            metal_result = "virtual-host-unavailable";
+        } else {
+        auto metal = o; metal.metal = true; metal.diagnostic_q4_f32_reference = false;
+        metal.diagnostic_disable_flash = true;
+        const int metal_fd = open(argv[1], O_RDONLY | O_CLOEXEC);
+        require(metal_fd >= 0, "Cannot reopen Metal precision fixture");
+        c = flf_open(metal_fd, argv[2], metal, nullptr, nullptr, nullptr); close(metal_fd);
+        if (!c) {
+            const std::string error = flf_last_error();
+            require(error.find("Requested Flint GPU backend is unavailable") != std::string::npos,
+                "Metal precision context failed for a reason other than an unavailable GPU");
+        } else {
+            require(!flf_snapshot(c).flash_attention_active, "Metal precision trace unexpectedly enabled Flash Attention");
+            const auto traced = capture_small(c, true);
+            flf_close(c); c = nullptr;
+            require(exact.routes == traced.routes, "Small exact CPU/Metal expert sets differed");
+            compare_small_logits(exact, traced);
+            metal.diagnostic_routing = false; metal.conservative_metal = true;
+            const int serving_fd = open(argv[1], O_RDONLY | O_CLOEXEC);
+            require(serving_fd >= 0, "Cannot reopen callback-free Metal fixture");
+            c = flf_open(serving_fd, argv[2], metal, nullptr, nullptr, nullptr); close(serving_fd);
+            if (!c) throw std::runtime_error(flf_last_error());
+            require(!flf_snapshot(c).flash_attention_active, "Metal serving unexpectedly enabled Flash Attention");
+            const auto serving = capture_small(c, false);
+            flf_close(c); c = nullptr;
+            compare_small_logits(traced, serving);
+            compare_small_logits(exact, serving);
+            metal_result = "passed";
+        }
+        }
+#endif
+        require(std::filesystem::is_empty(argv[2]), "Metal precision control left a manifest");
+        std::cout << "FLINT_API_CONTROL memoryAdmission=true duplicateLoadRejected=true descriptorRetained=true stateOnlyPrefill=true noCopyLogits=true greedy=true seededDecode=true staleLogitsRejected=true routingTrace=true singleTokenTrace=true metalReference=" << metal_result << " syntheticOnly=true phone=false kvAppend=true reset=true cancellation=true diagnosticGuards=true cpuKVF16=true cpuKVF32=true q4F32Scoped=true unload=true\n";
         return 0;
     } catch (const std::exception & e) {
         if (c) flf_close(c);
