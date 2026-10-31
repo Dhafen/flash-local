@@ -93,7 +93,7 @@ private struct FlintModelControls: View {
                 .onChange(of: model.expertCacheSlots) { _, _ in model.savePreferences() }
                 Text("Separat lagercache är tills vidare avstängd: den låsta Flint-motorn stöder ännu inte detta läge. Den delade expertbufferten kan fortfarande jämföras utan att ändra modellens beräkningar.")
                     .font(.caption).foregroundStyle(.secondary)
-                Text("Extra expertplatser kan minska omläsningar, men är ännu inte prestandaverifierade på iPhone. Samma minnesgräns gäller; för stora val stoppas säkert vid modellinläsning. Testa på sval telefon och jämför token/s.")
+                Text("Extra expertplatser aktiverar nu även experimentell explicit expert-read-ahead. Det kan minska I/O-väntan men kan också försämra promptinläsning eller minnestryck. Standardläget 0 är oförändrat. Mät på riktig iPhone innan du behåller en profil.")
                     .font(.caption).foregroundStyle(.secondary)
                 Text("65K ryms inte i nuvarande konservativa minnesbudget. Vald kapacitet är ingen verifiering av kontextkvalitet.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -110,8 +110,10 @@ private struct FlintModelControls: View {
                 TextEditor(text: $model.systemPrompt).frame(minHeight: 80).disabled(model.isBusy || model.apiListening)
                     .onChange(of: model.systemPrompt) { _, _ in model.savePreferences() }
             }.onAppear { temperature = String(model.options.temperature) }
-            Text("Första aktiveringen jämför fyra verkliga logitpositioner och beräknade top-6-expertval mellan CPU och Metal. Godkänd kontroll sparas per modell, appbygge och inställning. Full modellkvalitet och lång kontext behöver fortfarande testas.")
-                .font(.caption2).foregroundStyle(.secondary)
+            DisclosureGroup("Om modellens verifiering") {
+                Text("Första aktiveringen jämför fyra verkliga logitpositioner och beräknade top-6-expertval mellan CPU och Metal. Godkänd kontroll sparas per modell, appbygge och inställning. Full modellkvalitet och lång kontext behöver fortfarande testas.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
         }
     }
 }
