@@ -10,6 +10,20 @@ final class FlintPolicyTests: XCTestCase {
         XCTAssertEqual(FlintPrefixPolicy.reusableCount(cached: [], prompt: [1, 2]), 0)
         XCTAssertFalse(FlintPrefixPolicy.requiresReset(cached: [], prompt: [1, 2]))
     }
+    func testExperimentalExpertCacheCapacityIsBounded() throws {
+        var config = FlintConfiguration()
+        XCTAssertEqual(config.expertCacheSlots, 0)
+        try config.validate()
+        config.expertCacheSlots = 128
+        try config.validate()
+        config.expertCacheSlots = 256
+        try config.validate()
+        config.expertCacheSlots = -1
+        XCTAssertThrowsError(try config.validate())
+        config.expertCacheSlots = 257
+        XCTAssertThrowsError(try config.validate())
+    }
+
     func testInvalidBatchAndContextAreRejected() throws {
         var config = FlintConfiguration()
         try config.validate()
