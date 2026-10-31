@@ -245,12 +245,20 @@ int main(int argc, char ** argv) {
         if (!c) throw std::runtime_error(flf_last_error());
         const auto exact = capture_small(c, true);
         const auto baseline_bank = flf_snapshot(c).expert_bank_bytes;
+        const auto baseline_budget = flf_snapshot(c).estimated_process_bytes;
         flf_close(c); c = nullptr;
         require(std::filesystem::is_empty(argv[2]), "One-token precision manifest not cleaned on unload");
 
         // Bank capacity is independent of physical batch. Increasing it must
         // not change selected experts or final logits on real native graphs.
         auto expanded = o; expanded.expert_cache_slots = 32;
+        auto denied = expanded; denied.process_ceiling_bytes = baseline_budget;
+        const int denied_fd = open(argv[1], O_RDONLY | O_CLOEXEC);
+        require(denied_fd >= 0, "Cannot reopen bounded expanded-bank fixture");
+        require(flf_open(denied_fd, argv[2], denied, nullptr, nullptr, nullptr) == nullptr,
+            "Expanded expert bank evaded memory admission");
+        close(denied_fd);
+        require(std::filesystem::is_empty(argv[2]), "Rejected expanded bank leaked its manifest");
         const int expanded_fd = open(argv[1], O_RDONLY | O_CLOEXEC);
         require(expanded_fd >= 0, "Cannot reopen expanded-cache fixture");
         c = flf_open(expanded_fd, argv[2], expanded, nullptr, nullptr, nullptr); close(expanded_fd);
