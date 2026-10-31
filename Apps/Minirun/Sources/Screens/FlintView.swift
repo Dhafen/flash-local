@@ -157,6 +157,16 @@ private struct FlintMeasurementPage: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Verkliga mätvärden från senaste körningen").font(.headline)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Aktiv prestandaprofil").font(.subheadline.bold())
+                LabeledContent("Delad expertbuffert", value: model.expertCacheSlots == 0 ? "Standard" : "\(model.expertCacheSlots) platser")
+                LabeledContent("Cache per MoE-lager", value: model.decodeCacheWindow == 0 ? "Av · referens" : "\(model.decodeCacheWindow) experter/lager")
+                LabeledContent("Kontextgräns", value: "\(model.contextProfile.rawValue) token")
+                Text("Inställningarna är experimentella. Samma modellvikter och numeriska kontroller används. Jämför mot referensläget innan du behåller en profil.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(12)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
             HStack {
                 ForEach([1000, 4000, 10000], id: \.self) { count in
                     Button("Testa \(count / 1000)K") { model.benchmark(promptTokens: count) }
@@ -173,6 +183,10 @@ private struct FlintMeasurementPage: View {
                 if let time = report.timeToFirstTokenSeconds { LabeledContent("Första modelltoken", value: String(format: "%.2f s", time)) }
                 LabeledContent("Observerad RAM-topp", value: String(format: "%.2f GB", Double(report.maximumObservedFootprintBytes) / 1e9))
                 LabeledContent("Explicit expertläsning", value: String(format: "%.2f GB", Double(report.explicitExpertBytesRead) / 1e9))
+                LabeledContent("Återanvändning av prompt", value: String(format: "%.1f %%", 100 * Double(report.reusedPromptTokens) / Double(max(1, report.promptTokenIDs.count))))
+                LabeledContent("Termiskt tillstånd (råvärde)", value: "\(report.maximumThermalState)")
+                LabeledContent("Genererade token", value: "\(report.generatedTokenIDs.count)")
+                LabeledContent("Total svarstid", value: String(format: "%.2f s", report.elapsedSeconds))
                 Button("Spara mätning i Filer") { model.saveReport() }
                 if let url = model.reportURL { ShareLink("Dela mätning", item: url) }
             } else { Text("Ingen modellkörning har mätts ännu.").foregroundStyle(.secondary) }
