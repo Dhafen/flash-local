@@ -24,6 +24,19 @@ final class FlintPolicyTests: XCTestCase {
         XCTAssertThrowsError(try config.validate())
     }
 
+    func testPerLayerDecodeCacheHasSafeBounds() throws {
+        var config = FlintConfiguration()
+        XCTAssertEqual(config.decodeCacheWindow, 0)
+        config.decodeCacheWindow = 8
+        try config.validate()
+        config.decodeCacheWindow = 64
+        try config.validate()
+        config.decodeCacheWindow = -1
+        XCTAssertThrowsError(try config.validate())
+        config.decodeCacheWindow = 65
+        XCTAssertThrowsError(try config.validate())
+    }
+
     func testInvalidBatchAndContextAreRejected() throws {
         var config = FlintConfiguration()
         try config.validate()
