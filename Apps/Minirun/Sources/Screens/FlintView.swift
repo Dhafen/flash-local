@@ -194,6 +194,27 @@ private struct FlintAPIControls: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text(model.apiStatus).accessibilityIdentifier("flint-api-status")
+            VStack(alignment: .leading, spacing: 8) {
+                Text("API-aktivitet").font(.headline)
+                Text(model.apiRequestPhase)
+                    .font(.subheadline)
+                    .accessibilityIdentifier("flint-api-request-phase")
+                if model.apiPromptTotal > 0 {
+                    ProgressView(value: Double(model.apiPromptProcessed),
+                                 total: Double(max(1, model.apiPromptTotal)))
+                        .accessibilityIdentifier("flint-api-prompt-progress")
+                    Text("Prompt: \(model.apiPromptProcessed) av \(model.apiPromptTotal) token")
+                        .font(.caption.monospacedDigit())
+                }
+                if model.apiGeneratedTokens > 0 {
+                    Text("Genererade token: \(model.apiGeneratedTokens)")
+                        .font(.caption.monospacedDigit())
+                }
+                Text("Visar bara tokenantal och status. Prompttext och API-nycklar loggas inte.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(12)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
             HStack {
                 Button("Starta API-server") { model.startAPI() }.disabled(!model.canSend || model.apiListening)
                 Button("Stoppa API-server") { model.stopAPI() }.disabled(!model.apiListening)
