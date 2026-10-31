@@ -351,6 +351,12 @@ final class FlintAppModel {
             defer { activeGeneration = nil; apiOperation = nil; end(id) }
             do {
                 for try await event in source.events {
+                    switch event {
+                    case .delta:
+                        apiRequestPhase = "Genererar svar…"
+                    case .complete:
+                        break
+                    }
                     switch pair.continuation.yield(event) {
                     case .enqueued: break
                     case .dropped, .terminated: source.cancel(); throw CancellationError()
