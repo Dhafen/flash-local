@@ -166,8 +166,15 @@ static void prepare_manifest(flf_context & c, const char * directory) {
     const uint64_t kv_cells = full * rounded(c.options.context_tokens) + (layers - full) * rounded(std::min<uint32_t>(
         c.options.context_tokens, window + c.options.physical_batch));
     c.metrics.estimated_kv_bytes = kv_cells * nk * head * 2 * (c.options.f32_kv_control ? 4 : 2);
-    c.metrics.expert_bank_bytes = bank;
-    c.metrics.estimated_process_bytes = add(add(add(dense_bytes, bank), c.metrics.estimated_kv_bytes),
+    // The patched runtime allocates a distinct set of decode tensors per
+    // routed layer when LLAMA_MOE_DECODE_WINDOW is nonzero. This memory is
+    // additional to the prefill bank, not a replacement for it.
+    const uint64_t decoder_bytes = c.options.decode_cache_window > 0
+        ? uint64_t(layers - dense_layers) * uint64_t(c.options.decode_cache_window) *
+              (bank / slots)
+        : 0;
+    c.metrics.expert_bank_bytes = add(bank, decoder_bytes);
+    c.metrics.estimated_process_bytes = add(add(add(dense_bytes, c.metrics.expert_bank_bytes), c.metrics.estimated_kv_bytes),
         add(c.options.app_reserve_bytes, 1000000000ULL + uint64_t(std::max(0, c.options.physical_batch - 4)) * (32u << 20)));
     require(c.metrics.estimated_process_bytes <= c.options.process_ceiling_bytes, "Flint dense/KV/bank/scratch admission exceeds memory budget");
     const std::string manifest_path = (fs::path(directory) / "flint-session-manifest.json").string();
@@ -195,7 +202,8 @@ flf_context * flf_open(int fd, const char * directory, flf_options o, flf_abort 
         c = std::make_unique<flf_context>();
         require(o.context_tokens >= 32 && o.context_tokens <= 65536 && o.evaluation_batch >= 1 && o.evaluation_batch <= 2048 &&
             o.physical_batch >= 1 && o.physical_batch <= 16 && o.physical_batch <= o.evaluation_batch &&
-            o.expert_cache_slots >= 0 && o.expert_cache_slots <= 256 && o.cpu_threads >= 1 &&
+            o.expert_cache_slots >= 0 && o.expert_cache_slots <= 256 &&
+            o.decode_cache_window >= 0 && o.decode_cache_window <= 64 && o.cpu_threads >= 1 &&
             o.cpu_threads <= 8 && o.process_ceiling_bytes > 0 && o.process_ceiling_bytes <= 5500000000ULL &&
             (!o.conservative_metal || (o.metal && !o.diagnostic_routing && o.f32_kv_control &&
                 o.diagnostic_disable_flash && o.physical_batch == 1 && !o.diagnostic_q4_f32_reference)) &&
@@ -219,6 +227,11 @@ flf_context * flf_open(int fd, const char * directory, flf_options o, flf_abort 
             "LLAMA_MOE_SKIP_READ", "LLAMA_MOE_DUMMY_READ", "LLAMA_MOE_MATMUL_SPLIT", "LLAMA_MOE_F_NOCACHE",
             "LLAMA_MOE_READ_DELAY_US", "LLAMA_MOE_PARK_WINDOW"})
             require(setenv(key, "0", 1) == 0, "Cannot configure bounded Flint streaming");
+        // Decode windows are allocated as separate resident layer tensors by
+        // the pinned runtime. Keep prefetch disabled in this first parity arm.
+        const std::string decode_window = std::to_string(o.decode_cache_window);
+        require(setenv("LLAMA_MOE_DECODE_WINDOW", decode_window.c_str(), 1) == 0,
+            "Cannot configure bounded Flint decode cache");
         unsetenv("LLAMA_MOE_LAYER_WINDOWS"); unsetenv("LLAMA_MOE_PREWARM"); unsetenv("LLAMA_MOE_SWEEP");
 #if !defined(__APPLE__) || TARGET_OS_OSX
         if (!o.metal) setenv("ORNITH_LES_CPU_CONTROL", "1", 1);
