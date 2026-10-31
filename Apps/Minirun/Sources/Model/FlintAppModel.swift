@@ -49,6 +49,8 @@ final class FlintAppModel {
     var prompt = ""
     var systemPrompt = ""
     var contextProfile: LocalContextProfile = .standard
+    // Experimental: additional shared expert bank slots, disabled by default.
+    var expertCacheSlots = 0
     var options = LocalModelCapabilities(family: .flint).defaultOptions
     private(set) var history: [FlintChatTurn] = []
     private(set) var ready = false
@@ -94,6 +96,8 @@ final class FlintAppModel {
         let preferences = UserDefaults.standard
         if let value = preferences.string(forKey: "FlashLocal.Flint.System.v1"), value.utf8.count <= 32768 { systemPrompt = value }
         if let profile = LocalContextProfile(rawValue: preferences.integer(forKey: "FlashLocal.Flint.Context.v1")) { contextProfile = profile }
+        let savedSlots = preferences.integer(forKey: "FlashLocal.Flint.ExpertSlots.v1")
+        if [0, 32, 64, 128, 256].contains(savedSlots) { expertCacheSlots = savedSlots }
         if let data = preferences.data(forKey: "FlashLocal.Flint.Options.v1"), let saved = try? JSONDecoder().decode(LocalGenerationOptions.self, from: data),
            (try? saved.validate()) != nil {
             options = saved; options.enableThinking = true; options.thinkingBudget = nil
@@ -109,6 +113,7 @@ final class FlintAppModel {
         guard systemPrompt.utf8.count <= 32768, (try? options.validate()) != nil else { return }
         UserDefaults.standard.set(systemPrompt, forKey: "FlashLocal.Flint.System.v1")
         UserDefaults.standard.set(contextProfile.rawValue, forKey: "FlashLocal.Flint.Context.v1")
+        UserDefaults.standard.set(expertCacheSlots, forKey: "FlashLocal.Flint.ExpertSlots.v1")
         UserDefaults.standard.set(try? JSONEncoder().encode(options), forKey: "FlashLocal.Flint.Options.v1")
     }
     private func saveHistory() {
@@ -150,11 +155,13 @@ final class FlintAppModel {
         savePreferences()
         let id = begin("Verifierar Flint-filen…"); loadingStartedAt = Date()
         let requestedContext = contextProfile
+        let requestedExpertSlots = expertCacheSlots
         operation = Task {
             defer { end(id) }
             do {
                 let artifact = try await files.artifact(root: modelsRoot, gate: gate)
                 var config = FlintConfiguration(); config.contextTokens = requestedContext.rawValue
+                config.expertCacheSlots = requestedExpertSlots
                 let check = try await session.prepare(artifact: artifact, privateRoot: privateRoot, configuration: config) { [weak self] value in
                     Task { @MainActor in
                         guard let self, self.operationID == id else { return }
