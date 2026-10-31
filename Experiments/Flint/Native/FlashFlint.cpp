@@ -127,7 +127,12 @@ static void prepare_manifest(flf_context & c, const char * directory) {
             static_cast<const bool *>(gguf_get_arr_data(file.get(), pattern))[il];
         require(v <= 1, "Invalid sliding-window layer flag"); full += v == 0;
     }
-    const uint32_t slots = std::min(experts, topk * uint32_t(c.options.physical_batch));
+    // More slots can reduce repeat expert reads without changing top-k routing.
+    // The bank is shared across routed layers: this is an opt-in performance
+    // experiment, not a claim of an independent cache for every layer.
+    const uint32_t minimum_slots = topk * uint32_t(c.options.physical_batch);
+    const uint32_t requested_slots = uint32_t(c.options.expert_cache_slots);
+    const uint32_t slots = std::min(experts, std::max(minimum_slots, requested_slots));
     c.slots = slots;
     uint64_t dense_bytes = gguf_get_data_offset(file.get());
     json entries = json::array();
@@ -189,7 +194,8 @@ flf_context * flf_open(int fd, const char * directory, flf_options o, flf_abort 
     try {
         c = std::make_unique<flf_context>();
         require(o.context_tokens >= 32 && o.context_tokens <= 65536 && o.evaluation_batch >= 1 && o.evaluation_batch <= 2048 &&
-            o.physical_batch >= 1 && o.physical_batch <= 16 && o.physical_batch <= o.evaluation_batch && o.cpu_threads >= 1 &&
+            o.physical_batch >= 1 && o.physical_batch <= 16 && o.physical_batch <= o.evaluation_batch &&
+            o.expert_cache_slots >= 0 && o.expert_cache_slots <= 256 && o.cpu_threads >= 1 &&
             o.cpu_threads <= 8 && o.process_ceiling_bytes > 0 && o.process_ceiling_bytes <= 5500000000ULL &&
             (!o.conservative_metal || (o.metal && !o.diagnostic_routing && o.f32_kv_control &&
                 o.diagnostic_disable_flash && o.physical_batch == 1 && !o.diagnostic_q4_f32_reference)) &&
