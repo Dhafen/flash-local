@@ -10,6 +10,9 @@
 #include <limits>
 #include <nlohmann/json.hpp>
 #include <set>
+#if defined(__APPLE__)
+#include <sys/sysctl.h>
+#endif
 
 static void require(bool ok, const char * text) { if (!ok) throw std::runtime_error(text); }
 
@@ -245,6 +248,18 @@ int main(int argc, char ** argv) {
         // When this host provides a Metal GPU, also compare the exact CPU
         // graph, the traced Metal graph, and callback-free Metal execution.
         // This is not evidence of iPhone numerical correctness.
+        // GitHub's virtualized Apple runners may expose a paravirtual Metal
+        // device that cannot allocate the model's output.weight buffer. That
+        // is not evidence of CPU/Metal numerical parity. Keep the CPU tests
+        // mandatory and report the GPU comparison as unavailable on a VM;
+        // physical Apple hosts must still execute the full Metal comparison.
+        int virtualized = 0;
+        size_t virtualized_size = sizeof(virtualized);
+        const bool virtual_host = sysctlbyname("kern.hv_vmm_present", &virtualized,
+            &virtualized_size, nullptr, 0) == 0 && virtualized_size == sizeof(virtualized) && virtualized != 0;
+        if (virtual_host) {
+            metal_result = "virtual-host-unavailable";
+        } else {
         auto metal = o; metal.metal = true; metal.diagnostic_q4_f32_reference = false;
         metal.diagnostic_disable_flash = true;
         const int metal_fd = open(argv[1], O_RDONLY | O_CLOEXEC);
@@ -271,6 +286,7 @@ int main(int argc, char ** argv) {
             compare_small_logits(traced, serving);
             compare_small_logits(exact, serving);
             metal_result = "passed";
+        }
         }
 #endif
         require(std::filesystem::is_empty(argv[2]), "Metal precision control left a manifest");
