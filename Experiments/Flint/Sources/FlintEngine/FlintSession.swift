@@ -33,7 +33,7 @@ public struct FlintConfiguration: Equatable, Sendable {
     public func validate() throws {
         guard (32...65536).contains(contextTokens), (1...2048).contains(evaluationBatch),
               (1...16).contains(physicalBatch), physicalBatch <= evaluationBatch,
-              (1...8).contains(cpuThreads), (0...256).contains(expertCacheSlots), (0...64).contains(decodeCacheWindow), memoryCeilingBytes > 0, memoryCeilingBytes <= 5_500_000_000 else {
+              (1...8).contains(cpuThreads), (0...256).contains(expertCacheSlots), decodeCacheWindow == 0, memoryCeilingBytes > 0, memoryCeilingBytes <= 5_500_000_000 else {
             throw FlintFailure.invalid("Invalid bounded Flint configuration")
         }
         guard !(diagnosticF32KV || diagnosticDisableFlash) || (backend == .metal && diagnosticRouting) else {
