@@ -105,6 +105,10 @@ int main(int argc, char ** argv) {
         require(flf_open(fd, argv[2], rejected, nullptr, nullptr, nullptr) == nullptr, "Non-diagnostic Q4 F32 reference accepted");
         rejected = o; rejected.f32_kv_control = false; rejected.diagnostic_q4_f32_reference = true;
         require(flf_open(fd, argv[2], rejected, nullptr, nullptr, nullptr) == nullptr, "Q4 F32 reference with F16 KV accepted");
+        rejected = o; rejected.decode_cache_window = -1;
+        require(flf_open(fd, argv[2], rejected, nullptr, nullptr, nullptr) == nullptr, "Negative decode cache accepted");
+        rejected = o; rejected.decode_cache_window = 65;
+        require(flf_open(fd, argv[2], rejected, nullptr, nullptr, nullptr) == nullptr, "Oversized decode cache accepted");
         rejected = o; rejected.expert_cache_slots = -1;
         require(flf_open(fd, argv[2], rejected, nullptr, nullptr, nullptr) == nullptr, "Negative cache slots accepted");
         rejected = o; rejected.expert_cache_slots = 257;
@@ -270,6 +274,22 @@ int main(int argc, char ** argv) {
             "Expanded expert bank changed the exact CPU routing or logits");
         flf_close(c); c = nullptr;
         require(std::filesystem::is_empty(argv[2]), "Expanded expert-bank manifest not cleaned on unload");
+
+        // This fixture verifies the actual layer-isolated decode tensor path.
+        // It must be mathematically transparent, not merely allocate bytes.
+        auto windowed = o; windowed.decode_cache_window = 8;
+        const int window_fd = open(argv[1], O_RDONLY | O_CLOEXEC);
+        require(window_fd >= 0, "Cannot reopen decode-window fixture");
+        c = flf_open(window_fd, argv[2], windowed, nullptr, nullptr, nullptr); close(window_fd);
+        if (!c) throw std::runtime_error(flf_last_error());
+        const auto window_snapshot = flf_snapshot(c);
+        require(window_snapshot.expert_bank_bytes > baseline_bank,
+            "Decode window did not reserve per-layer expert residency");
+        const auto window_capture = capture_small(c, true);
+        require(window_capture.routes == exact.routes && window_capture.logits == exact.logits,
+            "Per-layer decode window changed exact CPU routing or logits");
+        flf_close(c); c = nullptr;
+        require(std::filesystem::is_empty(argv[2]), "Decode-window manifest not cleaned on unload");
 
         const char * metal_result = "unavailable";
 #if defined(__APPLE__)
