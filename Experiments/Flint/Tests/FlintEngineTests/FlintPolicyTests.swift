@@ -28,9 +28,9 @@ final class FlintPolicyTests: XCTestCase {
         var config = FlintConfiguration()
         XCTAssertEqual(config.decodeCacheWindow, 0)
         config.decodeCacheWindow = 8
-        try config.validate()
+        XCTAssertThrowsError(try config.validate())
         config.decodeCacheWindow = 64
-        try config.validate()
+        XCTAssertThrowsError(try config.validate())
         config.decodeCacheWindow = -1
         XCTAssertThrowsError(try config.validate())
         config.decodeCacheWindow = 65
