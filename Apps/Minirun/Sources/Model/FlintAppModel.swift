@@ -68,6 +68,10 @@ final class FlintAppModel {
     private(set) var reportURL: URL?
     private(set) var numericalReportURL: URL?
     private(set) var apiStatus = "Avstängd"
+    private(set) var apiPromptProcessed = 0
+    private(set) var apiPromptTotal = 0
+    private(set) var apiGeneratedTokens = 0
+    private(set) var apiRequestPhase = "Ingen aktiv förfrågan"
     private(set) var apiURLs: [String] = []
     private(set) var apiAccessKey = ""
     private(set) var apiListening = false
@@ -324,8 +328,22 @@ final class FlintAppModel {
     private func openAPI(_ request: LocalChatRequest) async throws -> LocalChatGeneration {
         guard canSend else { throw LocalAPIError(status: isBusy ? 429 : 503, message: "Flint is busy, unloaded or the phone app is not active") }
         let id = begin("API · läser prompt…")
+        apiPromptProcessed = 0; apiPromptTotal = 0; apiGeneratedTokens = 0
+        apiRequestPhase = "Tar emot och tokeniserar prompt…"
         let source: LocalChatGeneration
-        do { source = try await session.start(request) } catch { end(id); throw error }
+        do {
+            source = try await session.start(request, progress: { [weak self] processed, total in
+                Task { @MainActor [weak self] in
+                    guard let self, self.isBusy else { return }
+                    self.apiPromptProcessed = processed
+                    self.apiPromptTotal = total
+                    self.apiRequestPhase = "Läser prompt · \(processed)/\(total) token"
+                }
+            })
+        } catch {
+            apiRequestPhase = "Förfrågan misslyckades"
+            end(id); throw error
+        }
         activeGeneration = source
         let pair = AsyncThrowingStream<LocalChatEvent, Error>.makeStream(bufferingPolicy: .bufferingOldest(512))
         pair.continuation.onTermination = { _ in source.cancel() }
@@ -339,13 +357,18 @@ final class FlintAppModel {
                     @unknown default: source.cancel(); throw CancellationError()
                     }
                 }
-                report = await session.lastReport(); status = "API · klar"; pair.continuation.finish()
+                report = await session.lastReport()
+                apiGeneratedTokens = report?.completionTokens ?? 0
+                apiRequestPhase = "Klar · \(apiGeneratedTokens) genererade token"
+                status = "API · klar"; pair.continuation.finish()
             } catch { self.error = error.localizedDescription; pair.continuation.finish(throwing: error) }
         }
         return .init(events: pair.stream, cancel: source.cancel)
     }
     func stopAPI() {
         apiID = nil; apiServer?.stop(); apiServer = nil; apiListening = false; apiStatus = "Avstängd"; apiURLs = []; apiAccessKey = ""
+        apiPromptProcessed = 0; apiPromptTotal = 0; apiGeneratedTokens = 0
+        apiRequestPhase = "Ingen aktiv förfrågan"
         if apiOperation != nil { activeGeneration?.cancel(); apiOperation?.cancel() }
     }
 }
