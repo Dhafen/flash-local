@@ -23,6 +23,15 @@ typedef struct {
     // Bounded callback-free Metal candidate: F32 KV, Flash Attention off and
     // physical batch 1. The caller must independently admit its numerics.
     bool conservative_metal;
+    // 0 keeps the legacy min(topK * physicalBatch, experts) bank.
+    // Nonzero requests additional *shared* expert slots (not a per-layer
+    // persistent cache). Admission accounts for their full backing memory;
+    // the requested count is clamped to the model's expert count.
+    int32_t expert_cache_slots;
+    // Experimental per-layer decode residency; 0 disables it. Nonzero
+    // windows are independent of the shared prefill bank, and are admitted
+    // against the SAME process ceiling, never allocated on top of it blindly.
+    int32_t decode_cache_window;
 } flf_options;
 typedef struct {
     // Explicit expert pread totals only; not mmap faults/physical NAND traffic.

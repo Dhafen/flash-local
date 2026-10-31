@@ -105,6 +105,14 @@ int main(int argc, char ** argv) {
         require(flf_open(fd, argv[2], rejected, nullptr, nullptr, nullptr) == nullptr, "Non-diagnostic Q4 F32 reference accepted");
         rejected = o; rejected.f32_kv_control = false; rejected.diagnostic_q4_f32_reference = true;
         require(flf_open(fd, argv[2], rejected, nullptr, nullptr, nullptr) == nullptr, "Q4 F32 reference with F16 KV accepted");
+        rejected = o; rejected.decode_cache_window = -1;
+        require(flf_open(fd, argv[2], rejected, nullptr, nullptr, nullptr) == nullptr, "Negative decode cache accepted");
+        rejected = o; rejected.decode_cache_window = 65;
+        require(flf_open(fd, argv[2], rejected, nullptr, nullptr, nullptr) == nullptr, "Oversized decode cache accepted");
+        rejected = o; rejected.expert_cache_slots = -1;
+        require(flf_open(fd, argv[2], rejected, nullptr, nullptr, nullptr) == nullptr, "Negative cache slots accepted");
+        rejected = o; rejected.expert_cache_slots = 257;
+        require(flf_open(fd, argv[2], rejected, nullptr, nullptr, nullptr) == nullptr, "Oversized cache slots accepted");
         rejected = o; rejected.conservative_metal = true;
         require(flf_open(fd, argv[2], rejected, nullptr, nullptr, nullptr) == nullptr, "CPU conservative Metal accepted");
         rejected = o; rejected.metal = true; rejected.conservative_metal = true;
@@ -240,8 +248,43 @@ int main(int argc, char ** argv) {
         c = flf_open(one_fd, argv[2], o, nullptr, nullptr, nullptr); close(one_fd);
         if (!c) throw std::runtime_error(flf_last_error());
         const auto exact = capture_small(c, true);
+        const auto baseline_bank = flf_snapshot(c).expert_bank_bytes;
+        const auto baseline_budget = flf_snapshot(c).estimated_process_bytes;
         flf_close(c); c = nullptr;
         require(std::filesystem::is_empty(argv[2]), "One-token precision manifest not cleaned on unload");
+
+        // Bank capacity is independent of physical batch. Increasing it must
+        // not change selected experts or final logits on real native graphs.
+        auto expanded = o; expanded.expert_cache_slots = 32;
+        auto denied = expanded; denied.process_ceiling_bytes = baseline_budget;
+        const int denied_fd = open(argv[1], O_RDONLY | O_CLOEXEC);
+        require(denied_fd >= 0, "Cannot reopen bounded expanded-bank fixture");
+        require(flf_open(denied_fd, argv[2], denied, nullptr, nullptr, nullptr) == nullptr,
+            "Expanded expert bank evaded memory admission");
+        close(denied_fd);
+        require(std::filesystem::is_empty(argv[2]), "Rejected expanded bank leaked its manifest");
+        const int expanded_fd = open(argv[1], O_RDONLY | O_CLOEXEC);
+        require(expanded_fd >= 0, "Cannot reopen expanded-cache fixture");
+        c = flf_open(expanded_fd, argv[2], expanded, nullptr, nullptr, nullptr); close(expanded_fd);
+        if (!c) throw std::runtime_error(flf_last_error());
+        require(flf_snapshot(c).expert_bank_bytes > baseline_bank,
+            "Expanded expert bank did not allocate additional resident slots");
+        const auto expanded_capture = capture_small(c, true);
+        require(expanded_capture.routes == exact.routes && expanded_capture.logits == exact.logits,
+            "Expanded expert bank changed the exact CPU routing or logits");
+        flf_close(c); c = nullptr;
+        require(std::filesystem::is_empty(argv[2]), "Expanded expert-bank manifest not cleaned on unload");
+
+        // Flint's pinned runtime rejects per-layer decode windows at model load.
+        // Keep this experimental configuration fail-closed until a dedicated
+        // Flint implementation and exact-parity control are available.
+        auto unsupported = o; unsupported.decode_cache_window = 8;
+        const int unsupported_fd = open(argv[1], O_RDONLY | O_CLOEXEC);
+        require(unsupported_fd >= 0, "Cannot reopen unsupported decode-cache fixture");
+        require(flf_open(unsupported_fd, argv[2], unsupported, nullptr, nullptr, nullptr) == nullptr,
+            "Unsupported per-layer decode cache was accepted");
+        close(unsupported_fd);
+        require(std::filesystem::is_empty(argv[2]), "Rejected decode cache leaked manifest");
 
         const char * metal_result = "unavailable";
 #if defined(__APPLE__)

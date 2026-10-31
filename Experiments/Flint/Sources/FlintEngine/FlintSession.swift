@@ -24,12 +24,16 @@ public struct FlintConfiguration: Equatable, Sendable {
     var diagnosticQ4F32Reference = false
     // Internal serving candidate; admission still requires a complete proof.
     var conservativeMetal = false
+    // 0 preserves the proven slot bank; larger values are opt-in tests.
+    public var expertCacheSlots = 0
+    // Optional per-layer decode cache; 0 retains the verified baseline.
+    public var decodeCacheWindow = 0
     public var memoryCeilingBytes: UInt64 = 5_500_000_000
     public init() {}
     public func validate() throws {
         guard (32...65536).contains(contextTokens), (1...2048).contains(evaluationBatch),
               (1...16).contains(physicalBatch), physicalBatch <= evaluationBatch,
-              (1...8).contains(cpuThreads), memoryCeilingBytes > 0, memoryCeilingBytes <= 5_500_000_000 else {
+              (1...8).contains(cpuThreads), (0...256).contains(expertCacheSlots), decodeCacheWindow == 0, memoryCeilingBytes > 0, memoryCeilingBytes <= 5_500_000_000 else {
             throw FlintFailure.invalid("Invalid bounded Flint configuration")
         }
         guard !(diagnosticF32KV || diagnosticDisableFlash) || (backend == .metal && diagnosticRouting) else {
@@ -197,6 +201,8 @@ public actor FlintSession {
         options.context_tokens = Int32(configuration.contextTokens)
         options.evaluation_batch = Int32(configuration.evaluationBatch)
         options.physical_batch = Int32(configuration.physicalBatch)
+        options.expert_cache_slots = Int32(configuration.expertCacheSlots)
+        options.decode_cache_window = Int32(configuration.decodeCacheWindow)
         options.cpu_threads = Int32(configuration.cpuThreads)
         options.process_ceiling_bytes = limit
         options.app_reserve_bytes = max(memory.footprintBytes, 400_000_000)

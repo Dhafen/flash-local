@@ -6,13 +6,18 @@ PROFILE = pathlib.Path(__file__).resolve().parents[1] / "Experiments/Flint/model
 
 
 def plan(context, physical_batch=4, process_ceiling=5_500_000_000, app_bytes=400_000_000,
-         scratch_reserve=1_000_000_000, available_bytes=None):
+         scratch_reserve=1_000_000_000, available_bytes=None, expert_cache_slots=0,
+         decode_cache_window=0):
     profile = json.loads(PROFILE.read_text(encoding="utf-8"))
     g, layout = profile["geometry"], profile["layoutAudit"]
     if isinstance(context, bool) or not isinstance(context, int) or not 1 <= context <= g["metadataContextLimit"]:
         raise ValueError("Context exceeds the model metadata")
     if isinstance(physical_batch, bool) or not isinstance(physical_batch, int) or not 1 <= physical_batch <= 256:
         raise ValueError("Unsupported physical batch")
+    if isinstance(expert_cache_slots, bool) or not isinstance(expert_cache_slots, int) or not 0 <= expert_cache_slots <= 256:
+        raise ValueError("Invalid opt-in expert bank capacity")
+    if isinstance(decode_cache_window, bool) or not isinstance(decode_cache_window, int) or not 0 <= decode_cache_window <= 64:
+        raise ValueError("Invalid per-layer decode window")
     for size in [process_ceiling, app_bytes, scratch_reserve]:
         if isinstance(size, bool) or not isinstance(size, int) or not 0 <= size < (1 << 63): raise ValueError("Invalid memory budget")
     if available_bytes is not None and (not isinstance(available_bytes, int) or isinstance(available_bytes, bool) or available_bytes < 0):
@@ -24,15 +29,19 @@ def plan(context, physical_batch=4, process_ceiling=5_500_000_000, app_bytes=400
     full = len(g["fullAttentionWithoutRoPE"])
     swa = g["layers"] - full
     kv = (full * align(context) + swa * align(min(context, g["slidingWindow"] + physical_batch))) * g["kvHeads"] * g["headDimension"] * 2 * 2
-    slots = min(g["routedExperts"], g["topK"] * physical_batch)
-    bank = slots * (layout["routedBytes"] // (g["layers"] - g["leadingDenseLayers"]) // g["routedExperts"])
+    slots = min(g["routedExperts"], max(g["topK"] * physical_batch, expert_cache_slots))
+    expert_bytes = layout["routedBytes"] // (g["layers"] - g["leadingDenseLayers"]) // g["routedExperts"]
+    bank = slots * expert_bytes
+    decoder_cache = decode_cache_window * (g["layers"] - g["leadingDenseLayers"]) * expert_bytes
     dense = layout["nonRoutedBytes"]
-    required = app_bytes + dense + kv + bank + scratch_reserve
+    required = app_bytes + dense + kv + bank + decoder_cache + scratch_reserve
     limit = process_ceiling
     if available_bytes is not None: limit = min(limit, app_bytes + available_bytes)
     return {"estimated": True, "contextTokens": context, "physicalBatch": physical_batch,
             "residentDenseUpperBoundBytes": dense, "paddedKVBytes": kv, "expertSlots": slots,
-            "expertBankBytes": bank, "appBytes": app_bytes, "scratchReserveBytes": scratch_reserve,
+            "requestedExpertCacheSlots": expert_cache_slots,
+            "expertBankBytes": bank, "decodeCacheBytes": decoder_cache,
+            "decodeCacheWindow": decode_cache_window, "appBytes": app_bytes, "scratchReserveBytes": scratch_reserve,
             "estimatedProcessBytes": required, "effectiveCeilingBytes": limit,
             "admitted": required <= limit, "iPhoneStabilityVerified": False}
 

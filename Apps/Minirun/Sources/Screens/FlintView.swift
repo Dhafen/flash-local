@@ -82,6 +82,19 @@ private struct FlintModelControls: View {
                 Picker("Kontextkapacitet", selection: $model.contextProfile) {
                     ForEach([LocalContextProfile.standard, .test16K, .test32K]) { Text($0.title).tag($0) }
                 }.disabled(model.ready || model.isBusy || model.apiListening)
+                Picker("Expertbuffert (experiment)", selection: $model.expertCacheSlots) {
+                    Text("Standard (oförändrad)").tag(0)
+                    Text("32 platser").tag(32)
+                    Text("64 platser").tag(64)
+                    Text("128 platser").tag(128)
+                    Text("256 platser").tag(256)
+                }
+                .disabled(model.ready || model.isBusy || model.apiListening)
+                .onChange(of: model.expertCacheSlots) { _, _ in model.savePreferences() }
+                Text("Separat lagercache är tills vidare avstängd: den låsta Flint-motorn stöder ännu inte detta läge. Den delade expertbufferten kan fortfarande jämföras utan att ändra modellens beräkningar.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text("Extra expertplatser kan minska omläsningar, men är ännu inte prestandaverifierade på iPhone. Samma minnesgräns gäller; för stora val stoppas säkert vid modellinläsning. Testa på sval telefon och jämför token/s.")
+                    .font(.caption).foregroundStyle(.secondary)
                 Text("65K ryms inte i nuvarande konservativa minnesbudget. Vald kapacitet är ingen verifiering av kontextkvalitet.")
                     .font(.caption).foregroundStyle(.secondary)
                 TextField("Temperatur", text: $temperature).textFieldStyle(.roundedBorder)
@@ -134,6 +147,16 @@ private struct FlintMeasurementPage: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Verkliga mätvärden från senaste körningen").font(.headline)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Aktiv prestandaprofil").font(.subheadline.bold())
+                LabeledContent("Delad expertbuffert", value: model.expertCacheSlots == 0 ? "Standard" : "\(model.expertCacheSlots) platser")
+                LabeledContent("Cache per MoE-lager", value: model.decodeCacheWindow == 0 ? "Av · referens" : "\(model.decodeCacheWindow) experter/lager")
+                LabeledContent("Kontextgräns", value: "\(model.contextProfile.rawValue) token")
+                Text("Inställningarna är experimentella. Samma modellvikter och numeriska kontroller används. Jämför mot referensläget innan du behåller en profil.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(12)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
             HStack {
                 ForEach([1000, 4000, 10000], id: \.self) { count in
                     Button("Testa \(count / 1000)K") { model.benchmark(promptTokens: count) }
@@ -150,6 +173,10 @@ private struct FlintMeasurementPage: View {
                 if let time = report.timeToFirstTokenSeconds { LabeledContent("Första modelltoken", value: String(format: "%.2f s", time)) }
                 LabeledContent("Observerad RAM-topp", value: String(format: "%.2f GB", Double(report.maximumObservedFootprintBytes) / 1e9))
                 LabeledContent("Explicit expertläsning", value: String(format: "%.2f GB", Double(report.explicitExpertBytesRead) / 1e9))
+                LabeledContent("Återanvändning av prompt", value: String(format: "%.1f %%", 100 * Double(report.reusedPromptTokens) / Double(max(1, report.promptTokenIDs.count))))
+                LabeledContent("Termiskt tillstånd (råvärde)", value: "\(report.maximumThermalState)")
+                LabeledContent("Genererade token", value: "\(report.generatedTokenIDs.count)")
+                LabeledContent("Total svarstid", value: String(format: "%.2f s", report.elapsedSeconds))
                 Button("Spara mätning i Filer") { model.saveReport() }
                 if let url = model.reportURL { ShareLink("Dela mätning", item: url) }
             } else { Text("Ingen modellkörning har mätts ännu.").foregroundStyle(.secondary) }
@@ -171,6 +198,27 @@ private struct FlintAPIControls: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text(model.apiStatus).accessibilityIdentifier("flint-api-status")
+            VStack(alignment: .leading, spacing: 8) {
+                Text("API-aktivitet").font(.headline)
+                Text(model.apiRequestPhase)
+                    .font(.subheadline)
+                    .accessibilityIdentifier("flint-api-request-phase")
+                if model.apiPromptTotal > 0 {
+                    ProgressView(value: Double(model.apiPromptProcessed),
+                                 total: Double(max(1, model.apiPromptTotal)))
+                        .accessibilityIdentifier("flint-api-prompt-progress")
+                    Text("Prompt: \(model.apiPromptProcessed) av \(model.apiPromptTotal) token")
+                        .font(.caption.monospacedDigit())
+                }
+                if model.apiGeneratedTokens > 0 {
+                    Text("Genererade token: \(model.apiGeneratedTokens)")
+                        .font(.caption.monospacedDigit())
+                }
+                Text("Visar bara tokenantal och status. Prompttext och API-nycklar loggas inte.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(12)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
             HStack {
                 Button("Starta API-server") { model.startAPI() }.disabled(!model.canSend || model.apiListening)
                 Button("Stoppa API-server") { model.stopAPI() }.disabled(!model.apiListening)
