@@ -169,9 +169,11 @@ static void prepare_manifest(flf_context & c, const char * directory) {
     // The patched runtime allocates a distinct set of decode tensors per
     // routed layer when LLAMA_MOE_DECODE_WINDOW is nonzero. This memory is
     // additional to the prefill bank, not a replacement for it.
+    uint64_t expert_stride_bytes = 0;
+    for (const auto & group : bank_strides) expert_stride_bytes = add(expert_stride_bytes, group.second);
     const uint64_t decoder_bytes = c.options.decode_cache_window > 0
         ? uint64_t(layers - dense_layers) * uint64_t(c.options.decode_cache_window) *
-              (bank / slots)
+              expert_stride_bytes
         : 0;
     c.metrics.expert_bank_bytes = add(bank, decoder_bytes);
     c.metrics.estimated_process_bytes = add(add(add(dense_bytes, c.metrics.expert_bank_bytes), c.metrics.estimated_kv_bytes),
