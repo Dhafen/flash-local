@@ -22,6 +22,8 @@ public struct FlintConfiguration: Equatable, Sendable {
     var diagnosticF32KV = false
     var diagnosticDisableFlash = false
     var diagnosticQ4F32Reference = false
+    // Internal serving candidate; admission still requires a complete proof.
+    var conservativeMetal = false
     public var memoryCeilingBytes: UInt64 = 5_500_000_000
     public init() {}
     public func validate() throws {
@@ -36,6 +38,28 @@ public struct FlintConfiguration: Equatable, Sendable {
         guard !diagnosticQ4F32Reference || (backend == .cpuReference && diagnosticRouting) else {
             throw FlintFailure.invalid("Q4/F32 reference requires a CPU diagnostic graph")
         }
+        guard !conservativeMetal || (backend == .metal && !diagnosticRouting && physicalBatch == 1 &&
+              !diagnosticF32KV && !diagnosticDisableFlash && !diagnosticQ4F32Reference) else {
+            throw FlintFailure.invalid("Conservative Metal requires the bounded serving configuration")
+        }
+    }
+    /// The same mode is used for the traced candidate, the callback-free
+    /// comparison, serving and later restoration from the sealed admission.
+    static func forMode(_ mode: FlintServingMode, requested: FlintConfiguration, tracing: Bool) throws -> FlintConfiguration {
+        try requested.validate()
+        guard requested.backend == .metal && !requested.diagnosticRouting && !requested.diagnosticF32KV &&
+              !requested.diagnosticDisableFlash && !requested.diagnosticQ4F32Reference && !requested.conservativeMetal else {
+            throw FlintFailure.invalid("Expected the ordinary requested Metal configuration")
+        }
+        var result = requested
+        if mode != .standard { result.physicalBatch = 1 }
+        result.diagnosticRouting = tracing
+        if mode == .singleTokenF32KV {
+            if tracing { result.diagnosticF32KV = true; result.diagnosticDisableFlash = true }
+            else { result.conservativeMetal = true }
+        }
+        try result.validate()
+        return result
     }
 }
 
@@ -127,6 +151,7 @@ public actor FlintSession {
     private var activeRequest: UUID?
     private var generationReport: FlintGenerationReport?
     private var numericalAdmission = false
+    private var activeServingMode: FlintServingMode?
     private var numericalReport: FlintNumericalCheck?
 
     public init() {}
@@ -176,10 +201,11 @@ public actor FlintSession {
         options.process_ceiling_bytes = limit
         options.app_reserve_bytes = max(memory.footprintBytes, 400_000_000)
         options.metal = configuration.backend == .metal
-        options.f32_kv_control = configuration.backend == .cpuReference || configuration.diagnosticF32KV
+        options.f32_kv_control = configuration.backend == .cpuReference || configuration.diagnosticF32KV || configuration.conservativeMetal
         options.diagnostic_routing = configuration.diagnosticRouting
-        options.diagnostic_disable_flash = configuration.diagnosticDisableFlash
+        options.diagnostic_disable_flash = configuration.diagnosticDisableFlash || configuration.conservativeMetal
         options.diagnostic_q4_f32_reference = configuration.diagnosticQ4F32Reference
+        options.conservative_metal = configuration.conservativeMetal
         let control = Unmanaged.passUnretained(cancellation).toOpaque()
         let pointer = flf_open(fd, directory.path, options, { opaque in
             guard let opaque else { return true }
@@ -194,12 +220,12 @@ public actor FlintSession {
         let loaded = FlintNativeOwner(pointer: pointer, directory: directory, control: cancellation, engineLease: engineLease)
         try artifact.assertUnchanged()
         self.native = loaded; self.artifact = artifact; self.configuration = configuration
-        activeCeiling = limit; directoryAdopted = true; numericalAdmission = false
+        activeCeiling = limit; directoryAdopted = true; numericalAdmission = false; activeServingMode = nil
         stateTokens.removeAll(); lastLogits = nil; hasCurrentLogits = false
     }
 
     public func unload() {
-        cancellation.cancel(); native = nil; artifact = nil; stateTokens.removeAll(); lastLogits = nil; hasCurrentLogits = false; numericalAdmission = false
+        cancellation.cancel(); native = nil; artifact = nil; stateTokens.removeAll(); lastLogits = nil; hasCurrentLogits = false; numericalAdmission = false; activeServingMode = nil
     }
     public func resetConversation() throws {
         guard activeRequest == nil else { throw LocalAPIError(status: 429, message: "Stop the current Flint request before clearing its context") }
@@ -324,7 +350,7 @@ extension FlintSession {
     public func start(_ request: LocalChatRequest,
                       progress: @escaping @Sendable (Int, Int) -> Void = { _, _ in }) throws -> LocalChatGeneration {
         _ = try owner()
-        guard numericalAdmission else { throw LocalAPIError(status: 503, message: "Complete Flint's CPU/Metal admission before generation") }
+        guard numericalAdmission, activeServingMode != nil else { throw LocalAPIError(status: 503, message: "Complete Flint's CPU/Metal admission before generation") }
         guard activeRequest == nil else { throw LocalAPIError(status: 429, message: "Flint is already serving a request") }
         guard request.requestedModelID == LocalModelCapabilities(family: .flint).modelID else {
             throw LocalAPIError(status: 404, message: "The requested model is not loaded", parameter: "model")
@@ -411,6 +437,7 @@ extension FlintSession {
         generationReport = .init(modelSHA256: FlintArtifact.manifest.sha256, nativeRevision: Self.nativeRevision,
             contextTokens: configuration.contextTokens, evaluationBatch: configuration.evaluationBatch,
             physicalBatch: configuration.physicalBatch, cpuThreads: configuration.cpuThreads,
+            servingMode: activeServingMode, f32KV: configuration.conservativeMetal, flashAttentionActive: final.flashAttentionActive,
             processMemoryBudgetBytes: activeCeiling, platform: Self.platform,
             operatingSystem: ProcessInfo.processInfo.operatingSystemVersionString, sourceRevision: BuildInfo.gitRevision,
             appBuild: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String, timestamp: Date(),
@@ -464,7 +491,7 @@ extension FlintSession {
         guard activeRequest == nil else { throw LocalAPIError(status: 429, message: "Finish the active Flint request before preparing its model") }
         numericalReport = nil
         try artifact.assertUnchanged(); try configuration.validate()
-        guard configuration.backend == .metal, !configuration.diagnosticRouting else { throw FlintFailure.invalid("Serving requires the ordinary Metal configuration") }
+        _ = try FlintConfiguration.forMode(.standard, requested: configuration, tracing: false)
         guard let executable = Bundle.main.executableURL else { throw FlintFailure.invalid("Missing executable identity") }
         guard let libraryPath = flf_library_path() else { throw failure() }
         try LocalModelStorage.prepare(root: privateRoot)
@@ -473,14 +500,15 @@ extension FlintSession {
             "executable": try FileDigestComputer.digest(ofFileAt: executable, algorithm: .sha256).hex,
             "os": ProcessInfo.processInfo.operatingSystemVersionString, "context": String(configuration.contextTokens),
             "evaluation": String(configuration.evaluationBatch), "physical": String(configuration.physicalBatch),
-            "policy": "flint-q4-f32-cpu-and-metal-four-position-expert-sets-v2"]
+            "policy": "flint-q4-f32-cpu-and-validated-metal-fallback-v3"]
         let url = privateRoot.appendingPathComponent("numerical-admission-v1.json")
         let key = try LocalAPIKeyStore(service: "com.dhafen.flashlocal.flint-admission.v1").loadOrCreate()
         if let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= 2 << 20,
            let data = try? Data(contentsOf: url), let opened = LocalAdmissionSeal.open(data, identity: identity, key: key),
-           let saved = try? JSONDecoder().decode(FlintNumericalCheck.self, from: opened), saved.passed {
-            try load(artifact: artifact, privateRoot: privateRoot, configuration: configuration, progress: progress)
-            numericalReport = saved; numericalAdmission = true; return saved
+           let saved = try? JSONDecoder().decode(FlintNumericalCheck.self, from: opened), let mode = saved.servingMode {
+            try load(artifact: artifact, privateRoot: privateRoot,
+                     configuration: FlintConfiguration.forMode(mode, requested: configuration, tracing: false), progress: progress)
+            numericalReport = saved; activeServingMode = mode; numericalAdmission = true; return saved
         }
         unload()
         do {
@@ -499,7 +527,7 @@ extension FlintSession {
             }
             let referenceRoutes = try routingDecisions()
             unload(); try Task.checkCancellation()
-            var metal = configuration; metal.diagnosticRouting = true
+            let metal = try FlintConfiguration.forMode(.standard, requested: configuration, tracing: true)
             try load(artifact: artifact, privateRoot: privateRoot, configuration: metal, progress: progress)
             try traceRouting(true)
             var comparisons: [FlintNumericalCheck.Position] = [], candidateLogits: [[Float]] = []; first = 0
@@ -558,10 +586,11 @@ extension FlintSession {
                     var exact = cpu; exact.diagnosticQ4F32Reference = true
                     try load(artifact: artifact, privateRoot: privateRoot, configuration: exact, progress: progress)
                     try traceRouting(true)
-                    var exactPositions: [FlintNumericalCheck.Position] = []; first = 0
+                    var exactPositions: [FlintNumericalCheck.Position] = [], exactLogits: [[Float]] = []; first = 0
                     for (number, position) in positions.enumerated() {
                         try Task.checkCancellation()
                         let logits = try evaluate(tokens: Array(tokens[first...position]), outputLogits: true)!
+                        exactLogits.append(logits)
                         exactPositions.append(try FlintNumericalCheck.compare(position: position, reference: logits, candidate: candidateLogits[number]))
                         first = position + 1
                         progress(.init(phase: 4, fraction: Double(number + 1) / Double(positions.count), observedFootprintBytes: ProcessFootprint.current()?.footprintBytes))
@@ -581,31 +610,90 @@ extension FlintSession {
                         // serve based only on a diagnostic graph's output.
                         unload(); try Task.checkCancellation()
                         try load(artifact: artifact, privateRoot: privateRoot, configuration: configuration, progress: progress)
-                        var servingPositions: [FlintNumericalCheck.Position] = []; first = 0
+                        var servingPositions: [FlintNumericalCheck.Position] = [], servingReferencePositions: [FlintNumericalCheck.Position] = []; first = 0
                         for (number, position) in positions.enumerated() {
                             try Task.checkCancellation()
                             let logits = try evaluate(tokens: Array(tokens[first...position]), outputLogits: true)!
                             servingPositions.append(try FlintNumericalCheck.compare(position: position, reference: candidateLogits[number], candidate: logits))
+                            servingReferencePositions.append(try FlintNumericalCheck.compare(position: position, reference: exactLogits[number], candidate: logits))
                             first = position + 1
                         }
                         exactCheck = .init(positions: exactPositions, routedTokenLayers: exactCheck.routedTokenLayers,
                             exactExpertSets: exactCheck.exactExpertSets, routeDiagnostics: exactCheck.routeDiagnostics,
-                            servingPositions: servingPositions)
+                            servingPositions: servingPositions, servingReferencePositions: servingReferencePositions)
                         check = FlintNumericalCheck(positions: comparisons, routedTokenLayers: referenceRoutes.count,
                             exactExpertSets: check.exactExpertSets, routeDiagnostics: check.routeDiagnostics,
                             matchedMetalControl: check.matchedMetalControl, q4F32Reference: exactCheck)
                         numericalReport = check
                     }
+                    unload()
+                    if !check.passed {
+                        // Try the least restrictive candidate first. Neither
+                        // candidate changes weights or expert routing. Each is
+                        // admitted only after comparing every computed top-six
+                        // set and four full logit vectors to the F32 reference,
+                        // then the same callback-free serving configuration.
+                        var fallbacks: [FlintNumericalCheck.MetalFallback] = []
+                        for mode in [FlintServingMode.singleToken, .singleTokenF32KV] {
+                            try Task.checkCancellation()
+                            do {
+                                let traced = try FlintConfiguration.forMode(mode, requested: configuration, tracing: true)
+                                try load(artifact: artifact, privateRoot: privateRoot, configuration: traced, progress: progress)
+                                try traceRouting(true)
+                                var positionsCompared: [FlintNumericalCheck.Position] = [], metalLogits: [[Float]] = []; first = 0
+                                for (number, position) in positions.enumerated() {
+                                    try Task.checkCancellation()
+                                    let logits = try evaluate(tokens: Array(tokens[first...position]), outputLogits: true)!
+                                    metalLogits.append(logits)
+                                    positionsCompared.append(try FlintNumericalCheck.compare(position: position, reference: exactLogits[number], candidate: logits))
+                                    first = position + 1
+                                    progress(.init(phase: 4, fraction: Double(number + 1) / Double(positions.count), observedFootprintBytes: ProcessFootprint.current()?.footprintBytes))
+                                }
+                                let routes = try routingDecisions()
+                                var proof = FlintNumericalCheck.Q4F32Reference(positions: positionsCompared, routedTokenLayers: exactRoutes.count,
+                                    exactExpertSets: exactRoutes.count == tokens.count * 46 + positions.count && FlintNumericalCheck.sameRoutes(exactRoutes, routes),
+                                    routeDiagnostics: FlintNumericalCheck.diagnoseRoutes(exactRoutes, routes))
+                                unload()
+                                if proof.referencePassed {
+                                    let serving = try FlintConfiguration.forMode(mode, requested: configuration, tracing: false)
+                                    try load(artifact: artifact, privateRoot: privateRoot, configuration: serving, progress: progress)
+                                    var servingPositions: [FlintNumericalCheck.Position] = [], servingReferencePositions: [FlintNumericalCheck.Position] = []; first = 0
+                                    for (number, position) in positions.enumerated() {
+                                        try Task.checkCancellation()
+                                        let logits = try evaluate(tokens: Array(tokens[first...position]), outputLogits: true)!
+                                        servingPositions.append(try FlintNumericalCheck.compare(position: position, reference: metalLogits[number], candidate: logits))
+                                        servingReferencePositions.append(try FlintNumericalCheck.compare(position: position, reference: exactLogits[number], candidate: logits))
+                                        first = position + 1
+                                    }
+                                    proof = .init(positions: positionsCompared, routedTokenLayers: proof.routedTokenLayers,
+                                        exactExpertSets: proof.exactExpertSets, routeDiagnostics: proof.routeDiagnostics,
+                                        servingPositions: servingPositions, servingReferencePositions: servingReferencePositions)
+                                }
+                                fallbacks.append(.init(mode: mode, outcome: .compared, comparison: proof))
+                            } catch is CancellationError { unload(); throw CancellationError() }
+                            catch {
+                                unload(); try Task.checkCancellation()
+                                fallbacks.append(.init(mode: mode, outcome: .unavailable, comparison: nil))
+                            }
+                            unload()
+                            check = FlintNumericalCheck(positions: comparisons, routedTokenLayers: referenceRoutes.count,
+                                exactExpertSets: check.exactExpertSets, routeDiagnostics: check.routeDiagnostics,
+                                matchedMetalControl: check.matchedMetalControl, q4F32Reference: exactCheck, metalFallbacks: fallbacks)
+                            numericalReport = check
+                            if check.passed { break }
+                        }
+                    }
                 } catch is CancellationError { unload(); throw CancellationError() }
                 catch { /* Preserve the failed comparison if the exact reference cannot complete. */ }
                 unload()
             }
-            guard check.passed else { throw FlintFailure.invalid("Flint's CPU/Metal comparison differed; no new chat/API backend was admitted") }
+            guard let mode = check.servingMode else { throw FlintFailure.invalid("Flint's CPU/Metal comparison differed; no new chat/API backend was admitted") }
             // Serving has no routing graph callbacks or trace storage.
-            try load(artifact: artifact, privateRoot: privateRoot, configuration: configuration, progress: progress)
+            try load(artifact: artifact, privateRoot: privateRoot,
+                     configuration: FlintConfiguration.forMode(mode, requested: configuration, tracing: false), progress: progress)
             let sealed = try LocalAdmissionSeal.seal(JSONEncoder().encode(check), identity: identity, key: key)
             try sealed.write(to: url, options: [.atomic])
-            numericalAdmission = true
+            activeServingMode = mode; numericalAdmission = true
             return check
         } catch { unload(); throw error }
     }

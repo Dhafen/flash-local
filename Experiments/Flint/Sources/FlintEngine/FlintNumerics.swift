@@ -5,6 +5,13 @@ public struct FlintRouteDecision: Codable, Equatable, Sendable {
     public let experts: [Int32]
 }
 
+/// Only modes backed by a complete numerical admission may be used to serve.
+public enum FlintServingMode: String, Codable, Sendable {
+    case standard
+    case singleToken
+    case singleTokenF32KV
+}
+
 public struct FlintNumericalCheck: Codable, Sendable {
     public struct RouteDifference: Codable, Equatable, Sendable {
         public let position, layer: Int
@@ -39,11 +46,16 @@ public struct FlintNumericalCheck: Codable, Sendable {
         /// Compare the callback-free serving graph with the traced candidate.
         /// A missing or failed comparison cannot admit the new reference path.
         public let servingPositions: [Position]?
+        /// The callback-free graph must also meet the original thresholds
+        /// directly against the CPU reference, not just the traced graph.
+        public let servingReferencePositions: [Position]?
         init(positions: [Position], routedTokenLayers: Int, exactExpertSets: Bool,
-             routeDiagnostics: RouteDiagnostics?, servingPositions: [Position]? = nil) {
+             routeDiagnostics: RouteDiagnostics?, servingPositions: [Position]? = nil,
+             servingReferencePositions: [Position]? = nil) {
             self.positions = positions; self.routedTokenLayers = routedTokenLayers
             self.exactExpertSets = exactExpertSets; self.routeDiagnostics = routeDiagnostics
             self.servingPositions = servingPositions
+            self.servingReferencePositions = servingReferencePositions
         }
         var referencePassed: Bool {
             guard let routes = routeDiagnostics, routes.referenceCount == routedTokenLayers,
@@ -52,10 +64,22 @@ public struct FlintNumericalCheck: Codable, Sendable {
             return FlintNumericalCheck.validControl(positions, routedTokenLayers, exactExpertSets)
         }
         var passed: Bool {
-            guard referencePassed, let servingPositions else { return false }
+            guard referencePassed, let servingPositions, let servingReferencePositions else { return false }
             return servingPositions.map(\.index) == positions.map(\.index) &&
-                FlintNumericalCheck.validControl(servingPositions, routedTokenLayers, exactExpertSets)
+                servingReferencePositions.map(\.index) == positions.map(\.index) &&
+                FlintNumericalCheck.validControl(servingPositions, routedTokenLayers, exactExpertSets) &&
+                FlintNumericalCheck.validControl(servingReferencePositions, routedTokenLayers, exactExpertSets)
         }
+    }
+    public struct MetalFallback: Codable, Sendable {
+        public enum Outcome: String, Codable, Sendable { case compared, unavailable }
+        public let mode: FlintServingMode
+        public let outcome: Outcome
+        public let comparison: Q4F32Reference?
+        init(mode: FlintServingMode, outcome: Outcome, comparison: Q4F32Reference?) {
+            self.mode = mode; self.outcome = outcome; self.comparison = comparison
+        }
+        var passed: Bool { outcome == .compared && comparison?.passed == true }
     }
     public let positions: [Position]
     public let routedTokenLayers: Int
@@ -64,12 +88,14 @@ public struct FlintNumericalCheck: Codable, Sendable {
     public let routeDiagnostics: RouteDiagnostics?
     public let matchedMetalControl: MatchedMetalControl?
     public let q4F32Reference: Q4F32Reference?
+    public let metalFallbacks: [MetalFallback]?
     init(positions: [Position], routedTokenLayers: Int, exactExpertSets: Bool,
          routeDiagnostics: RouteDiagnostics?, matchedMetalControl: MatchedMetalControl? = nil,
-         q4F32Reference: Q4F32Reference? = nil) {
+         q4F32Reference: Q4F32Reference? = nil, metalFallbacks: [MetalFallback]? = nil) {
         self.positions = positions; self.routedTokenLayers = routedTokenLayers
         self.exactExpertSets = exactExpertSets; self.routeDiagnostics = routeDiagnostics
         self.matchedMetalControl = matchedMetalControl; self.q4F32Reference = q4F32Reference
+        self.metalFallbacks = metalFallbacks
     }
     private static func validControl(_ positions: [Position], _ routedTokenLayers: Int, _ exactExpertSets: Bool) -> Bool {
         guard positions.count == 4, let last = positions.last?.index, (7..<63).contains(last) else { return false }
@@ -77,9 +103,16 @@ public struct FlintNumericalCheck: Codable, Sendable {
         return positions.map(\.index) == [0, 3, tokenCount / 2, tokenCount - 1] &&
             positions.allSatisfy(\.passed) && routedTokenLayers == tokenCount * 46 + 4 && exactExpertSets
     }
-    public var passed: Bool {
-        Self.validControl(positions, routedTokenLayers, exactExpertSets) || q4F32Reference?.passed == true
+    public var servingMode: FlintServingMode? {
+        if Self.validControl(positions, routedTokenLayers, exactExpertSets) || q4F32Reference?.passed == true {
+            return .standard
+        }
+        let order: [FlintServingMode] = [.singleToken, .singleTokenF32KV]
+        guard let candidates = metalFallbacks, !candidates.isEmpty, candidates.count <= order.count,
+              candidates.map(\.mode) == Array(order.prefix(candidates.count)) else { return nil }
+        return candidates.first(where: \.passed)?.mode
     }
+    public var passed: Bool { servingMode != nil }
     public static func compare(position: Int, reference: [Float], candidate: [Float]) throws -> Position {
         guard !reference.isEmpty, reference.count == candidate.count, reference.count <= 300000,
               reference.allSatisfy(\.isFinite), candidate.allSatisfy(\.isFinite) else { throw ComparisonFailure.invalidLogits }

@@ -163,8 +163,13 @@ final class FlintAppModel {
                             3: "Kontrollerar modellkontext", 4: "Jämför logitpositioner och expertval"][value.phase] ?? "Förbereder Flint"
                     }
                 }
-                guard check.passed, !gate.cancelled(), sceneIsActive else { await session.unload(); throw CancellationError() }
-                ready = true; status = "Redo · kort CPU/Metal-kontroll godkänd"
+                guard let mode = check.servingMode, !gate.cancelled(), sceneIsActive else { await session.unload(); throw CancellationError() }
+                ready = true
+                switch mode {
+                case .standard: status = "Redo · CPU/Metal-kontroll godkänd"
+                case .singleToken: status = "Redo · verifierad tokenvis promptinläsning"
+                case .singleTokenF32KV: status = "Redo · verifierat F32-KV-läge, tokenvis prompt"
+                }
             } catch {
                 ready = false; self.error = error.localizedDescription; status = "Flint kunde inte laddas."
                 if let check = await session.lastNumericalCheck() {

@@ -8,6 +8,9 @@ public struct FlintGenerationReport: Codable, Sendable {
     public let modelSHA256, nativeRevision: String
     public let contextTokens: Int
     public let evaluationBatch, physicalBatch, cpuThreads: Int
+    /// Actual admitted mode and observed attention, absent in older reports.
+    public let servingMode: FlintServingMode?
+    public let f32KV, flashAttentionActive: Bool?
     public let processMemoryBudgetBytes: UInt64
     public let platform, operatingSystem, sourceRevision: String
     public let appBuild: String?
