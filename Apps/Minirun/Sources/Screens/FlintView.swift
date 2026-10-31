@@ -91,6 +91,18 @@ private struct FlintModelControls: View {
                 }
                 .disabled(model.ready || model.isBusy || model.apiListening)
                 .onChange(of: model.expertCacheSlots) { _, _ in model.savePreferences() }
+                Picker("Lagercache för generering (experiment)", selection: $model.decodeCacheWindow) {
+                    Text("Av (referens)").tag(0)
+                    Text("8 experter/lager").tag(8)
+                    Text("16 experter/lager").tag(16)
+                    Text("32 experter/lager").tag(32)
+                    Text("48 experter/lager").tag(48)
+                    Text("64 experter/lager").tag(64)
+                }
+                .disabled(model.ready || model.isBusy || model.apiListening)
+                .onChange(of: model.decodeCacheWindow) { _, _ in model.savePreferences() }
+                Text("Lagercachen lagrar separata expertvikter per lager under generering. Den är oberoende av den delade expertbufferten, ingår i minneskontrollen och är inte verifierad som snabbare på denna iPhone. Starta med 8 och jämför med Av.")
+                    .font(.caption).foregroundStyle(.secondary)
                 Text("Extra expertplatser kan minska omläsningar, men är ännu inte prestandaverifierade på iPhone. Samma minnesgräns gäller; för stora val stoppas säkert vid modellinläsning. Testa på sval telefon och jämför token/s.")
                     .font(.caption).foregroundStyle(.secondary)
                 Text("65K ryms inte i nuvarande konservativa minnesbudget. Vald kapacitet är ingen verifiering av kontextkvalitet.")
