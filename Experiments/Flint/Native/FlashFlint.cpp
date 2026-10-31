@@ -234,6 +234,16 @@ flf_context * flf_open(int fd, const char * directory, flf_options o, flf_abort 
         const std::string decode_window = std::to_string(o.decode_cache_window);
         require(setenv("LLAMA_MOE_DECODE_WINDOW", decode_window.c_str(), 1) == 0,
             "Cannot configure bounded Flint decode cache");
+        // Opt-in, lossless I/O experiment. The shared expert bank remains the
+        // authoritative source of routed expert bytes; this flag only asks the
+        // pinned runtime to issue explicit read-ahead for the same weights.
+        // Keep the default (zero extra slots) byte-for-byte unchanged.
+        // Real-device prompt/decode speed and cache pressure must be measured
+        // before making this the default; this is not speculative routing.
+        if (o.expert_cache_slots > 0) {
+            require(setenv("LLAMA_MOE_PREFETCH_READ", "1", 1) == 0,
+                "Cannot configure opt-in Flint expert read-ahead");
+        }
         unsetenv("LLAMA_MOE_LAYER_WINDOWS"); unsetenv("LLAMA_MOE_PREWARM"); unsetenv("LLAMA_MOE_SWEEP");
 #if !defined(__APPLE__) || TARGET_OS_OSX
         if (!o.metal) setenv("ORNITH_LES_CPU_CONTROL", "1", 1);
