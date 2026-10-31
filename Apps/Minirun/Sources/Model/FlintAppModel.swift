@@ -358,7 +358,7 @@ final class FlintAppModel {
                     }
                 }
                 report = await session.lastReport()
-                apiGeneratedTokens = report?.completionTokens ?? 0
+                apiGeneratedTokens = report?.generatedTokenIDs.count ?? 0
                 apiRequestPhase = "Klar · \(apiGeneratedTokens) genererade token"
                 status = "API · klar"; pair.continuation.finish()
             } catch { self.error = error.localizedDescription; pair.continuation.finish(throwing: error) }
