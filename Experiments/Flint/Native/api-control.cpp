@@ -105,6 +105,10 @@ int main(int argc, char ** argv) {
         require(flf_open(fd, argv[2], rejected, nullptr, nullptr, nullptr) == nullptr, "Non-diagnostic Q4 F32 reference accepted");
         rejected = o; rejected.f32_kv_control = false; rejected.diagnostic_q4_f32_reference = true;
         require(flf_open(fd, argv[2], rejected, nullptr, nullptr, nullptr) == nullptr, "Q4 F32 reference with F16 KV accepted");
+        rejected = o; rejected.expert_cache_slots = -1;
+        require(flf_open(fd, argv[2], rejected, nullptr, nullptr, nullptr) == nullptr, "Negative cache slots accepted");
+        rejected = o; rejected.expert_cache_slots = 257;
+        require(flf_open(fd, argv[2], rejected, nullptr, nullptr, nullptr) == nullptr, "Oversized cache slots accepted");
         rejected = o; rejected.conservative_metal = true;
         require(flf_open(fd, argv[2], rejected, nullptr, nullptr, nullptr) == nullptr, "CPU conservative Metal accepted");
         rejected = o; rejected.metal = true; rejected.conservative_metal = true;
@@ -240,8 +244,24 @@ int main(int argc, char ** argv) {
         c = flf_open(one_fd, argv[2], o, nullptr, nullptr, nullptr); close(one_fd);
         if (!c) throw std::runtime_error(flf_last_error());
         const auto exact = capture_small(c, true);
+        const auto baseline_bank = flf_snapshot(c).expert_bank_bytes;
         flf_close(c); c = nullptr;
         require(std::filesystem::is_empty(argv[2]), "One-token precision manifest not cleaned on unload");
+
+        // Bank capacity is independent of physical batch. Increasing it must
+        // not change selected experts or final logits on real native graphs.
+        auto expanded = o; expanded.expert_cache_slots = 32;
+        const int expanded_fd = open(argv[1], O_RDONLY | O_CLOEXEC);
+        require(expanded_fd >= 0, "Cannot reopen expanded-cache fixture");
+        c = flf_open(expanded_fd, argv[2], expanded, nullptr, nullptr, nullptr); close(expanded_fd);
+        if (!c) throw std::runtime_error(flf_last_error());
+        require(flf_snapshot(c).expert_bank_bytes > baseline_bank,
+            "Expanded expert bank did not allocate additional resident slots");
+        const auto expanded_capture = capture_small(c, true);
+        require(expanded_capture.routes == exact.routes && expanded_capture.logits == exact.logits,
+            "Expanded expert bank changed the exact CPU routing or logits");
+        flf_close(c); c = nullptr;
+        require(std::filesystem::is_empty(argv[2]), "Expanded expert-bank manifest not cleaned on unload");
 
         const char * metal_result = "unavailable";
 #if defined(__APPLE__)
