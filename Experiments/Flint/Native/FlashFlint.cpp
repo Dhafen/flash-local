@@ -205,7 +205,7 @@ flf_context * flf_open(int fd, const char * directory, flf_options o, flf_abort 
         require(o.context_tokens >= 32 && o.context_tokens <= 65536 && o.evaluation_batch >= 1 && o.evaluation_batch <= 2048 &&
             o.physical_batch >= 1 && o.physical_batch <= 16 && o.physical_batch <= o.evaluation_batch &&
             o.expert_cache_slots >= 0 && o.expert_cache_slots <= 256 &&
-            o.decode_cache_window >= 0 && o.decode_cache_window <= 64 && o.cpu_threads >= 1 &&
+            o.decode_cache_window == 0 && o.cpu_threads >= 1 &&
             o.cpu_threads <= 8 && o.process_ceiling_bytes > 0 && o.process_ceiling_bytes <= 5500000000ULL &&
             (!o.conservative_metal || (o.metal && !o.diagnostic_routing && o.f32_kv_control &&
                 o.diagnostic_disable_flash && o.physical_batch == 1 && !o.diagnostic_q4_f32_reference)) &&
