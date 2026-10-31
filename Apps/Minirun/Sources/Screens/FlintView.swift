@@ -82,6 +82,17 @@ private struct FlintModelControls: View {
                 Picker("Kontextkapacitet", selection: $model.contextProfile) {
                     ForEach([LocalContextProfile.standard, .test16K, .test32K]) { Text($0.title).tag($0) }
                 }.disabled(model.ready || model.isBusy || model.apiListening)
+                Picker("Expertbuffert (experiment)", selection: $model.expertCacheSlots) {
+                    Text("Standard (oförändrad)").tag(0)
+                    Text("32 platser").tag(32)
+                    Text("64 platser").tag(64)
+                    Text("128 platser").tag(128)
+                    Text("256 platser").tag(256)
+                }
+                .disabled(model.ready || model.isBusy || model.apiListening)
+                .onChange(of: model.expertCacheSlots) { _, _ in model.savePreferences() }
+                Text("Extra expertplatser kan minska omläsningar, men är ännu inte prestandaverifierade på iPhone. Samma minnesgräns gäller; för stora val stoppas säkert vid modellinläsning. Testa på sval telefon och jämför token/s.")
+                    .font(.caption).foregroundStyle(.secondary)
                 Text("65K ryms inte i nuvarande konservativa minnesbudget. Vald kapacitet är ingen verifiering av kontextkvalitet.")
                     .font(.caption).foregroundStyle(.secondary)
                 TextField("Temperatur", text: $temperature).textFieldStyle(.roundedBorder)
