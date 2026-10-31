@@ -275,21 +275,16 @@ int main(int argc, char ** argv) {
         flf_close(c); c = nullptr;
         require(std::filesystem::is_empty(argv[2]), "Expanded expert-bank manifest not cleaned on unload");
 
-        // This fixture verifies the actual layer-isolated decode tensor path.
-        // It must be mathematically transparent, not merely allocate bytes.
-        auto windowed = o; windowed.decode_cache_window = 8;
-        const int window_fd = open(argv[1], O_RDONLY | O_CLOEXEC);
-        require(window_fd >= 0, "Cannot reopen decode-window fixture");
-        c = flf_open(window_fd, argv[2], windowed, nullptr, nullptr, nullptr); close(window_fd);
-        if (!c) throw std::runtime_error(flf_last_error());
-        const auto window_snapshot = flf_snapshot(c);
-        require(window_snapshot.expert_bank_bytes > baseline_bank,
-            "Decode window did not reserve per-layer expert residency");
-        const auto window_capture = capture_small(c, true);
-        require(window_capture.routes == exact.routes && window_capture.logits == exact.logits,
-            "Per-layer decode window changed exact CPU routing or logits");
-        flf_close(c); c = nullptr;
-        require(std::filesystem::is_empty(argv[2]), "Decode-window manifest not cleaned on unload");
+        // Flint's pinned runtime rejects per-layer decode windows at model load.
+        // Keep this experimental configuration fail-closed until a dedicated
+        // Flint implementation and exact-parity control are available.
+        auto unsupported = o; unsupported.decode_cache_window = 8;
+        const int unsupported_fd = open(argv[1], O_RDONLY | O_CLOEXEC);
+        require(unsupported_fd >= 0, "Cannot reopen unsupported decode-cache fixture");
+        require(flf_open(unsupported_fd, argv[2], unsupported, nullptr, nullptr, nullptr) == nullptr,
+            "Unsupported per-layer decode cache was accepted");
+        close(unsupported_fd);
+        require(std::filesystem::is_empty(argv[2]), "Rejected decode cache leaked manifest");
 
         const char * metal_result = "unavailable";
 #if defined(__APPLE__)
