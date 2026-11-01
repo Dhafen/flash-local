@@ -86,12 +86,18 @@ public struct FlintMetrics: Codable, Sendable {
     public let expertIOBytes, expertIOCalls, cachedTokens, evaluatedTokens, stateOnlyTokens: UInt64
     public let estimatedProcessBytes, expertBankBytes, estimatedKVBytes: UInt64
     public let forwardSeconds: Double
+    /// Advisory OS hints only; NOT physical NAND reads or cache hits.
+    public let adviceRequests, adviceAccepted, adviceDuplicates, adviceDrops: UInt64
+    public let adviceBytes, adviceFailures: UInt64
     public let flashAttentionActive: Bool
     init(_ value: flf_metrics) {
         expertIOBytes = value.io_bytes; expertIOCalls = value.io_calls; cachedTokens = value.cached_tokens
         evaluatedTokens = value.evaluated_tokens; stateOnlyTokens = value.state_only_tokens
         estimatedProcessBytes = value.estimated_process_bytes; expertBankBytes = value.expert_bank_bytes
         estimatedKVBytes = value.estimated_kv_bytes; forwardSeconds = value.forward_seconds
+        adviceRequests = value.advice_requests; adviceAccepted = value.advice_accepted
+        adviceDuplicates = value.advice_duplicates; adviceDrops = value.advice_drops
+        adviceBytes = value.advice_bytes; adviceFailures = value.advice_failures
         flashAttentionActive = value.flash_attention_active
     }
 }
@@ -454,6 +460,12 @@ extension FlintSession {
             finishReason: finish)
         generationReport?.expertCacheSlots = configuration.expertCacheSlots
         generationReport?.expertReadAheadRequested = configuration.expertCacheSlots > 0
+        generationReport?.advisoryRequests = final.adviceRequests - initial.adviceRequests
+        generationReport?.advisoryAccepted = final.adviceAccepted - initial.adviceAccepted
+        generationReport?.advisoryDuplicates = final.adviceDuplicates - initial.adviceDuplicates
+        generationReport?.advisoryDrops = final.adviceDrops - initial.adviceDrops
+        generationReport?.advisoryBytes = final.adviceBytes - initial.adviceBytes
+        generationReport?.advisoryFailures = final.adviceFailures - initial.adviceFailures
         try emit(.complete(.init(promptTokens: prompt.count, completionTokens: generated.count, reasoningTokens: reasoningTokens,
             forcedTokens: 0, finishReason: finish, metrics: metrics)))
     }
