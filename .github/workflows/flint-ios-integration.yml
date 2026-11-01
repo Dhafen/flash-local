@@ -5,12 +5,17 @@ on:
   pull_request:
     branches:
       - codex/flint-io-prefetch-experiment
+    # A change to Flint's app model, native runtime or project generation
+    # must recompile the real iPhone target; otherwise a green PR can
+    # conceal a broken device build.
     paths:
-      - 'Apps/Minirun/Sources/Model/REAMAppModel.swift'
-      - 'Apps/Minirun/Sources/Screens/REAMRootView.swift'
-      - 'Apps/Minirun/Sources/Screens/FlintView.swift'
-      - 'Experiments/Flint/Sources/**'
+      - 'Apps/Minirun/**'
+      - 'Experiments/Flint/**'
+      - 'scripts/build_flint_runtime.py'
+      - 'scripts/build_tokenizer_xcframework.py'
+      - 'scripts/generate_xcode_project.py'
       - '.github/workflows/flint-ios-integration.yml'
+      - '.github/workflows/ornith-les.yml'
   workflow_dispatch:
 permissions:
   contents: read
