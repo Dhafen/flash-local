@@ -108,20 +108,23 @@ private:
                 in_flight_ = true;
             }
             bool ok = false;
+            uint64_t requested_bytes = 0;
 #if defined(__APPLE__) && defined(F_RDADVISE)
-            // Apple radvisory is bounded by the verified tensor region and the
-            // documented rad_count field; do not allocate or read model bytes.
+            // F_RDADVISE takes an int count: report the actual submitted
+            // advisory range, not the possibly larger tensor stride.
             radvisory advice{};
             advice.ra_offset = static_cast<off_t>(job.offset);
-            advice.ra_count = static_cast<int>(std::min<uint64_t>(job.bytes, INT32_MAX));
+            requested_bytes = std::min<uint64_t>(job.bytes, INT32_MAX);
+            advice.ra_count = static_cast<int>(requested_bytes);
             ok = fcntl(fd_, F_RDADVISE, &advice) == 0;
 #elif defined(POSIX_FADV_WILLNEED)
+            requested_bytes = job.bytes;
             ok = posix_fadvise(fd_, static_cast<off_t>(job.offset),
                                static_cast<off_t>(job.bytes), POSIX_FADV_WILLNEED) == 0;
 #endif
             std::lock_guard<std::mutex> lock(mu_);
             in_flight_ = false;
-            if (ok) stats_.advised_bytes += job.bytes;
+            if (ok) stats_.advised_bytes += requested_bytes;
             else ++stats_.failures;
         }
     }
