@@ -12,6 +12,20 @@ import AppKit
 /// Actual native control captures. Empty model storage; no inference or fake metrics.
 @MainActor
 final class FlintRenderTests: XCTestCase {
+    func testBackgroundSceneDisablesFlintChatAndLANAdmission() {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let model = FlintAppModel(modelsRoot: directory.appendingPathComponent("Models"),
+            privateRoot: directory.appendingPathComponent("State"),
+            documents: directory.appendingPathComponent("Documents"))
+        XCTAssertTrue(model.canStart)
+        XCTAssertFalse(model.canSend, "No model has been loaded")
+        model.setActive(false)
+        XCTAssertFalse(model.canStart, "Backgrounded scenes cannot start Flint operations")
+        XCTAssertFalse(model.canSend)
+        model.setActive(true)
+        XCTAssertTrue(model.canStart, "Foregrounding restores permission to load a model")
+        XCTAssertFalse(model.canSend, "Foregrounding must not fabricate a loaded model")
+    }
     func testLegacyUnsupportedPreferencesDoNotBlockModelLoading() {
         let defaults = UserDefaults.standard
         let contextKey = "FlashLocal.Flint.Context.v1"
