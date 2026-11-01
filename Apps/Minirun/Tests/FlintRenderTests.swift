@@ -12,6 +12,36 @@ import AppKit
 /// Actual native control captures. Empty model storage; no inference or fake metrics.
 @MainActor
 final class FlintRenderTests: XCTestCase {
+    func testLegacyUnsupportedPreferencesDoNotBlockModelLoading() {
+        let defaults = UserDefaults.standard
+        let contextKey = "FlashLocal.Flint.Context.v1"
+        let cacheKey = "FlashLocal.Flint.DecodeWindow.v1"
+        let previousContext = defaults.object(forKey: contextKey)
+        let previousCache = defaults.object(forKey: cacheKey)
+        defer {
+            if let previousContext { defaults.set(previousContext, forKey: contextKey) }
+            else { defaults.removeObject(forKey: contextKey) }
+            if let previousCache { defaults.set(previousCache, forKey: cacheKey) }
+            else { defaults.removeObject(forKey: cacheKey) }
+        }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        func model() -> FlintAppModel {
+            FlintAppModel(modelsRoot: root.appendingPathComponent("Models"),
+                privateRoot: root.appendingPathComponent("State"),
+                documents: root.appendingPathComponent("Documents"))
+        }
+        // An older version could persist these options even though the
+        // current UI has no way to select or clear them.
+        defaults.set(LocalContextProfile.test65K.rawValue, forKey: contextKey)
+        defaults.set(32, forKey: cacheKey)
+        let restored = model()
+        XCTAssertEqual(restored.contextProfile, .standard)
+        XCTAssertEqual(restored.decodeCacheWindow, 0)
+
+        // Valid context choices must still survive an app restart.
+        defaults.set(LocalContextProfile.test32K.rawValue, forKey: contextKey)
+        XCTAssertEqual(model().contextProfile, .test32K)
+    }
     func testUnloadedChatAPIAndMeasurementsInBothAppearances() throws {
         let keys = ["FlashLocal.Flint.System.v1", "FlashLocal.Flint.Context.v1", "FlashLocal.Flint.Options.v1"]
         let defaults = UserDefaults.standard
