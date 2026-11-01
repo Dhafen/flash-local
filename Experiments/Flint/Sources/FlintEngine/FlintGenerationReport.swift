@@ -9,9 +9,6 @@ public struct FlintGenerationReport: Codable, Sendable {
     public let contextTokens: Int
     public let evaluationBatch, physicalBatch, cpuThreads: Int
     /// Captured from the loaded configuration; unlike live UI preferences this cannot drift after a run.
-    public var expertCacheSlots: Int? = nil
-    /// Whether the existing experimental read-ahead switch was requested.
-    public var expertReadAheadRequested: Bool? = nil
     /// Actual admitted mode and observed attention, absent in older reports.
     public let servingMode: FlintServingMode?
     public let f32KV, flashAttentionActive: Bool?
@@ -26,6 +23,10 @@ public struct FlintGenerationReport: Codable, Sendable {
     public let maximumObservedFootprintBytes, explicitExpertBytesRead: UInt64
     public let maximumThermalState: Int
     public let finishReason: String
+    /// Captured from the actually admitted configuration, not mutable UI preferences.
+    public var expertCacheSlots: Int? = nil
+    /// This indicates the opt-in request; it does not prove faster storage reads.
+    public var expertReadAheadRequested: Bool? = nil
     public var evaluatedPromptTokens: Int { promptTokenIDs.count - reusedPromptTokens }
     public var decodeTokensPerSecond: Double? {
         decodeForwardSeconds > 0 ? Double(generatedTokenIDs.count) / decodeForwardSeconds : nil
