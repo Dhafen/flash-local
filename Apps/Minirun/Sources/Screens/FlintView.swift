@@ -175,6 +175,14 @@ private struct FlintMeasurementPage: View {
             Text("En ofarlig fast prompt med exakt uppmätt tokenantal och högst 256 nya token. Kör på sval telefon, upprepa och spara rapporterna. Minst 128 utdata-token krävs för en jämförbar decode-mätning. Chatthistoriken behålls; den gemensamma KV-sessionen används till testet.")
                 .font(.caption).foregroundStyle(.secondary)
             if let report = model.report {
+                LabeledContent("Körningens expertbuffert", value: report.expertCacheSlots.map { $0 == 0 ? "Standard (0)" : "\($0) platser" } ?? "Äldre rapport – ej registrerad")
+                LabeledContent("Expertförinläsning begärd", value: report.expertReadAheadRequested.map { $0 ? "Ja" : "Nej" } ?? "Okänd")
+                LabeledContent("Verklig fysisk batch", value: "\(report.physicalBatch)")
+                LabeledContent("Flash Attention", value: report.flashAttentionActive == true ? "Aktiv" : "Av / ej verifierad")
+                if report.physicalBatch == 1 {
+                    Text("Den numeriskt verifierade kompatibilitetsprofilen använder tokenvis fysisk batch. Större batch kräver separat CPU/Metal-verifiering före aktivering.")
+                        .font(.caption).foregroundStyle(.orange)
+                }
                 LabeledContent("Nya / återanvända prompttoken", value: "\(report.evaluatedPromptTokens) / \(report.reusedPromptTokens)")
                 LabeledContent("Prompttid", value: String(format: "%.2f s", report.prefillSeconds))
                 if report.prefillSeconds > 0 { LabeledContent("Prompt", value: String(format: "%.2f token/s", Double(report.evaluatedPromptTokens) / report.prefillSeconds)) }
