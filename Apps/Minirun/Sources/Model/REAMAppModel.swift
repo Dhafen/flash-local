@@ -264,6 +264,20 @@ final class REAMAppModel {
         alternateRunnerActive = false
         refreshStorage()
     }
+
+    /// Activate the legacy GGUF runner only when its page is actually shown.
+    /// Do not start verification of the previously selected model first: that
+    /// would race with selectModel and could prevent a requested model switch.
+    func activateForChatModel(_ target: LocalChatModel) {
+        alternateRunnerActive = false
+        if selectedModel != target {
+            selectModel(target)
+        } else if !prepared {
+            prepare()
+        } else {
+            refreshStorage()
+        }
+    }
     #if canImport(OrnithLES)
     func verifiedOrnithForAlternateRunner() -> VerifiedGGUFArtifact? {
         guard alternateRunnerActive, !isBusy, let artifact,
