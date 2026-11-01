@@ -1,4 +1,5 @@
 #include "FlashFlint.h"
+#include "FlintExpertReadAhead.h"
 #include "llama.h"
 #include "llama-context.h"
 #include "llama-moe-slot.h"
@@ -57,10 +58,15 @@ struct flf_context {
     struct route { int32_t position, layer; std::array<int32_t, 6> experts; };
     std::vector<route> routes;
     std::array<uint32_t, 49> trace_layer_rows{};
+    // Diagnostic-only advisor, never used by the admitted serving path.
+    std::vector<FlintExpertReadAhead::Family> expert_families;
+    std::unique_ptr<FlintExpertReadAhead> diagnostic_read_ahead;
     int32_t layers = 0, trace_final_position = -1;
     bool trace_output_requested = false;
     int32_t slots = 0;
     ~flf_context() {
+        // Drain kernel hints before closing the verified source descriptor.
+        diagnostic_read_ahead.reset();
         if (sampler) llama_sampler_free(sampler);
         if (context) llama_free(context);
         if (model) llama_model_free(model);
@@ -156,6 +162,7 @@ static void prepare_manifest(flf_context & c, const char * directory) {
         const uint64_t stride = size / experts;
         require(!bank_strides.count(key) || bank_strides[key] == stride, "Unexpected mixed expert strides");
         bank_strides[key] = stride;
+        c.expert_families.push_back({int(layer), offset, stride, int(experts)});
         entries.push_back({{"layer", layer}, {"tensor_family", match[2].str()}, {"tensor_name", name},
             {"quant_type", ggml_type_name(tensor->type)}, {"exact_byte_length", size}, {"bytes_per_expert", stride},
             {"expert_stride", stride}, {"expert_count", experts}, {"repacked_offset", offset}, {"repacked_file", "/dev/fd/" + std::to_string(c.source)}});
@@ -223,6 +230,12 @@ flf_context * flf_open(int fd, const char * directory, flf_options o, flf_abort 
         if (!c->stream) { close(model_fd); throw std::runtime_error("Cannot retain Flint GGUF stream"); }
         if (progress) progress(0, -1, user);
         prepare_manifest(*c, directory);
+        // The first routing-aware I/O prototype is deliberately attached only
+        // to numerical diagnostic traces, never to production decode. Its
+        // bounded async hints cannot change the authentic model outputs.
+        if (o.expert_cache_slots > 0 && o.diagnostic_routing) {
+            c->diagnostic_read_ahead = std::make_unique<FlintExpertReadAhead>(c->source, c->expert_families);
+        }
         // Current omni knobs are process environment variables. Caller MUST
         // hold the shared app engine lease before this isolated runtime opens.
         for (const char * key : {"LLAMA_MOE_DECODE_WINDOW", "LLAMA_MOE_LOOKAHEAD_PREFETCH", "LLAMA_MOE_PREFETCH_READ",
@@ -292,6 +305,9 @@ flf_context * flf_open(int fd, const char * directory, flf_options o, flf_abort 
                     ggml_backend_tensor_get(tensor, entry.experts.data(), size_t(row) * tensor->nb[1], 6 * sizeof(int32_t));
                     for (int id : entry.experts) if (id < 0 || id >= 256) return false;
                     c.routes.push_back(entry);
+                    if (c.diagnostic_read_ahead) {
+                        c.diagnostic_read_ahead->suggest(layer, entry.experts.data(), entry.experts.size());
+                    }
                 }
                 c.trace_layer_rows[layer] += uint32_t(tensor->ne[1]);
                 return !c.should_abort();
