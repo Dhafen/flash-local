@@ -296,6 +296,9 @@ final class FlintAppModel {
     }
     func benchmark(promptTokens: Int) {
         guard canSend, !apiListening else { return }
+        // A previous benchmark report must never be mistaken for this run's
+        // result if the new stream ends early without a completion event.
+        report = nil
         let id = begin("Benchmark · förbereder \(promptTokens) verkliga prompttoken")
         operation = Task {
             defer { activeGeneration = nil; end(id) }
@@ -305,11 +308,19 @@ final class FlintAppModel {
                     Task { @MainActor in guard let self, self.operationID == id else { return }; self.status = "Benchmark · prompt \(done)/\(total)" }
                 }
                 activeGeneration = source
+                var completed = false
                 for try await event in source.events {
-                    if case .complete = event { report = await session.lastReport() }
+                    if case .complete = event {
+                        completed = true
+                        report = await session.lastReport()
+                    }
                 }
-                status = (report?.generatedTokenIDs.count ?? 0) >= 128 ? "Benchmark klar · minst 128 genererade token" :
-                    "Körningen tog slut före 128 token · inte ett jämförbart decode-benchmark"
+                if !completed {
+                    status = "Benchmark avbröts utan sluthändelse · ingen giltig mätning"
+                } else {
+                    status = (report?.generatedTokenIDs.count ?? 0) >= 128 ? "Benchmark klar · minst 128 genererade token" :
+                        "Körningen tog slut före 128 token · inte ett jämförbart decode-benchmark"
+                }
             } catch { self.error = error.localizedDescription; status = "Benchmark stoppades." }
         }
     }
