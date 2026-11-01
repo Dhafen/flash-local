@@ -72,7 +72,8 @@ jobs:
           # A generic Simulator SDK build needs no booted device or signing.
           xcodebuild build -project Apps/Minirun/Minirun.xcodeproj $XCODEBUILD_FLAGS \
             -target MinirunIOSTests -configuration Debug -sdk iphonesimulator \
-            CODE_SIGNING_ALLOWED=NO 2>&1 | tee flint-ios-tests-build.log | tail -70
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee flint-ios-tests-build.log | tail -70
       - name: Compile both engines for a physical iPhone (unsigned)
         run: |
           xcodebuild build -project Apps/Minirun/Minirun.xcodeproj $XCODEBUILD_FLAGS \
