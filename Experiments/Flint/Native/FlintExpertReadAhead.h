@@ -49,9 +49,15 @@ public:
             for (const auto & f : families_) {
                 if (f.layer == layer && expert >= 0 && expert < f.experts) {
                     valid = true;
+                    // Validate the multiplication and addition BEFORE computing a file offset.
+                    // A malformed manifest must never wrap into a different tensor.
+                    const uint64_t limit = uint64_t(INT64_MAX);
+                    if (f.bytes_per_expert == 0 || f.offset > limit ||
+                        uint64_t(expert) > (limit - f.offset) / f.bytes_per_expert) {
+                        ++stats_.drops; continue;
+                    }
                     const Job job{f.offset + uint64_t(expert) * f.bytes_per_expert, f.bytes_per_expert};
-                    if (job.bytes == 0 || job.offset > uint64_t(INT64_MAX) ||
-                        job.bytes > uint64_t(INT64_MAX) - job.offset) { ++stats_.drops; continue; }
+                    if (job.bytes > limit - job.offset) { ++stats_.drops; continue; }
                     bool duplicate = in_flight_ && active_job_.offset == job.offset && active_job_.bytes == job.bytes;
                     for (const auto & queued : queue_) {
                         if (queued.offset == job.offset && queued.bytes == job.bytes) { duplicate = true; break; }
