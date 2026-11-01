@@ -66,6 +66,13 @@ jobs:
           xcodebuild build -project Apps/Minirun/Minirun.xcodeproj $XCODEBUILD_FLAGS \
             -scheme Minirun-iOS -destination 'generic/platform=iOS Simulator' \
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee flint-ios-simulator.log | tail -70
+      - name: Compile iOS XCTest bundle (build-only, no simulator run)
+        run: |
+          # Building the app target alone does not type-check FlintRenderTests.
+          # A generic Simulator SDK build needs no booted device or signing.
+          xcodebuild build -project Apps/Minirun/Minirun.xcodeproj $XCODEBUILD_FLAGS \
+            -target MinirunIOSTests -configuration Debug -sdk iphonesimulator \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee flint-ios-tests-build.log | tail -70
       - name: Compile both engines for a physical iPhone (unsigned)
         run: |
           xcodebuild build -project Apps/Minirun/Minirun.xcodeproj $XCODEBUILD_FLAGS \
@@ -79,6 +86,7 @@ jobs:
           path: |
             flint-ios-simulator.log
             flint-ios-device.log
+            flint-ios-tests-build.log
             .work/flint-runtime/build.log
             .work/flint-runtime/build-manifest.json
           if-no-files-found: ignore
