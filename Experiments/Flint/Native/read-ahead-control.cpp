@@ -1,5 +1,7 @@
 // Standalone bounded advisory worker test; intentionally never loads a model.
 #include "FlintExpertReadAhead.h"
+#include <chrono>
+#include <thread>
 #include <cstdint>
 #include <cstdio>
 #include <stdexcept>
@@ -27,8 +29,18 @@ int main() {
         // This flood must remain bounded; stop() clears pending requests and
         // joins the only worker before the file descriptor is closed.
         for (int n = 0; n < 100; ++n) worker.suggest(2, routed, 6);
+        // The earlier queue-only test could stop before the worker made any
+        // advisory system call. Give it a bounded opportunity to execute,
+        // then prove that at least one real attempt completed.
+        for (int n = 0; n < 100; ++n) {
+            const auto observed = worker.snapshot();
+            if (observed.advised_bytes > 0 || observed.failures > 0) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
         worker.stop();
         auto stats = worker.snapshot();
+        if (stats.advised_bytes == 0 && stats.failures == 0)
+            throw std::runtime_error("Read-ahead worker never attempted an advisory operation");
         if (stats.requests != 6 + 2 + 6 + 600 || stats.accepted == 0 || stats.drops < 8)
             throw std::runtime_error("Read-ahead queue rejected its bounded test invariants");
         std::printf("FLINT_ADVICE_CONTROL accepted=%llu drops=%llu duplicates=%llu advised=%llu failures=%llu joined=true\n",
