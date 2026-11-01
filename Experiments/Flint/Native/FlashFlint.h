@@ -39,6 +39,11 @@ typedef struct {
     uint64_t estimated_process_bytes, expert_bank_bytes, estimated_kv_bytes;
     double forward_seconds;
     bool flash_attention_active;
+    // Routing-trace-only asynchronous advisory requests, not physical NAND
+    // traffic, not an assertion that the read advice was useful, and always
+    // zero in callback-free production serving.
+    uint64_t advice_requests, advice_accepted, advice_duplicates;
+    uint64_t advice_drops, advice_bytes, advice_failures;
 } flf_metrics;
 // Caller verifies the complete file SHA and holds an exclusive APP engine
 // lease (also excluding Ornith). The file descriptor is retained by duplication.
