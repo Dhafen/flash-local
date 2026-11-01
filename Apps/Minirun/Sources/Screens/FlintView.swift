@@ -89,8 +89,15 @@ private struct FlintModelControls: View {
                     Text("128 platser").tag(128)
                     Text("256 platser").tag(256)
                 }
-                .disabled(model.ready || model.isBusy || model.apiListening)
+                .disabled(model.ready || model.isBusy || model.apiListening || model.isShuttingDown)
                 .onChange(of: model.expertCacheSlots) { _, _ in model.savePreferences() }
+                if model.ready || model.isBusy || model.apiListening || model.isShuttingDown {
+                    Text("För att ändra expertbuffert: tryck Ladda ur modell ovan, vänta tills urladdningen är klar, välj 32/64/128 platser och tryck Ladda modell igen. Bufferten kan inte ändras medan modellen används.")
+                        .font(.callout).foregroundStyle(.orange)
+                } else {
+                    Text("Välj en experimentell buffert här innan du laddar modellen. Standard (0) kör utan expertförinläsning.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 Text("Separat lagercache är tills vidare avstängd: den låsta Flint-motorn stöder ännu inte detta läge. Den delade expertbufferten kan fortfarande jämföras utan att ändra modellens beräkningar.")
                     .font(.caption).foregroundStyle(.secondary)
                 Text("Extra expertplatser aktiverar nu även experimentell explicit expert-read-ahead. Det kan minska I/O-väntan men kan också försämra promptinläsning eller minnestryck. Standardläget 0 är oförändrat. Mät på riktig iPhone innan du behåller en profil.")
