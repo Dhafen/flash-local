@@ -34,7 +34,8 @@ struct REAMRootView: View {
             }
         }
     }
-    @State private var activeRunner: Runner = .ornith
+    @State private var activeRunner: Runner =
+        Runner(rawValue: UserDefaults.standard.string(forKey: "FlashLocal.activeInferenceRunner") ?? "") ?? .ornith
     #if os(iOS)
     @State private var showingHuggingFace = false
     #endif
@@ -96,9 +97,13 @@ struct REAMRootView: View {
             #endif
             #endif
         }
-        // Never initialize the second GGUF owner while LES or Flint is active.
-        // A switch waits for the previous engine to release its native lease.
+        // Restore only the selected page. Model files are never downloaded or
+        // loaded automatically merely because a preference was restored.
         #if canImport(FlintEngine) && canImport(OrnithLES)
+        .task {
+            if activeRunner == .ream { model.activateForChatModel(.ream) }
+            model.showsFlint = activeRunner == .flint
+        }
         .onChange(of: scenePhase) { _, phase in
             guard activeRunner == .ream else { return }
             if phase == .background { model.releaseInferenceResources() }
@@ -129,6 +134,7 @@ struct REAMRootView: View {
             if target == .ream { model.activateForChatModel(.ream) }
             model.showsFlint = target == .flint
             activeRunner = target
+            UserDefaults.standard.set(target.rawValue, forKey: "FlashLocal.activeInferenceRunner")
             model.isSwitchingInferenceModel = false
         }
     }
