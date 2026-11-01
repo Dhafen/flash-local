@@ -1,6 +1,5 @@
 // Standalone bounded advisory worker test; intentionally never loads a model.
 #include "FlintExpertReadAhead.h"
-#include <cassert>
 #include <cstdint>
 #include <cstdio>
 #include <stdexcept>
@@ -30,9 +29,8 @@ int main() {
         for (int n = 0; n < 100; ++n) worker.suggest(2, routed, 6);
         worker.stop();
         auto stats = worker.snapshot();
-        assert(stats.requests == 6 + 2 + 6 + 600);
-        assert(stats.accepted > 0);
-        assert(stats.drops >= 8);
+        if (stats.requests != 6 + 2 + 6 + 600 || stats.accepted == 0 || stats.drops < 8)
+            throw std::runtime_error("Read-ahead queue rejected its bounded test invariants");
         std::printf("FLINT_ADVICE_CONTROL accepted=%llu drops=%llu duplicates=%llu advised=%llu failures=%llu joined=true\n",
             (unsigned long long)stats.accepted, (unsigned long long)stats.drops,
             (unsigned long long)stats.duplicates, (unsigned long long)stats.advised_bytes,
