@@ -2,6 +2,7 @@ import MinirunKit
 import SwiftUI
 #if os(iOS)
 import UIKit
+import SafariServices
 #endif
 
 struct REAMRootView: View {
@@ -21,25 +22,68 @@ struct REAMRootView: View {
     #if canImport(OrnithLES)
     private var lesModel: OrnithLESAppModel { model.ornithSession }
     #endif
+    #if canImport(FlintEngine) && canImport(OrnithLES)
+    private enum Runner: String, CaseIterable, Identifiable {
+        case ornith, ream, flint
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .ornith: "Ornith 1.5 · 35B-A3B"
+            case .ream: "Qwen3.8 · REAM"
+            case .flint: "Recursive Flint · 40B-A2.5B"
+            }
+        }
+    }
+    @State private var activeRunner: Runner = .ornith
+    #if os(iOS)
+    @State private var showingHuggingFace = false
+    #endif
+    #endif
+
     var body: some View {
         NavigationStack {
             #if canImport(FlintEngine) && canImport(OrnithLES)
             VStack(spacing: 12) {
-                HStack {
-                    Text(model.showsFlint ? "Flint · experiment" : "Ornith").font(.headline)
-                    Spacer()
-                    Button(model.showsFlint ? "Till Ornith" : "Prova Flint") {
-                        guard !model.isSwitchingInferenceModel else { return }
-                        model.isSwitchingInferenceModel = true
-                        Task {
-                            if model.showsFlint { await model.flintSession.shutdown() }
-                            else { await lesModel.shutdown() }
-                            model.showsFlint.toggle(); model.isSwitchingInferenceModel = false
+                HStack(spacing: 12) {
+                    Picker("Aktiv modell", selection: Binding(
+                        get: { activeRunner },
+                        set: { selectRunner($0) }
+                    )) {
+                        ForEach(Runner.allCases) { runner in
+                            Text(runner.title).tag(runner)
                         }
-                    }.disabled(model.isSwitchingInferenceModel)
-                }.padding(.horizontal)
-                if model.showsFlint { FlintView(model: model.flintSession) }
-                else { OrnithLESView(model: lesModel, existing: model.verifiedOrnithForAlternateRunner()) }
+                    }
+                    .pickerStyle(.menu)
+                    .disabled(model.isSwitchingInferenceModel)
+                    .accessibilityIdentifier("iphone-model-selector")
+                    Spacer(minLength: 4)
+                    #if os(iOS)
+                    Button("Hugging Face") { showingHuggingFace = true }
+                        .disabled(model.isSwitchingInferenceModel)
+                        .sheet(isPresented: $showingHuggingFace) {
+                            HuggingFaceGGUFBrowser().ignoresSafeArea()
+                        }
+                    #else
+                    Link("Hugging Face", destination: URL(string: "https://huggingface.co/models?library=gguf")!)
+                    #endif
+                }
+                .padding(.horizontal)
+                Text("Endast de tre verifierade GGUF-profilerna kan köras här. Hugging Face visar fler modeller, men en GGUF-fil är inte automatiskt kompatibel. Generellt MLX-importstöd är inte aktiverat.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal)
+                if model.isSwitchingInferenceModel {
+                    ProgressView("Frigör föregående modell…")
+                }
+                switch activeRunner {
+                case .flint:
+                    FlintView(model: model.flintSession)
+                case .ream:
+                    REAMChatPage(model: model, discard: { confirmation = .discard })
+                        .navigationTitle("Qwen3.8 · REAM")
+                case .ornith:
+                    OrnithLESView(model: lesModel, existing: model.verifiedOrnithForAlternateRunner())
+                }
             }
             #else
             #if canImport(OrnithLES)
@@ -50,11 +94,15 @@ struct REAMRootView: View {
             #endif
             #endif
         }
-        // LES owns verification and lifecycle when it is the root experience.
-        // Starting the invisible legacy owner hashes the same large GGUF a
-        // second time and cannot share its artifact (it was never paused as an
-        // alternate runner). The ordinary root retains its existing lifecycle.
-        #if !canImport(OrnithLES)
+        // Never initialize the second GGUF owner while LES or Flint is active.
+        // A switch waits for the previous engine to release its native lease.
+        #if canImport(FlintEngine) && canImport(OrnithLES)
+        .onChange(of: scenePhase) { _, phase in
+            guard activeRunner == .ream else { return }
+            if phase == .background { model.releaseInferenceResources() }
+            else if phase == .active { model.refreshStorage() }
+        }
+        #elseif !canImport(OrnithLES)
         .task { model.prepare() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .background { model.releaseInferenceResources() }
@@ -62,13 +110,45 @@ struct REAMRootView: View {
         }
         #endif
     }
+
+    #if canImport(FlintEngine) && canImport(OrnithLES)
+    @MainActor
+    private func selectRunner(_ target: Runner) {
+        guard !model.isSwitchingInferenceModel, target != activeRunner else { return }
+        model.isSwitchingInferenceModel = true
+        Task { @MainActor in
+            // Await teardown before allowing a second heavyweight engine to
+            // allocate GPU buffers or acquire its own exclusive model lease.
+            switch activeRunner {
+            case .ornith: await lesModel.shutdown()
+            case .ream: await model.pauseForAlternateRunner()
+            case .flint: await model.flintSession.shutdown()
+            }
+            if target == .ream { model.activateForChatModel(.ream) }
+            model.showsFlint = target == .flint
+            activeRunner = target
+            model.isSwitchingInferenceModel = false
+        }
+    }
+    #endif
 }
+
+#if os(iOS) && canImport(FlintEngine) && canImport(OrnithLES)
+/// In-app browsing, not a claim that arbitrary Hugging Face weights are
+/// admitted by the pinned native engines. Downloads remain explicitly verified.
+private struct HuggingFaceGGUFBrowser: UIViewControllerRepresentable {
+    func makeUIViewController(context: Context) -> SFSafariViewController {
+        SFSafariViewController(url: URL(string: "https://huggingface.co/models?library=gguf")!)
+    }
+    func updateUIViewController(_ controller: SFSafariViewController, context: Context) {}
+}
+#endif
 
 /// Pure page content, separable from navigation/lifecycle for light/dark QA.
 struct REAMChatPage: View {
     @Bindable var model: REAMAppModel
     var discard: () -> Void = {}
-    var openPerformance: () -> Void = {}
+    var openPerformance: (() -> Void)? = nil
     var openLES: (() -> Void)? = nil
     var body: some View {
         VStack(spacing: 0) {
@@ -80,21 +160,23 @@ struct REAMChatPage: View {
                             .buttonStyle(.borderedProminent).disabled(!model.canOpenAlternateRunner)
                             .accessibilityIdentifier("open-ornith-les").padding(.bottom, 12)
                     }
-                    Button(action: openPerformance) {
-                        HStack(spacing: 12) {
-                            Image(systemName: "cpu").font(.title2)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Ornith Performance").font(.headline)
-                                Text("Öppna modell och optimeringskontroll").font(.caption)
-                            }
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                        }.frame(maxWidth: .infinity, alignment: .leading)
+                    if let openPerformance {
+                        Button(action: openPerformance) {
+                            HStack(spacing: 12) {
+                                Image(systemName: "cpu").font(.title2)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Ornith Performance").font(.headline)
+                                    Text("Öppna modell och optimeringskontroll").font(.caption)
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                            }.frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(!model.canOpenAlternateRunner)
+                        .accessibilityIdentifier("open-ornith-performance")
+                        .padding(.bottom, 16)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!model.canOpenAlternateRunner)
-                    .accessibilityIdentifier("open-ornith-performance")
-                    .padding(.bottom, 16)
                     modelCard
                     Divider()
                     LazyVStack(alignment: .leading, spacing: 20) {
