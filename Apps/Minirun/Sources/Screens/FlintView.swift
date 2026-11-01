@@ -89,11 +89,18 @@ private struct FlintModelControls: View {
                     Text("128 platser").tag(128)
                     Text("256 platser").tag(256)
                 }
-                .disabled(model.ready || model.isBusy || model.apiListening)
+                .disabled(model.ready || model.isBusy || model.apiListening || model.isShuttingDown)
                 .onChange(of: model.expertCacheSlots) { _, _ in model.savePreferences() }
+                if model.ready || model.isBusy || model.apiListening || model.isShuttingDown {
+                    Text("För att ändra expertbuffert: tryck Ladda ur modell ovan, vänta tills urladdningen är klar, välj 32/64/128 platser och tryck Ladda modell igen. Bufferten kan inte ändras medan modellen används.")
+                        .font(.callout).foregroundStyle(.orange)
+                } else {
+                    Text("Välj en experimentell buffert här innan du laddar modellen. Standard (0) kör utan expertförinläsning.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 Text("Separat lagercache är tills vidare avstängd: den låsta Flint-motorn stöder ännu inte detta läge. Den delade expertbufferten kan fortfarande jämföras utan att ändra modellens beräkningar.")
                     .font(.caption).foregroundStyle(.secondary)
-                Text("Extra expertplatser kan minska omläsningar, men är ännu inte prestandaverifierade på iPhone. Samma minnesgräns gäller; för stora val stoppas säkert vid modellinläsning. Testa på sval telefon och jämför token/s.")
+                Text("Extra expertplatser aktiverar nu även experimentell explicit expert-read-ahead. Det kan minska I/O-väntan men kan också försämra promptinläsning eller minnestryck. Standardläget 0 är oförändrat. Mät på riktig iPhone innan du behåller en profil.")
                     .font(.caption).foregroundStyle(.secondary)
                 Text("65K ryms inte i nuvarande konservativa minnesbudget. Vald kapacitet är ingen verifiering av kontextkvalitet.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -110,8 +117,10 @@ private struct FlintModelControls: View {
                 TextEditor(text: $model.systemPrompt).frame(minHeight: 80).disabled(model.isBusy || model.apiListening)
                     .onChange(of: model.systemPrompt) { _, _ in model.savePreferences() }
             }.onAppear { temperature = String(model.options.temperature) }
-            Text("Första aktiveringen jämför fyra verkliga logitpositioner och beräknade top-6-expertval mellan CPU och Metal. Godkänd kontroll sparas per modell, appbygge och inställning. Full modellkvalitet och lång kontext behöver fortfarande testas.")
-                .font(.caption2).foregroundStyle(.secondary)
+            DisclosureGroup("Om modellens verifiering") {
+                Text("Första aktiveringen jämför fyra verkliga logitpositioner och beräknade top-6-expertval mellan CPU och Metal. Godkänd kontroll sparas per modell, appbygge och inställning. Full modellkvalitet och lång kontext behöver fortfarande testas.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
         }
     }
 }
@@ -166,6 +175,14 @@ private struct FlintMeasurementPage: View {
             Text("En ofarlig fast prompt med exakt uppmätt tokenantal och högst 256 nya token. Kör på sval telefon, upprepa och spara rapporterna. Minst 128 utdata-token krävs för en jämförbar decode-mätning. Chatthistoriken behålls; den gemensamma KV-sessionen används till testet.")
                 .font(.caption).foregroundStyle(.secondary)
             if let report = model.report {
+                LabeledContent("Körningens expertbuffert", value: report.expertCacheSlots.map { $0 == 0 ? "Standard (0)" : "\($0) platser" } ?? "Äldre rapport – ej registrerad")
+                LabeledContent("Expertförinläsning begärd", value: report.expertReadAheadRequested.map { $0 ? "Ja" : "Nej" } ?? "Okänd")
+                LabeledContent("Verklig fysisk batch", value: "\(report.physicalBatch)")
+                LabeledContent("Flash Attention", value: report.flashAttentionActive == true ? "Aktiv" : "Av / ej verifierad")
+                if report.physicalBatch == 1 {
+                    Text("Den numeriskt verifierade kompatibilitetsprofilen använder tokenvis fysisk batch. Större batch kräver separat CPU/Metal-verifiering före aktivering.")
+                        .font(.caption).foregroundStyle(.orange)
+                }
                 LabeledContent("Nya / återanvända prompttoken", value: "\(report.evaluatedPromptTokens) / \(report.reusedPromptTokens)")
                 LabeledContent("Prompttid", value: String(format: "%.2f s", report.prefillSeconds))
                 if report.prefillSeconds > 0 { LabeledContent("Prompt", value: String(format: "%.2f token/s", Double(report.evaluatedPromptTokens) / report.prefillSeconds)) }

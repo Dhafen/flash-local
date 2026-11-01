@@ -452,6 +452,8 @@ extension FlintSession {
             elapsedSeconds: elapsed, timeToFirstTokenSeconds: firstToken, maximumObservedFootprintBytes: observation.peak,
             explicitExpertBytesRead: final.expertIOBytes - initial.expertIOBytes, maximumThermalState: observation.thermal,
             finishReason: finish)
+        generationReport?.expertCacheSlots = configuration.expertCacheSlots
+        generationReport?.expertReadAheadRequested = configuration.expertCacheSlots > 0
         try emit(.complete(.init(promptTokens: prompt.count, completionTokens: generated.count, reasoningTokens: reasoningTokens,
             forcedTokens: 0, finishReason: finish, metrics: metrics)))
     }
@@ -506,7 +508,9 @@ extension FlintSession {
             "executable": try FileDigestComputer.digest(ofFileAt: executable, algorithm: .sha256).hex,
             "os": ProcessInfo.processInfo.operatingSystemVersionString, "context": String(configuration.contextTokens),
             "evaluation": String(configuration.evaluationBatch), "physical": String(configuration.physicalBatch),
-            "policy": "flint-q4-f32-cpu-and-validated-metal-fallback-v3"]
+            "policy": "flint-q4-f32-cpu-and-validated-metal-fallback-v3",
+            "expert_slots": String(configuration.expertCacheSlots),
+            "decode_window": String(configuration.decodeCacheWindow)]
         let url = privateRoot.appendingPathComponent("numerical-admission-v1.json")
         let key = try LocalAPIKeyStore(service: "com.dhafen.flashlocal.flint-admission.v1").loadOrCreate()
         if let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= 2 << 20,
