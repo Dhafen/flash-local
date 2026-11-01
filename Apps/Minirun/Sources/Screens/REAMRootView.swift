@@ -1,5 +1,8 @@
 import MinirunKit
 import SwiftUI
+#if canImport(FlintEngine)
+import FlintEngine
+#endif
 #if os(iOS)
 import UIKit
 import SafariServices
@@ -142,11 +145,92 @@ struct REAMRootView: View {
 }
 
 #if os(iOS) && canImport(FlintEngine) && canImport(OrnithLES)
-/// In-app browsing, not a claim that arbitrary Hugging Face weights are
-/// admitted by the pinned native engines. Downloads remain explicitly verified.
-private struct HuggingFaceGGUFBrowser: UIViewControllerRepresentable {
+/// Only exact, SHA-256-pinned GGUF files are admitted by the current engines.
+/// Other files in the same repositories are not automatically compatible.
+private struct HuggingFaceGGUFBrowser: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var selectedPage: Page?
+
+    private struct Page: Identifiable {
+        let id: String
+        let url: URL
+    }
+    private struct ModelLink: Identifiable {
+        let id: String
+        let title: String
+        let fileName: String
+        let downloadURL: URL
+    }
+    private var admitted: [ModelLink] {
+        [
+            .init(id: "ornith", title: "Ornith 1.5 · 35B-A3B",
+                  fileName: PinnedGGUFDownload.primaryOrnith.manifest.fileName,
+                  downloadURL: PinnedGGUFDownload.primaryOrnith.url),
+            .init(id: "ream", title: "Qwen3.8 · REAM",
+                  fileName: PinnedGGUFDownload.primaryREAM.manifest.fileName,
+                  downloadURL: PinnedGGUFDownload.primaryREAM.url),
+            .init(id: "flint", title: "Recursive Flint · 40B-A2.5B",
+                  fileName: FlintArtifact.manifest.fileName,
+                  downloadURL: FlintArtifact.sourceURL)
+        ]
+    }
+    // Derive repository pages from the very same pinned URLs used by the
+    // downloader, so the catalog cannot silently point at a different repo.
+    private func repositoryPage(_ downloadURL: URL) -> URL {
+        guard let marker = downloadURL.path.range(of: "/resolve/"),
+              var components = URLComponents(url: downloadURL, resolvingAgainstBaseURL: false) else {
+            return downloadURL
+        }
+        components.path = String(downloadURL.path[..<marker.lowerBound])
+        components.query = nil
+        components.fragment = nil
+        return components.url ?? downloadURL
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Fasta modellfiler i appen") {
+                    ForEach(admitted) { entry in
+                        Button {
+                            selectedPage = .init(id: entry.id, url: repositoryPage(entry.downloadURL))
+                        } label: {
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(entry.title).font(.headline)
+                                Text(entry.fileName).font(.caption.monospaced())
+                                    .foregroundStyle(.secondary)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .accessibilityIdentifier("hf-pinned-\(entry.id)")
+                    }
+                }
+                Section("Utforska andra GGUF-filer") {
+                    Button("Visa alla GGUF-modeller på Hugging Face") {
+                        selectedPage = .init(id: "explore",
+                            url: URL(string: "https://huggingface.co/models?library=gguf")!)
+                    }
+                    Text("Endast de exakta filerna ovan har fasta SHA-256-manifest i appen. Andra GGUF-filer kan inte importeras eller köras ännu. MLX stöds inte av dessa motorer. Full inferens på fysisk iPhone är inte verifierad.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Hugging Face")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Stäng") { dismiss() }
+                }
+            }
+            .sheet(item: $selectedPage) { page in
+                HuggingFaceSafariPage(url: page.url).ignoresSafeArea()
+            }
+        }
+    }
+}
+
+private struct HuggingFaceSafariPage: UIViewControllerRepresentable {
+    let url: URL
     func makeUIViewController(context: Context) -> SFSafariViewController {
-        SFSafariViewController(url: URL(string: "https://huggingface.co/models?library=gguf")!)
+        SFSafariViewController(url: url)
     }
     func updateUIViewController(_ controller: SFSafariViewController, context: Context) {}
 }
