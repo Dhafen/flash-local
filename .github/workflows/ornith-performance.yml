@@ -14,9 +14,10 @@ on:
       - 'scripts/tests/test_ornith_mlx_metadata.py'
 permissions:
   contents: read
-concurrency:
-  group: ornith-performance-${{ github.ref }}
-  cancel-in-progress: true
+# No workflow-level concurrency: this reusable workflow is invoked by multiple
+# parent workflows on the same PR ref. Ref-scoped cancellation can cancel
+# another parent's job and turn a healthy CI run red. The caller owns
+# cancellation policy and job scheduling.
 defaults:
   run:
     shell: bash
