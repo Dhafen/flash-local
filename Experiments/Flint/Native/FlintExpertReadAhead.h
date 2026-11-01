@@ -52,7 +52,7 @@ public:
                     const Job job{f.offset + uint64_t(expert) * f.bytes_per_expert, f.bytes_per_expert};
                     if (job.bytes == 0 || job.offset > uint64_t(INT64_MAX) ||
                         job.bytes > uint64_t(INT64_MAX) - job.offset) { ++stats_.drops; continue; }
-                    bool duplicate = false;
+                    bool duplicate = in_flight_ && active_job_.offset == job.offset && active_job_.bytes == job.bytes;
                     for (const auto & queued : queue_) {
                         if (queued.offset == job.offset && queued.bytes == job.bytes) { duplicate = true; break; }
                     }
@@ -85,6 +85,8 @@ private:
     std::condition_variable cv_;
     std::deque<Job> queue_;
     bool stopping_ = false;
+    bool in_flight_ = false;
+    Job active_job_{};
     Stats stats_;
     std::thread worker_;
     void run() {
@@ -96,6 +98,8 @@ private:
                 if (stopping_) return;
                 job = queue_.front();
                 queue_.pop_front();
+                active_job_ = job;
+                in_flight_ = true;
             }
             bool ok = false;
 #if defined(__APPLE__) && defined(F_RDADVISE)
@@ -110,6 +114,7 @@ private:
                                static_cast<off_t>(job.bytes), POSIX_FADV_WILLNEED) == 0;
 #endif
             std::lock_guard<std::mutex> lock(mu_);
+            in_flight_ = false;
             if (ok) stats_.advised_bytes += job.bytes;
             else ++stats_.failures;
         }
