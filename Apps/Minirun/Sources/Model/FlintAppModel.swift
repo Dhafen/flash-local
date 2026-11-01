@@ -221,7 +221,24 @@ final class FlintAppModel {
     func clearChat() {
         guard canStart else { return }
         history = []; saveHistory()
-        if ready { Task { do { try await session.resetConversation() } catch { self.error = error.localizedDescription } } }
+        guard ready else { return }
+        // Keep the shared chat/LAN session unavailable until the native KV
+        // reset has actually finished. Otherwise a new request can start with
+        // the previous conversation's state while reset is still queued.
+        let id = begin("Rensar samtalets modellminne…")
+        operation = Task {
+            defer { end(id) }
+            do {
+                try await session.resetConversation()
+                status = "Chatten rensad · modellminnet nollställt."
+            } catch {
+                // Never continue serving from a potentially stale KV cache.
+                ready = false
+                await session.unload()
+                self.error = "Modellminnet kunde inte rensas. Ladda om Flint: " + error.localizedDescription
+                status = "Flint måste laddas om."
+            }
+        }
     }
     private func request() throws -> LocalChatRequest {
         guard history.count < 128, systemPrompt.utf8.count <= 32768, try JSONEncoder().encode(history).count < 12 << 20 else {
@@ -339,7 +356,7 @@ final class FlintAppModel {
         do {
             source = try await session.start(request, progress: { [weak self] processed, total in
                 Task { @MainActor [weak self] in
-                    guard let self, self.isBusy else { return }
+                    guard let self, self.operationID == id else { return }
                     self.apiPromptProcessed = processed
                     self.apiPromptTotal = total
                     self.apiRequestPhase = "Läser prompt · \(processed)/\(total) token"
