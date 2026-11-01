@@ -106,11 +106,22 @@ struct REAMRootView: View {
         .task {
             if activeRunner == .ream { model.activateForChatModel(.ream) }
             model.showsFlint = activeRunner == .flint
+            // Restoring the Flint page must not make its LAN API available
+            // while the app is backgrounded or transitioning to foreground.
+            if activeRunner == .flint { model.flintSession.setActive(scenePhase == .active) }
         }
         .onChange(of: scenePhase) { _, phase in
-            guard activeRunner == .ream else { return }
-            if phase == .background { model.releaseInferenceResources() }
-            else if phase == .active { model.refreshStorage() }
+            switch activeRunner {
+            case .ream:
+                if phase == .background { model.releaseInferenceResources() }
+                else if phase == .active { model.refreshStorage() }
+            case .flint:
+                // Flint owns both chat and LAN serving. Invalidate its gate
+                // and cancel active work before iOS suspends the process.
+                model.flintSession.setActive(phase == .active)
+            case .ornith:
+                break // OrnithLESView manages its own lifecycle.
+            }
         }
         #elseif !canImport(OrnithLES)
         .task { model.prepare() }
@@ -135,6 +146,7 @@ struct REAMRootView: View {
             case .flint: await model.flintSession.shutdown()
             }
             if target == .ream { model.activateForChatModel(.ream) }
+            if target == .flint { model.flintSession.setActive(scenePhase == .active) }
             model.showsFlint = target == .flint
             activeRunner = target
             UserDefaults.standard.set(target.rawValue, forKey: "FlashLocal.activeInferenceRunner")
