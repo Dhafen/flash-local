@@ -452,6 +452,8 @@ extension FlintSession {
             elapsedSeconds: elapsed, timeToFirstTokenSeconds: firstToken, maximumObservedFootprintBytes: observation.peak,
             explicitExpertBytesRead: final.expertIOBytes - initial.expertIOBytes, maximumThermalState: observation.thermal,
             finishReason: finish)
+        generationReport?.expertCacheSlots = configuration.expertCacheSlots
+        generationReport?.expertReadAheadRequested = configuration.expertCacheSlots > 0
         try emit(.complete(.init(promptTokens: prompt.count, completionTokens: generated.count, reasoningTokens: reasoningTokens,
             forcedTokens: 0, finishReason: finish, metrics: metrics)))
     }
