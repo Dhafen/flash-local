@@ -26,6 +26,21 @@ int main() {
         worker.suggest(2, routed, 6);
         worker.suggest(2, invalid, 2);
         worker.suggest(100, routed, 6);
+        // Malformed family metadata must not wrap the byte offset and issue
+        // read advice against an unrelated part of the model file.
+        const uint64_t max_signed_offset = uint64_t(INT64_MAX);
+        FlintExpertReadAhead overflow_worker(fd, {
+            {7, max_signed_offset - 100, 64, 8},
+            {8, 0, UINT64_MAX, 8}
+        });
+        const int32_t overflow_expert[] = {2};
+        overflow_worker.suggest(7, overflow_expert, 1);
+        overflow_worker.suggest(8, overflow_expert, 1);
+        const auto overflow_stats = overflow_worker.snapshot();
+        if (overflow_stats.requests != 2 || overflow_stats.drops != 2 ||
+            overflow_stats.accepted != 0)
+            throw std::runtime_error("Overflowing expert offsets were not rejected");
+        overflow_worker.stop();
         // This flood must remain bounded; stop() clears pending requests and
         // joins the only worker before the file descriptor is closed.
         for (int n = 0; n < 100; ++n) worker.suggest(2, routed, 6);
