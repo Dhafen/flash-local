@@ -69,7 +69,7 @@ struct REAMRootView: View {
                     #endif
                 }
                 .padding(.horizontal)
-                Text("Endast de tre verifierade GGUF-profilerna kan köras här. Hugging Face visar fler modeller, men en GGUF-fil är inte automatiskt kompatibel. Generellt MLX-importstöd är inte aktiverat.")
+                Text("Appen har tre fasta modellprofiler. Hugging Face-knappen låter dig utforska GGUF-modeller, men import av valfria GGUF-filer stöds ännu inte. MLX-import kräver en separat kompatibel motor.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .padding(.horizontal)
