@@ -101,11 +101,16 @@ final class FlintAppModel {
         }
         let preferences = UserDefaults.standard
         if let value = preferences.string(forKey: "FlashLocal.Flint.System.v1"), value.utf8.count <= 32768 { systemPrompt = value }
-        if let profile = LocalContextProfile(rawValue: preferences.integer(forKey: "FlashLocal.Flint.Context.v1")) { contextProfile = profile }
+        // Older builds offered 65K, which the current 5.5 GB phone budget cannot
+        // admit. Never restore an unsupported picker value on launch.
+        if let profile = LocalContextProfile(rawValue: preferences.integer(forKey: "FlashLocal.Flint.Context.v1")),
+           [.standard, .test16K, .test32K].contains(profile) { contextProfile = profile }
         let savedSlots = preferences.integer(forKey: "FlashLocal.Flint.ExpertSlots.v1")
         if [0, 32, 64, 128, 256].contains(savedSlots) { expertCacheSlots = savedSlots }
-        let savedWindow = preferences.integer(forKey: "FlashLocal.Flint.DecodeWindow.v1")
-        if [0, 8, 16, 32, 48, 64].contains(savedWindow) { decodeCacheWindow = savedWindow }
+        // Previous experiments could persist nonzero decode residency. The native
+        // runtime now explicitly rejects it; keeping that preference would
+        // make every subsequent model load fail with no visible way to reset.
+        decodeCacheWindow = 0
         if let data = preferences.data(forKey: "FlashLocal.Flint.Options.v1"), let saved = try? JSONDecoder().decode(LocalGenerationOptions.self, from: data),
            (try? saved.validate()) != nil {
             options = saved; options.enableThinking = true; options.thinkingBudget = nil
