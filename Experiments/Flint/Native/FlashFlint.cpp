@@ -457,6 +457,15 @@ flf_metrics flf_snapshot(const flf_context * c) {
     if (!c) return {};
     auto out = c->metrics;
     if (auto * slots = c->context->flash_local_slots()) { auto s = slots->counters_snapshot(); out.io_bytes = s.all_bytes; out.io_calls = s.all_calls; }
+    if (c->diagnostic_read_ahead) {
+        const auto stats = c->diagnostic_read_ahead->snapshot();
+        out.advice_requests = stats.requests;
+        out.advice_accepted = stats.accepted;
+        out.advice_duplicates = stats.duplicates;
+        out.advice_drops = stats.drops;
+        out.advice_bytes = stats.advised_bytes;
+        out.advice_failures = stats.failures;
+    }
     return out;
 }
 const char * flf_last_error() { return error_text.c_str(); }
