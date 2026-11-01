@@ -1,0 +1,80 @@
+# Verify the actual iPhone application with BOTH native engines enabled.
+# No signing, no App Store Connect access and no EAS build credits are used.
+name: Flint iPhone integration smoke
+on:
+  pull_request:
+    branches:
+      - codex/flint-io-prefetch-experiment
+    paths:
+      - 'Apps/Minirun/Sources/Model/REAMAppModel.swift'
+      - 'Apps/Minirun/Sources/Screens/REAMRootView.swift'
+      - 'Apps/Minirun/Sources/Screens/FlintView.swift'
+      - 'Experiments/Flint/Sources/**'
+      - '.github/workflows/flint-ios-integration.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: flint-ios-integration-${{ github.ref }}
+  cancel-in-progress: true
+defaults:
+  run:
+    shell: bash
+jobs:
+  verified-les-runtime:
+    uses: ./.github/workflows/ornith-les.yml
+    with:
+      use_macos15: true
+  iphone-compile:
+    needs: verified-les-runtime
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      FLASH_LOCAL_ENABLE_LES: '1'
+      FLASH_LOCAL_ENABLE_FLINT: '1'
+      ORNITH_LES_CPU_CONTROL: '1'
+      XCODEBUILD_FLAGS: '-skipPackagePluginValidation -skipMacroValidation'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Select pinned Apple toolchain
+        run: |
+          test "$(uname -m)" = arm64
+          sudo xcode-select -s /Applications/Xcode_26.2.app
+          xcodebuild -version
+      - name: Download numerically validated LES framework
+        uses: actions/download-artifact@v4
+        with:
+          name: ornith-les-runtime
+          path: .work/ornith-les-runtime
+      - name: Verify LES framework against this exact source
+        run: python3 scripts/verify_ornith_les_runtime.py
+      - name: Build native tokenizer and Flint frameworks for Mac, iPhone and Simulator
+        run: |
+          python3 scripts/build_tokenizer_xcframework.py
+          python3 scripts/build_flint_runtime.py
+      - name: Generate pinned Xcode project
+        run: python3 scripts/generate_xcode_project.py
+      - name: Compile both engines in the actual iOS Simulator app
+        run: |
+          xcodebuild build -project Apps/Minirun/Minirun.xcodeproj $XCODEBUILD_FLAGS \
+            -scheme Minirun-iOS -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee flint-ios-simulator.log | tail -70
+      - name: Compile both engines for a physical iPhone (unsigned)
+        run: |
+          xcodebuild build -project Apps/Minirun/Minirun.xcodeproj $XCODEBUILD_FLAGS \
+            -scheme Minirun-iOS -configuration Release -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee flint-ios-device.log | tail -70
+      - name: Preserve compiler evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flint-ios-integration-logs
+          path: |
+            flint-ios-simulator.log
+            flint-ios-device.log
+            .work/flint-runtime/build.log
+            .work/flint-runtime/build-manifest.json
+          if-no-files-found: ignore
+          retention-days: 7
