@@ -74,15 +74,17 @@ struct REAMRootView: View {
                     .padding(.horizontal)
                 if model.isSwitchingInferenceModel {
                     ProgressView("Frigör föregående modell…")
-                }
-                switch activeRunner {
-                case .flint:
-                    FlintView(model: model.flintSession)
-                case .ream:
-                    REAMChatPage(model: model, discard: { confirmation = .discard })
-                        .navigationTitle("Qwen3.8 · REAM")
-                case .ornith:
-                    OrnithLESView(model: lesModel, existing: model.verifiedOrnithForAlternateRunner())
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    switch activeRunner {
+                    case .flint:
+                        FlintView(model: model.flintSession)
+                    case .ream:
+                        REAMChatPage(model: model, discard: { confirmation = .discard })
+                            .navigationTitle("Qwen3.8 · REAM")
+                    case .ornith:
+                        OrnithLESView(model: lesModel, existing: model.verifiedOrnithForAlternateRunner())
+                    }
                 }
             }
             #else
