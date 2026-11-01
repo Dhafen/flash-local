@@ -27,6 +27,14 @@ public struct FlintGenerationReport: Codable, Sendable {
     public var expertCacheSlots: Int? = nil
     /// This indicates the opt-in request; it does not prove faster storage reads.
     public var expertReadAheadRequested: Bool? = nil
+    /// Advisory worker counters for this generation only, not measured NAND traffic.
+    /// Nil for older reports. Zero means no advisory activity observed.
+    public var advisoryRequests: UInt64? = nil
+    public var advisoryAccepted: UInt64? = nil
+    public var advisoryDuplicates: UInt64? = nil
+    public var advisoryDrops: UInt64? = nil
+    public var advisoryBytes: UInt64? = nil
+    public var advisoryFailures: UInt64? = nil
     public var evaluatedPromptTokens: Int { promptTokenIDs.count - reusedPromptTokens }
     public var decodeTokensPerSecond: Double? {
         decodeForwardSeconds > 0 ? Double(generatedTokenIDs.count) / decodeForwardSeconds : nil
