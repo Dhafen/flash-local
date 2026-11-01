@@ -270,16 +270,21 @@ final class FlintAppModel {
                         Task { @MainActor in guard let self, self.operationID == id else { return }; self.status = "Läser prompt: \(done)/\(total) token" }
                     }
                     activeGeneration = source
+                    var completion = FlintEventCompletion()
                     for try await event in source.events {
+                        try completion.observe(event)
                         guard let index = history.firstIndex(where: { $0.id == turn.id }) else { source.cancel(); throw CancellationError() }
                         switch event {
                         case .delta(let text, let thought):
                             history[index].answer += text; history[index].reasoning += thought
                             status = text.isEmpty && !thought.isEmpty ? "Tänker…" : "Genererar…"
                         case .complete:
-                            history[index].completed = true; report = await session.lastReport(); status = "Klar"
+                            break
                         }
                     }
+                    try completion.requireCompletion()
+                    guard let index = history.firstIndex(where: { $0.id == turn.id }) else { throw CancellationError() }
+                    history[index].completed = true; report = await session.lastReport(); status = "Klar"
                 } catch { self.error = error.localizedDescription; status = "Svaret avbröts." }
             }
         } catch { self.error = error.localizedDescription }
@@ -383,7 +388,9 @@ final class FlintAppModel {
         apiOperation = Task {
             defer { activeGeneration = nil; apiOperation = nil; end(id) }
             do {
+                var completion = FlintEventCompletion()
                 for try await event in source.events {
+                    try completion.observe(event)
                     switch event {
                     case .delta:
                         apiRequestPhase = "Genererar svar…"
@@ -396,6 +403,7 @@ final class FlintAppModel {
                     @unknown default: source.cancel(); throw CancellationError()
                     }
                 }
+                try completion.requireCompletion()
                 report = await session.lastReport()
                 apiGeneratedTokens = report?.generatedTokenIDs.count ?? 0
                 apiRequestPhase = "Klar · \(apiGeneratedTokens) genererade token"

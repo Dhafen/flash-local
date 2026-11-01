@@ -283,4 +283,25 @@ final class FlintStreamTests: XCTestCase {
         XCTAssertTrue(FlintPrefixPolicy.requiresReset(cached: [1, 2, 3], prompt: [1, 2]))
         XCTAssertTrue(FlintPrefixPolicy.requiresReset(cached: [1, 2, 3], prompt: [1, 9, 3]))
     }
+    func testChatStreamRequiresOneTerminalCompletionEvent() throws {
+        let usage = LocalCompletionUsage(promptTokens: 1, completionTokens: 1,
+            reasoningTokens: 0, forcedTokens: 0, finishReason: "stop")
+        var completion = FlintEventCompletion()
+        XCTAssertThrowsError(try completion.requireCompletion()) {
+            XCTAssertEqual($0 as? FlintEventCompletion.Failure, .missingCompletion)
+        }
+        try completion.observe(.delta(content: "hello", reasoning: ""))
+        XCTAssertThrowsError(try completion.requireCompletion())
+        try completion.observe(.complete(usage))
+        XCTAssertTrue(completion.completed)
+        XCTAssertNoThrow(try completion.requireCompletion())
+        XCTAssertThrowsError(try completion.observe(.delta(content: "late", reasoning: ""))) {
+            XCTAssertEqual($0 as? FlintEventCompletion.Failure, .eventAfterCompletion)
+        }
+        var duplicate = FlintEventCompletion()
+        try duplicate.observe(.complete(usage))
+        XCTAssertThrowsError(try duplicate.observe(.complete(usage))) {
+            XCTAssertEqual($0 as? FlintEventCompletion.Failure, .eventAfterCompletion)
+        }
+    }
 }
