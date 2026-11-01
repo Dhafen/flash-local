@@ -8,6 +8,10 @@ public struct FlintGenerationReport: Codable, Sendable {
     public let modelSHA256, nativeRevision: String
     public let contextTokens: Int
     public let evaluationBatch, physicalBatch, cpuThreads: Int
+    /// Captured from the loaded configuration; unlike live UI preferences this cannot drift after a run.
+    public var expertCacheSlots: Int? = nil
+    /// Whether the existing experimental read-ahead switch was requested.
+    public var expertReadAheadRequested: Bool? = nil
     /// Actual admitted mode and observed attention, absent in older reports.
     public let servingMode: FlintServingMode?
     public let f32KV, flashAttentionActive: Bool?
