@@ -3,7 +3,11 @@
 // modifies routing: the pinned llama.cpp slot bank remains authoritative.
 // Apple F_RDADVISE asks the kernel to warm the file cache; it is not proof of
 // physical NAND I/O. The caller owns the verified descriptor until join().
+#include <algorithm>
 #include <array>
+#include <climits>
+#include <cstdlib>
+#include <utility>
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
