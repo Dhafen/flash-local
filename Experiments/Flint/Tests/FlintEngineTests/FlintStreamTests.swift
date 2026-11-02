@@ -373,6 +373,8 @@ final class FlintStreamTests: XCTestCase {
         XCTAssertFalse(report(decode: 0).isComparableDecodeBenchmark)
         XCTAssertFalse(report(decode: .nan).isComparableDecodeBenchmark)
         XCTAssertFalse(report(decode: .infinity).isComparableDecodeBenchmark)
+        XCTAssertFalse(report(decode: .leastNonzeroMagnitude).isComparableDecodeBenchmark)
+        XCTAssertNil(report(decode: .leastNonzeroMagnitude).decodeTokensPerSecond)
         XCTAssertFalse(report(prefill: -.infinity).isComparableDecodeBenchmark)
         XCTAssertFalse(report(elapsed: 0).isComparableDecodeBenchmark)
         XCTAssertFalse(report(reused: 1001).isComparableDecodeBenchmark)
