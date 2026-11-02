@@ -20,8 +20,10 @@ on:
 permissions:
   contents: read
 concurrency:
+  # New commits must not terminate an already-running iPhone compile.
+  # The ref group serializes expensive macOS jobs rather than killing them.
   group: flint-ios-integration-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 defaults:
   run:
     shell: bash
