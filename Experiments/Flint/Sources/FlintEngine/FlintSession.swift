@@ -238,10 +238,12 @@ public actor FlintSession {
 
     public func unload() {
         cancellation.cancel(); native = nil; artifact = nil; stateTokens.removeAll(); lastLogits = nil; hasCurrentLogits = false; numericalAdmission = false; activeServingMode = nil
+        generationReport = nil
     }
     public func resetConversation() throws {
         guard activeRequest == nil else { throw LocalAPIError(status: 429, message: "Stop the current Flint request before clearing its context") }
         try resetKV()
+        generationReport = nil
         cancellation.begin(ceiling: activeCeiling)
     }
     private func resetKV() throws {
@@ -380,6 +382,9 @@ extension FlintSession {
                 try produce(request, started: started, progress: progress, continuation: pair.continuation)
                 lease.finish(); pair.continuation.finish()
             } catch {
+                // A failed, cancelled or backpressured stream must never
+                // leave a publishable report, even if native decode finished.
+                generationReport = nil
                 try? resetKV()
                 lease.finish(); pair.continuation.finish(throwing: error)
             }
@@ -446,7 +451,7 @@ extension FlintSession {
             peakMemoryBytes: observation.peak, thermalStateAtStart: thermal, maximumThermalState: observation.thermal,
             platform: Self.platform, appBuild: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String,
             nativeRevision: Self.nativeRevision, memoryBudgetBytes: activeCeiling, timeToFirstTokenSeconds: firstToken)
-        generationReport = .init(modelSHA256: FlintArtifact.manifest.sha256, nativeRevision: Self.nativeRevision,
+        var finishedReport = FlintGenerationReport(modelSHA256: FlintArtifact.manifest.sha256, nativeRevision: Self.nativeRevision,
             contextTokens: configuration.contextTokens, evaluationBatch: configuration.evaluationBatch,
             physicalBatch: configuration.physicalBatch, cpuThreads: configuration.cpuThreads,
             servingMode: activeServingMode, f32KV: configuration.conservativeMetal, flashAttentionActive: final.flashAttentionActive,
@@ -458,16 +463,21 @@ extension FlintSession {
             elapsedSeconds: elapsed, timeToFirstTokenSeconds: firstToken, maximumObservedFootprintBytes: observation.peak,
             explicitExpertBytesRead: final.expertIOBytes - initial.expertIOBytes, maximumThermalState: observation.thermal,
             finishReason: finish)
-        generationReport?.expertCacheSlots = configuration.expertCacheSlots
-        generationReport?.expertReadAheadRequested = configuration.expertCacheSlots > 0
-        generationReport?.advisoryRequests = final.adviceRequests - initial.adviceRequests
-        generationReport?.advisoryAccepted = final.adviceAccepted - initial.adviceAccepted
-        generationReport?.advisoryDuplicates = final.adviceDuplicates - initial.adviceDuplicates
-        generationReport?.advisoryDrops = final.adviceDrops - initial.adviceDrops
-        generationReport?.advisoryBytes = final.adviceBytes - initial.adviceBytes
-        generationReport?.advisoryFailures = final.adviceFailures - initial.adviceFailures
+        finishedReport.expertCacheSlots = configuration.expertCacheSlots
+        finishedReport.expertReadAheadRequested = configuration.expertCacheSlots > 0
+        finishedReport.advisoryRequests = final.adviceRequests - initial.adviceRequests
+        finishedReport.advisoryAccepted = final.adviceAccepted - initial.adviceAccepted
+        finishedReport.advisoryDuplicates = final.adviceDuplicates - initial.adviceDuplicates
+        finishedReport.advisoryDrops = final.adviceDrops - initial.adviceDrops
+        finishedReport.advisoryBytes = final.adviceBytes - initial.adviceBytes
+        finishedReport.advisoryFailures = final.adviceFailures - initial.adviceFailures
+        try Task.checkCancellation()
         try emit(.complete(.init(promptTokens: prompt.count, completionTokens: generated.count, reasoningTokens: reasoningTokens,
             forcedTokens: 0, finishReason: finish, metrics: metrics)))
+        try Task.checkCancellation()
+        // Publish only after the terminal event was accepted. The consumer
+        // independently validates EOF and cancellation before using it.
+        generationReport = finishedReport
     }
     private static var platform: String {
         #if targetEnvironment(simulator)
