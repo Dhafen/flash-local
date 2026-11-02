@@ -42,7 +42,7 @@ struct REAMRootView: View {
 
     var body: some View {
         NavigationStack {
-            #if canImport(FlintEngine) && canImport(OrnithLES)
+            #if canImport(OrnithLES)
             VStack(spacing: 12) {
                 HStack(spacing: 12) {
                     Picker("Aktiv modell", selection: Binding(
@@ -96,7 +96,7 @@ struct REAMRootView: View {
         }
         // Restore only the selected page. Model files are never downloaded or
         // loaded automatically merely because a preference was restored.
-        #if canImport(FlintEngine) && canImport(OrnithLES)
+        #if canImport(OrnithLES)
         .task {
             if activeRunner == .ream { model.activateForChatModel(.ream) }
         }
@@ -118,7 +118,7 @@ struct REAMRootView: View {
         #endif
     }
 
-    #if canImport(FlintEngine) && canImport(OrnithLES)
+    #if canImport(OrnithLES)
     @MainActor
     private func selectRunner(_ target: Runner) {
         guard !model.isSwitchingInferenceModel, target != activeRunner else { return }
