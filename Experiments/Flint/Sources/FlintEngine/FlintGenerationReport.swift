@@ -45,10 +45,12 @@ public struct FlintGenerationReport: Codable, Sendable {
         decodeForwardSeconds.isFinite && decodeForwardSeconds > 0 &&
         prefillSeconds.isFinite && prefillSeconds >= 0 &&
         elapsedSeconds.isFinite && elapsedSeconds > 0 &&
-        (0...promptTokenIDs.count).contains(reusedPromptTokens)
+        (0...promptTokenIDs.count).contains(reusedPromptTokens) &&
+        decodeTokensPerSecond != nil
     }
     public var decodeTokensPerSecond: Double? {
-        decodeForwardSeconds.isFinite && decodeForwardSeconds > 0 ?
-            Double(generatedTokenIDs.count) / decodeForwardSeconds : nil
+        guard decodeForwardSeconds.isFinite && decodeForwardSeconds > 0 else { return nil }
+        let rate = Double(generatedTokenIDs.count) / decodeForwardSeconds
+        return rate.isFinite ? rate : nil
     }
 }
