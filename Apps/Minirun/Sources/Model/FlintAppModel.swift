@@ -43,6 +43,17 @@ struct FlintAPIStartupLease {
     }
 }
 
+/// Native startup can return after the foreground request was cancelled.
+/// Reject that late result and cancel its producer before consuming events.
+struct FlintForegroundStart {
+    static func requireActive(cancel: () -> Void) throws {
+        guard !Task.isCancelled else {
+            cancel()
+            throw CancellationError()
+        }
+    }
+}
+
 private actor FlintFileStore {
     private var verified: VerifiedGGUFArtifact?
     func artifact(root: URL, gate: FlintAppGate) throws -> VerifiedGGUFArtifact {
@@ -350,7 +361,9 @@ final class FlintAppModel {
                     let source = try await session.start(request) { [weak self] done, total in
                         Task { @MainActor in guard let self, self.operationID == id else { return }; self.status = "Läser prompt: \(done)/\(total) token" }
                     }
+                    try FlintForegroundStart.requireActive(cancel: source.cancel)
                     activeGeneration = source
+                    defer { source.cancel() }
                     var completion = FlintEventCompletion()
                     for try await event in source.events {
                         try completion.observe(event)
@@ -398,7 +411,9 @@ final class FlintAppModel {
                 let source = try await session.start(request) { [weak self] done, total in
                     Task { @MainActor in guard let self, self.operationID == id else { return }; self.status = "Benchmark · prompt \(done)/\(total)" }
                 }
+                try FlintForegroundStart.requireActive(cancel: source.cancel)
                 activeGeneration = source
+                defer { source.cancel() }
                 var completion = FlintEventCompletion()
                 for try await event in source.events {
                     try completion.observe(event)
