@@ -313,19 +313,22 @@ final class FlintAppModel {
                     Task { @MainActor in guard let self, self.operationID == id else { return }; self.status = "Benchmark · prompt \(done)/\(total)" }
                 }
                 activeGeneration = source
-                var completed = false
+                var completion = FlintEventCompletion()
                 for try await event in source.events {
-                    if case .complete = event {
-                        completed = true
-                        report = await session.lastReport()
-                    }
+                    try completion.observe(event)
                 }
-                if !completed {
-                    status = "Benchmark avbröts utan sluthändelse · ingen giltig mätning"
-                } else {
-                    status = (report?.generatedTokenIDs.count ?? 0) >= 128 ? "Benchmark klar · minst 128 genererade token" :
-                        "Körningen tog slut före 128 token · inte ett jämförbart decode-benchmark"
+                // Do not publish measurements until the entire stream has
+                // ended with exactly one terminal event. Late events or an
+                // incomplete stream invalidate this run, not just its status.
+                try completion.requireCompletion()
+                try Task.checkCancellation()
+                report = await session.lastReport()
+                guard let report else {
+                    status = "Benchmark saknar genereringsrapport · ingen giltig mätning"
+                    return
                 }
+                status = report.generatedTokenIDs.count >= 128 ? "Benchmark klar · minst 128 genererade token" :
+                    "Körningen tog slut före 128 token · inte ett jämförbart decode-benchmark"
             } catch { self.error = error.localizedDescription; status = "Benchmark stoppades." }
         }
     }
@@ -389,21 +392,32 @@ final class FlintAppModel {
             defer { activeGeneration = nil; apiOperation = nil; end(id) }
             do {
                 var completion = FlintEventCompletion()
+                var terminal: LocalChatEvent?
                 for try await event in source.events {
                     try completion.observe(event)
                     switch event {
                     case .delta:
                         apiRequestPhase = "Genererar svar…"
+                        switch pair.continuation.yield(event) {
+                        case .enqueued: break
+                        case .dropped, .terminated: source.cancel(); throw CancellationError()
+                        @unknown default: source.cancel(); throw CancellationError()
+                        }
                     case .complete:
-                        break
-                    }
-                    switch pair.continuation.yield(event) {
-                    case .enqueued: break
-                    case .dropped, .terminated: source.cancel(); throw CancellationError()
-                    @unknown default: source.cancel(); throw CancellationError()
+                        // Do not expose success to the LAN client until the
+                        // upstream stream has really ended. A later error or
+                        // duplicate completion must fail closed.
+                        terminal = event
                     }
                 }
                 try completion.requireCompletion()
+                try Task.checkCancellation()
+                guard let terminal else { throw FlintEventCompletion.Failure.missingCompletion }
+                switch pair.continuation.yield(terminal) {
+                case .enqueued: break
+                case .dropped, .terminated: source.cancel(); throw CancellationError()
+                @unknown default: source.cancel(); throw CancellationError()
+                }
                 report = await session.lastReport()
                 apiGeneratedTokens = report?.generatedTokenIDs.count ?? 0
                 apiRequestPhase = "Klar · \(apiGeneratedTokens) genererade token"
