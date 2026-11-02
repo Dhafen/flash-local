@@ -255,7 +255,13 @@ public actor FlintSession {
     }
     private func resetKV() throws {
         let owner = try self.owner()
-        guard flf_reset(owner.pointer) == 0 else { throw failure() }
+        guard flf_reset(owner.pointer) == 0 else {
+            // A failed native reset leaves the KV state unknown. Never admit
+            // another request on this handle, even if the caller recovers.
+            let error = failure()
+            unload()
+            throw error
+        }
         stateTokens.removeAll(); lastLogits = nil; hasCurrentLogits = false
     }
     public func metrics() throws -> FlintMetrics { .init(flf_snapshot(try owner().pointer)) }
@@ -315,8 +321,13 @@ public actor FlintSession {
         }
         guard status == 0 else {
             let error = failure()
-            _ = flf_reset(owner.pointer)
-            stateTokens.removeAll(); lastLogits = nil; hasCurrentLogits = false
+            if flf_reset(owner.pointer) != 0 {
+                // A failed evaluation followed by a failed reset cannot
+                // safely reuse this native context for later generation.
+                unload()
+            } else {
+                stateTokens.removeAll(); lastLogits = nil; hasCurrentLogits = false
+            }
             throw error
         }
         try artifact?.assertUnchanged()
