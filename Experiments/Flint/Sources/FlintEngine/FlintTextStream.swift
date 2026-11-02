@@ -81,4 +81,11 @@ public struct FlintEventCompletion: Sendable {
     public func requireCompletion() throws {
         guard completed else { throw Failure.missingCompletion }
     }
+
+    /// A terminal event cannot turn a cancelled chat or API request into a
+    /// successful response, even if cancellation races with stream EOF.
+    public func requireSuccessfulEnd() throws {
+        try requireCompletion()
+        try Task.checkCancellation()
+    }
 }
