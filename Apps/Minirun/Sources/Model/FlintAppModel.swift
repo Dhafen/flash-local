@@ -43,6 +43,19 @@ private actor FlintFileStore {
         verified = try await GGUFModelTransfer().download(insideRoot: root, source: source,
             cancellationRequested: { gate.cancelled() }, onProgress: progress)
     }
+    /// Explicitly confirmed recovery only. Never remove the resumable .partial
+    /// download, a symlink, or anything other than this manifest's installed file.
+    func discardInstalled(root: URL) throws {
+        try LocalModelStorage.prepare(root: root)
+        let url = root.appendingPathComponent(FlintArtifact.manifest.fileName)
+        let values = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+        guard values.isRegularFile == true, values.isSymbolicLink != true else {
+            throw FlintFailure.invalid("Flint-modellfilen är inte en vanlig fil och kan inte tas bort automatiskt")
+        }
+        // Release the verification descriptor before deleting its pathname.
+        verified = nil
+        try FileManager.default.removeItem(at: url)
+    }
 }
 
 struct FlintChatTurn: Codable, Identifiable {
@@ -156,6 +169,21 @@ final class FlintAppModel {
         guard operationID == id else { return }
         operationID = nil; operation = nil; isBusy = false; fraction = nil; loadingStartedAt = nil
         gate.setAvailable(sceneIsActive && ready)
+    }
+    /// Called only after the destructive confirmation in FlintModelControls.
+    /// A corrupt installed GGUF otherwise blocks the resumable downloader:
+    /// GGUFModelTransfer intentionally refuses to overwrite installed files.
+    func removeInstalledModel() async {
+        guard canStart, !ready, !apiListening, apiServer == nil, hasModel else { return }
+        let id = begin("Tar bort installerad Flint-modellfil…")
+        defer { end(id); refreshFile() }
+        do {
+            try await files.discardInstalled(root: modelsRoot)
+            status = "Modellfilen borttagen. Du kan hämta Flint igen; pågående .partial-filer behålls."
+        } catch {
+            self.error = error.localizedDescription
+            status = "Modellfilen kunde inte tas bort."
+        }
     }
     func download() {
         guard canStart, !hasModel else { return }
