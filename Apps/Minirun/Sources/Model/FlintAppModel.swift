@@ -275,6 +275,10 @@ final class FlintAppModel {
     }
     func stop() {
         gate.cancel()
+        // Stop can be tapped while session.start is suspended, before an API
+        // forwarding task exists. Invalidate that pending admission so a
+        // late native result cannot resume a stopped request.
+        _ = apiStartup.invalidate()
         session.cancel()
         activeGeneration?.cancel()
         operation?.cancel()
