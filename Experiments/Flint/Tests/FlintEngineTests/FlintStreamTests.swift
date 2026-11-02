@@ -283,6 +283,32 @@ final class FlintStreamTests: XCTestCase {
         XCTAssertTrue(FlintPrefixPolicy.requiresReset(cached: [1, 2, 3], prompt: [1, 2]))
         XCTAssertTrue(FlintPrefixPolicy.requiresReset(cached: [1, 2, 3], prompt: [1, 9, 3]))
     }
+    func testConsumerCancellationBlocksTerminalReportPublication() throws {
+        let control = FlintCancellation()
+        control.begin(ceiling: 5_500_000_000)
+        let lease = FlintRequestLease(control)
+        XCTAssertNoThrow(try control.checkCancellation())
+        // The producer Task itself need not be cancelled: a disconnected
+        // stream consumer cancels only the shared native request lease.
+        lease.cancel()
+        XCTAssertThrowsError(try control.checkCancellation()) { error in
+            XCTAssertTrue(error is CancellationError)
+        }
+        lease.finish()
+        // The next request resets the shared control. A late cancellation
+        // from the finished lease must not poison that next request.
+        control.begin(ceiling: 5_500_000_000)
+        lease.cancel()
+        XCTAssertNoThrow(try control.checkCancellation())
+    }
+    func testCancellationControlCanResetOnlyAtNewRequest() throws {
+        let control = FlintCancellation()
+        control.begin(ceiling: 5_500_000_000)
+        control.cancel()
+        XCTAssertThrowsError(try control.checkCancellation())
+        control.begin(ceiling: 5_500_000_000)
+        XCTAssertNoThrow(try control.checkCancellation())
+    }
     func testCancelledStreamCannotPublishCompletion() async throws {
         let usage = LocalCompletionUsage(promptTokens: 1, completionTokens: 1,
             reasoningTokens: 0, forcedTokens: 0, finishReason: "stop")
