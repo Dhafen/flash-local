@@ -26,6 +26,40 @@ final class FlintRenderTests: XCTestCase {
         XCTAssertTrue(model.canStart, "Foregrounding restores permission to load a model")
         XCTAssertFalse(model.canSend, "Foregrounding must not fabricate a loaded model")
     }
+    func testExplicitModelRemovalPreservesPartialDownloadAndChatState() async throws {
+        let fm = FileManager.default
+        let directory = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? fm.removeItem(at: directory) }
+        let root = directory.appendingPathComponent("Models")
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        let installed = root.appendingPathComponent(FlintArtifact.manifest.fileName)
+        let partial = root.appendingPathComponent(FlintArtifact.manifest.fileName + ".partial")
+        try Data("invalid model bytes".utf8).write(to: installed)
+        try Data("resume bytes".utf8).write(to: partial)
+        let model = FlintAppModel(modelsRoot: root, privateRoot: directory.appendingPathComponent("State"),
+            documents: directory.appendingPathComponent("Documents"))
+        XCTAssertTrue(model.hasModel)
+        await model.removeInstalledModel()
+        XCTAssertFalse(model.hasModel, "An explicitly confirmed recovery must unblock re-download")
+        XCTAssertFalse(fm.fileExists(atPath: installed.path))
+        XCTAssertEqual(try Data(contentsOf: partial), Data("resume bytes".utf8),
+                       "Never delete a resumable partial transfer")
+    }
+    func testBackgroundCannotRemoveInstalledModel() async throws {
+        let fm = FileManager.default
+        let directory = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? fm.removeItem(at: directory) }
+        let root = directory.appendingPathComponent("Models")
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        let installed = root.appendingPathComponent(FlintArtifact.manifest.fileName)
+        try Data("keep".utf8).write(to: installed)
+        let model = FlintAppModel(modelsRoot: root, privateRoot: directory.appendingPathComponent("State"),
+            documents: directory.appendingPathComponent("Documents"))
+        model.setActive(false)
+        await model.removeInstalledModel()
+        XCTAssertTrue(fm.fileExists(atPath: installed.path))
+        XCTAssertTrue(model.hasModel)
+    }
     func testLegacyUnsupportedPreferencesDoNotBlockModelLoading() {
         let defaults = UserDefaults.standard
         let contextKey = "FlashLocal.Flint.Context.v1"
