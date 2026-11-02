@@ -24,6 +24,7 @@ concurrency:
   # The ref group serializes expensive macOS jobs rather than killing them.
   group: flint-ios-integration-${{ github.ref }}
   cancel-in-progress: false
+  queue: max
 defaults:
   run:
     shell: bash
