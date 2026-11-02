@@ -270,6 +270,11 @@ int main(int argc, char ** argv) {
         require(flf_snapshot(c).expert_bank_bytes > baseline_bank,
             "Expanded expert bank did not allocate additional resident slots");
         const auto expanded_capture = capture_small(c, true);
+        // True top-6 routing from the diagnostic graph must reach the bounded
+        // asynchronous worker. This does NOT imply production acceleration.
+        const auto advice = flf_snapshot(c);
+        require(advice.advice_requests > 0 && advice.advice_accepted > 0,
+            "Actual traced expert routing never reached the advisory queue");
         require(expanded_capture.routes == exact.routes && expanded_capture.logits == exact.logits,
             "Expanded expert bank changed the exact CPU routing or logits");
         flf_close(c); c = nullptr;

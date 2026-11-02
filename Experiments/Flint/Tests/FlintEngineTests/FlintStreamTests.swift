@@ -283,4 +283,131 @@ final class FlintStreamTests: XCTestCase {
         XCTAssertTrue(FlintPrefixPolicy.requiresReset(cached: [1, 2, 3], prompt: [1, 2]))
         XCTAssertTrue(FlintPrefixPolicy.requiresReset(cached: [1, 2, 3], prompt: [1, 9, 3]))
     }
+    func testConsumerCancellationBlocksTerminalReportPublication() throws {
+        let control = FlintCancellation()
+        control.begin(ceiling: 5_500_000_000)
+        let lease = FlintRequestLease(control)
+        XCTAssertNoThrow(try control.checkCancellation())
+        // The producer Task itself need not be cancelled: a disconnected
+        // stream consumer cancels only the shared native request lease.
+        lease.cancel()
+        XCTAssertThrowsError(try control.checkCancellation()) { error in
+            XCTAssertTrue(error is CancellationError)
+        }
+        lease.finish()
+        // The next request resets the shared control. A late cancellation
+        // from the finished lease must not poison that next request.
+        control.begin(ceiling: 5_500_000_000)
+        lease.cancel()
+        XCTAssertNoThrow(try control.checkCancellation())
+    }
+    func testCancellationControlCanResetOnlyAtNewRequest() throws {
+        let control = FlintCancellation()
+        control.begin(ceiling: 5_500_000_000)
+        control.cancel()
+        XCTAssertThrowsError(try control.checkCancellation())
+        control.begin(ceiling: 5_500_000_000)
+        XCTAssertNoThrow(try control.checkCancellation())
+    }
+    func testCancelledCallerIsRejectedBeforeNativeStreamAdmission() async throws {
+        let capabilities = LocalModelCapabilities(family: .flint)
+        let request = try LocalChatRequest(data: JSONSerialization.data(withJSONObject: [
+            "model": capabilities.modelID,
+            "messages": [["role": "user", "content": "test"]]
+        ]), capabilities: capabilities)
+        let session = FlintSession()
+        let rejected = await Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            do {
+                _ = try await session.start(request)
+                return false
+            } catch is CancellationError {
+                return true
+            } catch {
+                // A cancelled request must be rejected *before* touching the
+                // unloaded native owner or any other admission state.
+                return false
+            }
+        }.value
+        XCTAssertTrue(rejected)
+    }
+
+    func testCancelledStreamCannotPublishCompletion() async throws {
+        let usage = LocalCompletionUsage(promptTokens: 1, completionTokens: 1,
+            reasoningTokens: 0, forcedTokens: 0, finishReason: "stop")
+        let task = Task {
+            var completion = FlintEventCompletion()
+            try completion.observe(.complete(usage))
+            // Simulate cancellation after the terminal event but before the
+            // UI/API publishes a successful response.
+            withUnsafeCurrentTask { $0?.cancel() }
+            try completion.requireSuccessfulEnd()
+        }
+        do {
+            try await task.value
+            XCTFail("A cancelled stream must never be published as complete")
+        } catch is CancellationError {
+            // Expected: cancellation wins even after the terminal event.
+        }
+    }
+
+    func testChatStreamRequiresOneTerminalCompletionEvent() throws {
+        let usage = LocalCompletionUsage(promptTokens: 1, completionTokens: 1,
+            reasoningTokens: 0, forcedTokens: 0, finishReason: "stop")
+        var completion = FlintEventCompletion()
+        XCTAssertThrowsError(try completion.requireCompletion()) {
+            XCTAssertEqual($0 as? FlintEventCompletion.Failure, .missingCompletion)
+        }
+        try completion.observe(.delta(content: "hello", reasoning: ""))
+        XCTAssertThrowsError(try completion.requireCompletion())
+        try completion.observe(.complete(usage))
+        XCTAssertTrue(completion.completed)
+        XCTAssertNoThrow(try completion.requireCompletion())
+        XCTAssertThrowsError(try completion.observe(.delta(content: "late", reasoning: ""))) {
+            XCTAssertEqual($0 as? FlintEventCompletion.Failure, .eventAfterCompletion)
+        }
+        var duplicate = FlintEventCompletion()
+        try duplicate.observe(.complete(usage))
+        XCTAssertThrowsError(try duplicate.observe(.complete(usage))) {
+            XCTAssertEqual($0 as? FlintEventCompletion.Failure, .eventAfterCompletion)
+        }
+    }
+
+    func testDecodeBenchmarkPublicationRejectsShortOrInvalidMeasurements() {
+        func report(prompt: Int = 1000, generated: Int = 128, decode: Double = 2,
+                    reused: Int = 0, prefill: Double = 1, elapsed: Double = 4,
+                    ttft: Double? = nil) -> FlintGenerationReport {
+            FlintGenerationReport(modelSHA256: "test", nativeRevision: "test", contextTokens: 8192,
+                evaluationBatch: 128, physicalBatch: 4, cpuThreads: 4,
+                servingMode: nil, f32KV: nil, flashAttentionActive: nil,
+                processMemoryBudgetBytes: 5_500_000_000, platform: "test",
+                operatingSystem: "test", sourceRevision: "test", appBuild: nil, timestamp: Date(),
+                promptTokenIDs: Array(repeating: 1, count: prompt),
+                generatedTokenIDs: Array(repeating: 2, count: generated),
+                reusedPromptTokens: reused, prefillSeconds: prefill,
+                decodeForwardSeconds: decode, elapsedSeconds: elapsed,
+                timeToFirstTokenSeconds: ttft, maximumObservedFootprintBytes: 0,
+                explicitExpertBytesRead: 0, maximumThermalState: 0, finishReason: "length")
+        }
+        XCTAssertTrue(report().isComparableDecodeBenchmark)
+        XCTAssertTrue(report(prompt: 4000).isComparableDecodeBenchmark)
+        XCTAssertTrue(report(prompt: 10000).isComparableDecodeBenchmark)
+        XCTAssertFalse(report(generated: 127).isComparableDecodeBenchmark)
+        XCTAssertFalse(report(prompt: 999).isComparableDecodeBenchmark)
+        XCTAssertFalse(report(decode: 0).isComparableDecodeBenchmark)
+        XCTAssertFalse(report(decode: .nan).isComparableDecodeBenchmark)
+        XCTAssertFalse(report(decode: .infinity).isComparableDecodeBenchmark)
+        XCTAssertFalse(report(decode: .leastNonzeroMagnitude).isComparableDecodeBenchmark)
+        XCTAssertNil(report(decode: .leastNonzeroMagnitude).decodeTokensPerSecond)
+        XCTAssertFalse(report(prefill: -.infinity).isComparableDecodeBenchmark)
+        XCTAssertFalse(report(elapsed: 0).isComparableDecodeBenchmark)
+        XCTAssertTrue(report(ttft: 0.3).isComparableDecodeBenchmark)
+        XCTAssertFalse(report(ttft: .nan).isComparableDecodeBenchmark)
+        XCTAssertFalse(report(ttft: .infinity).isComparableDecodeBenchmark)
+        XCTAssertFalse(report(ttft: -0.1).isComparableDecodeBenchmark)
+        XCTAssertFalse(report(ttft: 5).isComparableDecodeBenchmark)
+        XCTAssertFalse(report(reused: 1001).isComparableDecodeBenchmark)
+        XCTAssertNil(report(decode: .nan).decodeTokensPerSecond)
+        XCTAssertEqual(report().decodeTokensPerSecond, 64)
+    }
 }

@@ -12,6 +12,129 @@ import AppKit
 /// Actual native control captures. Empty model storage; no inference or fake metrics.
 @MainActor
 final class FlintRenderTests: XCTestCase {
+    func testCancelledForegroundStartupCancelsLateGenerationBeforeStreaming() async {
+        // A native actor may return after Stop cancelled the awaiting UI task.
+        // That late generation must be cancelled without consuming its stream.
+        let cancelledProducer = await Task { @MainActor in
+            var cancelledProducer = false
+            withUnsafeCurrentTask { $0?.cancel() }
+            do {
+                try FlintForegroundStart.requireActive { cancelledProducer = true }
+            } catch is CancellationError {
+                return cancelledProducer
+            } catch {
+                return false
+            }
+            return false
+        }.value
+        XCTAssertTrue(cancelledProducer)
+        XCTAssertNoThrow(try FlintForegroundStart.requireActive {
+            XCTFail("A live foreground request must not cancel its producer")
+        })
+    }
+
+    func testStoppedAPIListenerCannotSubmitWorkThroughReplacementListener() {
+        let original = UUID(), replacement = UUID()
+        XCTAssertTrue(FlintAPIListenerIdentity.accepts(original, active: original))
+        XCTAssertFalse(FlintAPIListenerIdentity.accepts(original, active: nil),
+                       "A queued request from a stopped listener must be rejected")
+        XCTAssertFalse(FlintAPIListenerIdentity.accepts(original, active: replacement),
+                       "A new listener must not adopt an old listener's queued request")
+        XCTAssertTrue(FlintAPIListenerIdentity.accepts(replacement, active: replacement))
+    }
+
+    func testStoppingAPIInvalidatesPendingNativeStartupWithoutPoisoningNextRequest() {
+        var startup = FlintAPIStartupLease()
+        let first = UUID(), second = UUID()
+        startup.begin(first)
+        XCTAssertEqual(startup.pending, first)
+        XCTAssertTrue(startup.invalidate(), "Stopping the listener must cancel an in-flight native admission")
+        XCTAssertNil(startup.pending)
+        XCTAssertFalse(startup.accept(first), "A late session.start result cannot reopen the stopped API")
+        startup.begin(second)
+        XCTAssertFalse(startup.accept(first), "A late result must not claim the next request")
+        XCTAssertTrue(startup.accept(second))
+        XCTAssertNil(startup.pending)
+        XCTAssertFalse(startup.invalidate(), "A finished startup must not cancel unrelated chat work")
+    }
+    func testBackgroundSceneDisablesFlintChatAndLANAdmission() {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let model = FlintAppModel(modelsRoot: directory.appendingPathComponent("Models"),
+            privateRoot: directory.appendingPathComponent("State"),
+            documents: directory.appendingPathComponent("Documents"))
+        XCTAssertTrue(model.canStart)
+        XCTAssertFalse(model.canSend, "No model has been loaded")
+        model.setActive(false)
+        XCTAssertFalse(model.canStart, "Backgrounded scenes cannot start Flint operations")
+        XCTAssertFalse(model.canSend)
+        model.setActive(true)
+        XCTAssertTrue(model.canStart, "Foregrounding restores permission to load a model")
+        XCTAssertFalse(model.canSend, "Foregrounding must not fabricate a loaded model")
+    }
+    func testExplicitModelRemovalPreservesPartialDownloadAndChatState() async throws {
+        let fm = FileManager.default
+        let directory = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? fm.removeItem(at: directory) }
+        let root = directory.appendingPathComponent("Models")
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        let installed = root.appendingPathComponent(FlintArtifact.manifest.fileName)
+        let partial = root.appendingPathComponent(FlintArtifact.manifest.fileName + ".partial")
+        try Data("invalid model bytes".utf8).write(to: installed)
+        try Data("resume bytes".utf8).write(to: partial)
+        let model = FlintAppModel(modelsRoot: root, privateRoot: directory.appendingPathComponent("State"),
+            documents: directory.appendingPathComponent("Documents"))
+        XCTAssertTrue(model.hasModel)
+        await model.removeInstalledModel()
+        XCTAssertFalse(model.hasModel, "An explicitly confirmed recovery must unblock re-download")
+        XCTAssertFalse(fm.fileExists(atPath: installed.path))
+        XCTAssertEqual(try Data(contentsOf: partial), Data("resume bytes".utf8),
+                       "Never delete a resumable partial transfer")
+    }
+    func testBackgroundCannotRemoveInstalledModel() async throws {
+        let fm = FileManager.default
+        let directory = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? fm.removeItem(at: directory) }
+        let root = directory.appendingPathComponent("Models")
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        let installed = root.appendingPathComponent(FlintArtifact.manifest.fileName)
+        try Data("keep".utf8).write(to: installed)
+        let model = FlintAppModel(modelsRoot: root, privateRoot: directory.appendingPathComponent("State"),
+            documents: directory.appendingPathComponent("Documents"))
+        model.setActive(false)
+        await model.removeInstalledModel()
+        XCTAssertTrue(fm.fileExists(atPath: installed.path))
+        XCTAssertTrue(model.hasModel)
+    }
+    func testLegacyUnsupportedPreferencesDoNotBlockModelLoading() {
+        let defaults = UserDefaults.standard
+        let contextKey = "FlashLocal.Flint.Context.v1"
+        let cacheKey = "FlashLocal.Flint.DecodeWindow.v1"
+        let previousContext = defaults.object(forKey: contextKey)
+        let previousCache = defaults.object(forKey: cacheKey)
+        defer {
+            if let previousContext { defaults.set(previousContext, forKey: contextKey) }
+            else { defaults.removeObject(forKey: contextKey) }
+            if let previousCache { defaults.set(previousCache, forKey: cacheKey) }
+            else { defaults.removeObject(forKey: cacheKey) }
+        }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        func model() -> FlintAppModel {
+            FlintAppModel(modelsRoot: root.appendingPathComponent("Models"),
+                privateRoot: root.appendingPathComponent("State"),
+                documents: root.appendingPathComponent("Documents"))
+        }
+        // An older version could persist these options even though the
+        // current UI has no way to select or clear them.
+        defaults.set(LocalContextProfile.test65K.rawValue, forKey: contextKey)
+        defaults.set(32, forKey: cacheKey)
+        let restored = model()
+        XCTAssertEqual(restored.contextProfile, .standard)
+        XCTAssertEqual(restored.decodeCacheWindow, 0)
+
+        // Valid context choices must still survive an app restart.
+        defaults.set(LocalContextProfile.test32K.rawValue, forKey: contextKey)
+        XCTAssertEqual(model().contextProfile, .test32K)
+    }
     func testUnloadedChatAPIAndMeasurementsInBothAppearances() throws {
         let keys = ["FlashLocal.Flint.System.v1", "FlashLocal.Flint.Context.v1", "FlashLocal.Flint.Options.v1"]
         let defaults = UserDefaults.standard

@@ -1679,3 +1679,55 @@ final class VerificationPhasePresentationTests: XCTestCase {
         XCTAssertNil(VerificationPhase.fileDigests.bytesChecked)
     }
 }
+
+/// A pasted repository link is navigation, not proof that its weights run.
+final class HuggingFaceRepositoryLinkTests: XCTestCase {
+    func testAcceptsCanonicalModelRepository() {
+        XCTAssertEqual(
+            RemoteModelBrowserPresentation.repositoryURL(
+                " https://huggingface.co/owner/model-name ")?.absoluteString,
+            "https://huggingface.co/owner/model-name")
+    }
+
+    func testRepositoryIDExtractedForCatalogLookup() {
+        let url = RemoteModelBrowserPresentation.repositoryURL(
+            "https://huggingface.co/owner/model-name/tree/main")!
+        XCTAssertEqual(RemoteModelBrowserPresentation.repositoryID(url), "owner/model-name")
+    }
+
+    func testDeepHuggingFaceLinksOpenOnlyValidatedRepositoryRoot() {
+        let pasted = [
+            "https://huggingface.co/owner/model-name/tree/main",
+            "https://huggingface.co/owner/model-name/resolve/main/weights.gguf",
+            "https://huggingface.co/owner/model-name/../../unrelated",
+            "https://huggingface.co/owner/model-name/%2e%2e/unrelated",
+        ]
+        for input in pasted {
+            let url = RemoteModelBrowserPresentation.repositoryURL(input)
+            XCTAssertEqual(url?.absoluteString, "https://huggingface.co/owner/model-name", input)
+            if let url {
+                XCTAssertEqual(RemoteModelBrowserPresentation.repositoryID(url), "owner/model-name")
+            }
+        }
+    }
+
+    func testRejectsUntrustedOrMalformedLocations() {
+        let invalid = [
+            "https://huggingface.co.evil.example/owner/model",
+            "http://huggingface.co/owner/model",
+            "https://other.example/owner/model",
+            "https://huggingface.co/owner",
+            "https://user:secret@huggingface.co/owner/model",
+            "https://huggingface.co:443/owner/model",
+            "https://huggingface.co/owner/model?token=secret",
+            "https://huggingface.co/owner/model#fragment",
+            "https://huggingface.co/../model",
+            "https://huggingface.co/owner/..",
+            "https://huggingface.co/owner/model%2Fother",
+            "https://huggingface.co/owner%20name/model",
+        ]
+        for input in invalid {
+            XCTAssertNil(RemoteModelBrowserPresentation.repositoryURL(input), input)
+        }
+    }
+}

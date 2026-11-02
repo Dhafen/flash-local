@@ -47,8 +47,10 @@ on:
         default: false
 
 concurrency:
-  group: ci-${{ github.ref }}${{ inputs.upload_private_testflight && '-delivery' || '' }}
-  cancel-in-progress: ${{ !inputs.upload_private_testflight }}
+  # Only the newest commit needs PR validation. Keep manual release/TestFlight
+  # dispatches isolated by run ID so a later commit can never cancel delivery.
+  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read

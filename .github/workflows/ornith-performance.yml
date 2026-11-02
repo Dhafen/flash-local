@@ -1,5 +1,12 @@
 name: Ornith Performance experiment
 on:
+  # Run QPACK by itself, without the CI dependency graph.
+  workflow_dispatch:
+    inputs:
+      use_macos15:
+        description: 'Use macos-15 with pinned Xcode 26.2'
+        type: boolean
+        default: true
   workflow_call:
     inputs:
       use_macos15:
@@ -14,9 +21,10 @@ on:
       - 'scripts/tests/test_ornith_mlx_metadata.py'
 permissions:
   contents: read
-concurrency:
-  group: ornith-performance-${{ github.ref }}
-  cancel-in-progress: true
+# No workflow-level concurrency: this reusable workflow is invoked by multiple
+# parent workflows on the same PR ref. Ref-scoped cancellation can cancel
+# another parent's job and turn a healthy CI run red. The caller owns
+# cancellation policy and job scheduling.
 defaults:
   run:
     shell: bash
@@ -25,6 +33,19 @@ jobs:
     runs-on: ${{ (github.event_name != 'workflow_dispatch' || inputs.use_macos15) && 'macos-15' || 'macos-26' }}
     timeout-minutes: 40
     steps:
+      - name: Record runner and run identity before validation
+        run: |
+          mkdir -p .work/qpack-diagnostics
+          {
+            echo "timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "run_id=$GITHUB_RUN_ID attempt=$GITHUB_RUN_ATTEMPT event=$GITHUB_EVENT_NAME"
+            echo "sha=$GITHUB_SHA ref=$GITHUB_REF job=$GITHUB_JOB"
+            echo "runner_os=$RUNNER_OS runner_arch=$RUNNER_ARCH"
+            uname -a
+            uptime
+            df -h .
+            xcode-select -p || true
+          } | tee .work/qpack-diagnostics/runner-start.txt
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
@@ -59,6 +80,7 @@ jobs:
         continue-on-error: true
         working-directory: .work/swiftlet-validation
         run: |
+          echo "QPACK core start $(date -u +%Y-%m-%dT%H:%M:%SZ)"
           xcodebuild -list -json > schemes.json
           scheme=$(python3 -c 'import json; d=json.load(open("schemes.json")); s=(d.get("workspace") or d.get("project"))["schemes"]; c=[x for x in s if x.lower().replace("-", "").startswith("swiftlet")]; p=[x for x in c if x.endswith("-Package")]; c=p or c; assert len(c)==1, s; print(c[0])')
           printf '%s\n' "$scheme" > scheme-used.txt
@@ -105,12 +127,23 @@ jobs:
           xcodebuild build -scheme OrnithPerformance -destination 'generic/platform=iOS Simulator' \
             -skipPackagePluginValidation -skipMacroValidation CODE_SIGNING_ALLOWED=NO \
             2>&1 | tee experiment-ios.log | tail -70
+      - name: Record final runner state
+        if: always()
+        run: |
+          mkdir -p .work/qpack-diagnostics
+          {
+            echo "timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "job_status=${{ job.status }}"
+            uptime
+            df -h .
+          } | tee .work/qpack-diagnostics/runner-end.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: ornith-performance-text
           include-hidden-files: true
           path: |
+            .work/qpack-diagnostics/*.txt
             .work/swiftlet-validation/swiftlet-tests.log
             .work/swiftlet-validation/SwiftletSessionTests.log
             .work/swiftlet-validation/TextGeneratorTests.log

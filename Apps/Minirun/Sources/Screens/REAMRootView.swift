@@ -1,7 +1,11 @@
 import MinirunKit
 import SwiftUI
+#if canImport(FlintEngine)
+import FlintEngine
+#endif
 #if os(iOS)
 import UIKit
+import SafariServices
 #endif
 
 struct REAMRootView: View {
@@ -21,25 +25,71 @@ struct REAMRootView: View {
     #if canImport(OrnithLES)
     private var lesModel: OrnithLESAppModel { model.ornithSession }
     #endif
+    #if canImport(FlintEngine) && canImport(OrnithLES)
+    private enum Runner: String, CaseIterable, Identifiable {
+        case ornith, ream, flint
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .ornith: "Ornith 1.5 · 35B-A3B"
+            case .ream: "Qwen3.8 · REAM"
+            case .flint: "Recursive Flint · 40B-A2.5B"
+            }
+        }
+    }
+    @State private var activeRunner: Runner =
+        Runner(rawValue: UserDefaults.standard.string(forKey: "FlashLocal.activeInferenceRunner") ?? "") ?? .ornith
+    #if os(iOS)
+    @State private var showingHuggingFace = false
+    #endif
+    #endif
+
     var body: some View {
         NavigationStack {
             #if canImport(FlintEngine) && canImport(OrnithLES)
             VStack(spacing: 12) {
-                HStack {
-                    Text(model.showsFlint ? "Flint · experiment" : "Ornith").font(.headline)
-                    Spacer()
-                    Button(model.showsFlint ? "Till Ornith" : "Prova Flint") {
-                        guard !model.isSwitchingInferenceModel else { return }
-                        model.isSwitchingInferenceModel = true
-                        Task {
-                            if model.showsFlint { await model.flintSession.shutdown() }
-                            else { await lesModel.shutdown() }
-                            model.showsFlint.toggle(); model.isSwitchingInferenceModel = false
+                HStack(spacing: 12) {
+                    Picker("Aktiv modell", selection: Binding(
+                        get: { activeRunner },
+                        set: { selectRunner($0) }
+                    )) {
+                        ForEach(Runner.allCases) { runner in
+                            Text(runner.title).tag(runner)
                         }
-                    }.disabled(model.isSwitchingInferenceModel)
-                }.padding(.horizontal)
-                if model.showsFlint { FlintView(model: model.flintSession) }
-                else { OrnithLESView(model: lesModel, existing: model.verifiedOrnithForAlternateRunner()) }
+                    }
+                    .pickerStyle(.menu)
+                    .disabled(model.isSwitchingInferenceModel)
+                    .accessibilityIdentifier("iphone-model-selector")
+                    Spacer(minLength: 4)
+                    #if os(iOS)
+                    Button("Hugging Face") { showingHuggingFace = true }
+                        .disabled(model.isSwitchingInferenceModel)
+                        .sheet(isPresented: $showingHuggingFace) {
+                            HuggingFaceGGUFBrowser().ignoresSafeArea()
+                        }
+                    #else
+                    Link("Hugging Face", destination: URL(string: "https://huggingface.co/models?library=gguf")!)
+                    #endif
+                }
+                .padding(.horizontal)
+                Text("Appen har tre fasta modellprofiler. Hugging Face-knappen låter dig utforska GGUF-modeller, men import av valfria GGUF-filer stöds ännu inte. MLX-import kräver en separat kompatibel motor.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal)
+                if model.isSwitchingInferenceModel {
+                    ProgressView("Frigör föregående modell…")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    switch activeRunner {
+                    case .flint:
+                        FlintView(model: model.flintSession)
+                    case .ream:
+                        REAMChatPage(model: model, discard: { confirmation = .discard })
+                            .navigationTitle("Qwen3.8 · REAM")
+                    case .ornith:
+                        OrnithLESView(model: lesModel, existing: model.verifiedOrnithForAlternateRunner())
+                    }
+                }
             }
             #else
             #if canImport(OrnithLES)
@@ -50,11 +100,30 @@ struct REAMRootView: View {
             #endif
             #endif
         }
-        // LES owns verification and lifecycle when it is the root experience.
-        // Starting the invisible legacy owner hashes the same large GGUF a
-        // second time and cannot share its artifact (it was never paused as an
-        // alternate runner). The ordinary root retains its existing lifecycle.
-        #if !canImport(OrnithLES)
+        // Restore only the selected page. Model files are never downloaded or
+        // loaded automatically merely because a preference was restored.
+        #if canImport(FlintEngine) && canImport(OrnithLES)
+        .task {
+            if activeRunner == .ream { model.activateForChatModel(.ream) }
+            model.showsFlint = activeRunner == .flint
+            // Restoring the Flint page must not make its LAN API available
+            // while the app is backgrounded or transitioning to foreground.
+            if activeRunner == .flint { model.flintSession.setActive(scenePhase == .active) }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            switch activeRunner {
+            case .ream:
+                if phase == .background { model.releaseInferenceResources() }
+                else if phase == .active { model.refreshStorage() }
+            case .flint:
+                // Flint owns both chat and LAN serving. Invalidate its gate
+                // and cancel active work before iOS suspends the process.
+                model.flintSession.setActive(phase == .active)
+            case .ornith:
+                break // OrnithLESView manages its own lifecycle.
+            }
+        }
+        #elseif !canImport(OrnithLES)
         .task { model.prepare() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .background { model.releaseInferenceResources() }
@@ -62,13 +131,128 @@ struct REAMRootView: View {
         }
         #endif
     }
+
+    #if canImport(FlintEngine) && canImport(OrnithLES)
+    @MainActor
+    private func selectRunner(_ target: Runner) {
+        guard !model.isSwitchingInferenceModel, target != activeRunner else { return }
+        model.isSwitchingInferenceModel = true
+        Task { @MainActor in
+            // Await teardown before allowing a second heavyweight engine to
+            // allocate GPU buffers or acquire its own exclusive model lease.
+            switch activeRunner {
+            case .ornith: await lesModel.shutdown()
+            case .ream: await model.pauseForAlternateRunner()
+            case .flint: await model.flintSession.shutdown()
+            }
+            if target == .ream { model.activateForChatModel(.ream) }
+            if target == .flint { model.flintSession.setActive(scenePhase == .active) }
+            model.showsFlint = target == .flint
+            activeRunner = target
+            UserDefaults.standard.set(target.rawValue, forKey: "FlashLocal.activeInferenceRunner")
+            model.isSwitchingInferenceModel = false
+        }
+    }
+    #endif
 }
+
+#if os(iOS) && canImport(FlintEngine) && canImport(OrnithLES)
+/// Only exact, SHA-256-pinned GGUF files are admitted by the current engines.
+/// Other files in the same repositories are not automatically compatible.
+private struct HuggingFaceGGUFBrowser: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var selectedPage: Page?
+
+    private struct Page: Identifiable {
+        let id: String
+        let url: URL
+    }
+    private struct ModelLink: Identifiable {
+        let id: String
+        let title: String
+        let fileName: String
+        let downloadURL: URL
+    }
+    private var admitted: [ModelLink] {
+        [
+            .init(id: "ornith", title: "Ornith 1.5 · 35B-A3B",
+                  fileName: PinnedGGUFDownload.primaryOrnith.manifest.fileName,
+                  downloadURL: PinnedGGUFDownload.primaryOrnith.url),
+            .init(id: "ream", title: "Qwen3.8 · REAM",
+                  fileName: PinnedGGUFDownload.primaryREAM.manifest.fileName,
+                  downloadURL: PinnedGGUFDownload.primaryREAM.url),
+            .init(id: "flint", title: "Recursive Flint · 40B-A2.5B",
+                  fileName: FlintArtifact.manifest.fileName,
+                  downloadURL: FlintArtifact.sourceURL)
+        ]
+    }
+    // Derive repository pages from the very same pinned URLs used by the
+    // downloader, so the catalog cannot silently point at a different repo.
+    private func repositoryPage(_ downloadURL: URL) -> URL {
+        guard let marker = downloadURL.path.range(of: "/resolve/"),
+              var components = URLComponents(url: downloadURL, resolvingAgainstBaseURL: false) else {
+            return downloadURL
+        }
+        components.path = String(downloadURL.path[..<marker.lowerBound])
+        components.query = nil
+        components.fragment = nil
+        return components.url ?? downloadURL
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Fasta modellfiler i appen") {
+                    ForEach(admitted) { entry in
+                        Button {
+                            selectedPage = .init(id: entry.id, url: repositoryPage(entry.downloadURL))
+                        } label: {
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(entry.title).font(.headline)
+                                Text(entry.fileName).font(.caption.monospaced())
+                                    .foregroundStyle(.secondary)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .accessibilityIdentifier("hf-pinned-\(entry.id)")
+                    }
+                }
+                Section("Utforska andra GGUF-filer") {
+                    Button("Visa alla GGUF-modeller på Hugging Face") {
+                        selectedPage = .init(id: "explore",
+                            url: URL(string: "https://huggingface.co/models?library=gguf")!)
+                    }
+                    Text("Endast de exakta filerna ovan har fasta SHA-256-manifest i appen. Andra GGUF-filer kan inte importeras eller köras ännu. MLX stöds inte av dessa motorer. Full inferens på fysisk iPhone är inte verifierad.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Hugging Face")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Stäng") { dismiss() }
+                }
+            }
+            .sheet(item: $selectedPage) { page in
+                HuggingFaceSafariPage(url: page.url).ignoresSafeArea()
+            }
+        }
+    }
+}
+
+private struct HuggingFaceSafariPage: UIViewControllerRepresentable {
+    let url: URL
+    func makeUIViewController(context: Context) -> SFSafariViewController {
+        SFSafariViewController(url: url)
+    }
+    func updateUIViewController(_ controller: SFSafariViewController, context: Context) {}
+}
+#endif
 
 /// Pure page content, separable from navigation/lifecycle for light/dark QA.
 struct REAMChatPage: View {
     @Bindable var model: REAMAppModel
     var discard: () -> Void = {}
-    var openPerformance: () -> Void = {}
+    var openPerformance: (() -> Void)? = nil
     var openLES: (() -> Void)? = nil
     var body: some View {
         VStack(spacing: 0) {
@@ -80,21 +264,23 @@ struct REAMChatPage: View {
                             .buttonStyle(.borderedProminent).disabled(!model.canOpenAlternateRunner)
                             .accessibilityIdentifier("open-ornith-les").padding(.bottom, 12)
                     }
-                    Button(action: openPerformance) {
-                        HStack(spacing: 12) {
-                            Image(systemName: "cpu").font(.title2)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Ornith Performance").font(.headline)
-                                Text("Öppna modell och optimeringskontroll").font(.caption)
-                            }
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                        }.frame(maxWidth: .infinity, alignment: .leading)
+                    if let openPerformance {
+                        Button(action: openPerformance) {
+                            HStack(spacing: 12) {
+                                Image(systemName: "cpu").font(.title2)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Ornith Performance").font(.headline)
+                                    Text("Öppna modell och optimeringskontroll").font(.caption)
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                            }.frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(!model.canOpenAlternateRunner)
+                        .accessibilityIdentifier("open-ornith-performance")
+                        .padding(.bottom, 16)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!model.canOpenAlternateRunner)
-                    .accessibilityIdentifier("open-ornith-performance")
-                    .padding(.bottom, 16)
                     modelCard
                     Divider()
                     LazyVStack(alignment: .leading, spacing: 20) {

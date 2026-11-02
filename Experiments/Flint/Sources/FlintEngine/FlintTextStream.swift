@@ -1,4 +1,5 @@
 import Foundation
+import MinirunKit
 
 /// UTF-8 pieces may split a scalar or a reasoning delimiter across tokens.
 /// Never insert replacement characters into code or tool arguments. At most
@@ -60,5 +61,31 @@ public struct FlintTextStream: Sendable {
             break
         }
         return delta
+    }
+}
+
+/// A successful chat/API stream must contain exactly one terminal event.
+/// Normal AsyncThrowingStream exhaustion without .complete is not success.
+public struct FlintEventCompletion: Sendable {
+    public enum Failure: Error, Equatable, Sendable {
+        case missingCompletion, eventAfterCompletion
+    }
+    public private(set) var completed = false
+    public init() {}
+
+    public mutating func observe(_ event: LocalChatEvent) throws {
+        guard !completed else { throw Failure.eventAfterCompletion }
+        if case .complete = event { completed = true }
+    }
+
+    public func requireCompletion() throws {
+        guard completed else { throw Failure.missingCompletion }
+    }
+
+    /// A terminal event cannot turn a cancelled chat or API request into a
+    /// successful response, even if cancellation races with stream EOF.
+    public func requireSuccessfulEnd() throws {
+        try requireCompletion()
+        try Task.checkCancellation()
     }
 }

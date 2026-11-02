@@ -17,10 +17,57 @@ private final class FlintAppGate: @unchecked Sendable {
     func canServe() -> Bool { lock.lock(); defer { lock.unlock() }; return available }
 }
 
+// Tracks the request admitted while session.start is still suspended on the
+// native actor. Stopping the LAN server invalidates its late result without
+// cancelling an unrelated foreground chat or benchmark.
+// A queued callback from a stopped listener must not be admitted by a
+// replacement listener merely because both share the same Flint session.
+struct FlintAPIListenerIdentity {
+    static func accepts(_ requested: UUID, active: UUID?) -> Bool {
+        active == requested
+    }
+}
+
+struct FlintAPIStartupLease {
+    private(set) var pending: UUID?
+    mutating func begin(_ id: UUID) { pending = id }
+    mutating func invalidate() -> Bool {
+        let wasPending = pending != nil
+        pending = nil
+        return wasPending
+    }
+    mutating func accept(_ id: UUID) -> Bool {
+        guard pending == id else { return false }
+        pending = nil
+        return true
+    }
+}
+
+/// Native startup can return after the foreground request was cancelled.
+/// Reject that late result and cancel its producer before consuming events.
+struct FlintForegroundStart {
+    static func requireActive(cancel: () -> Void) throws {
+        guard !Task.isCancelled else {
+            cancel()
+            throw CancellationError()
+        }
+    }
+}
+
 private actor FlintFileStore {
     private var verified: VerifiedGGUFArtifact?
     func artifact(root: URL, gate: FlintAppGate) throws -> VerifiedGGUFArtifact {
-        if let verified { try verified.assertUnchanged(); return verified }
+        if let verified {
+            do {
+                try verified.assertStillInstalled(insideRoot: root)
+                return verified
+            } catch {
+                // The previously pinned file may have been replaced after a
+                // failed download or Files import. Reverify the current bytes
+                // rather than permanently pinning a stale artifact identity.
+                self.verified = nil
+            }
+        }
         try LocalModelStorage.prepare(root: root)
         let result = try VerifiedGGUFArtifact.verify(insideRoot: root, manifest: FlintArtifact.manifest,
             cancellationRequested: { gate.cancelled() })
@@ -32,6 +79,19 @@ private actor FlintFileStore {
         let source = try PinnedGGUFDownload(url: FlintArtifact.sourceURL, manifest: FlintArtifact.manifest)
         verified = try await GGUFModelTransfer().download(insideRoot: root, source: source,
             cancellationRequested: { gate.cancelled() }, onProgress: progress)
+    }
+    /// Explicitly confirmed recovery only. Never remove the resumable .partial
+    /// download, a symlink, or anything other than this manifest's installed file.
+    func discardInstalled(root: URL) throws {
+        try LocalModelStorage.prepare(root: root)
+        let url = root.appendingPathComponent(FlintArtifact.manifest.fileName)
+        let values = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+        guard values.isRegularFile == true, values.isSymbolicLink != true else {
+            throw FlintFailure.invalid("Flint-modellfilen är inte en vanlig fil och kan inte tas bort automatiskt")
+        }
+        // Release the verification descriptor before deleting its pathname.
+        verified = nil
+        try FileManager.default.removeItem(at: url)
     }
 }
 
@@ -83,6 +143,7 @@ final class FlintAppModel {
     @ObservationIgnored private let gate = FlintAppGate()
     @ObservationIgnored private var operation: Task<Void, Never>?
     @ObservationIgnored private var apiOperation: Task<Void, Never>?
+    @ObservationIgnored private var apiStartup = FlintAPIStartupLease()
     @ObservationIgnored private var shutdownOperation: Task<Void, Never>?
     @ObservationIgnored private var activeGeneration: LocalChatGeneration?
     @ObservationIgnored private var apiServer: LocalModelAPIServer?
@@ -101,11 +162,16 @@ final class FlintAppModel {
         }
         let preferences = UserDefaults.standard
         if let value = preferences.string(forKey: "FlashLocal.Flint.System.v1"), value.utf8.count <= 32768 { systemPrompt = value }
-        if let profile = LocalContextProfile(rawValue: preferences.integer(forKey: "FlashLocal.Flint.Context.v1")) { contextProfile = profile }
+        // Older builds offered 65K, which the current 5.5 GB phone budget cannot
+        // admit. Never restore an unsupported picker value on launch.
+        if let profile = LocalContextProfile(rawValue: preferences.integer(forKey: "FlashLocal.Flint.Context.v1")),
+           [.standard, .test16K, .test32K].contains(profile) { contextProfile = profile }
         let savedSlots = preferences.integer(forKey: "FlashLocal.Flint.ExpertSlots.v1")
         if [0, 32, 64, 128, 256].contains(savedSlots) { expertCacheSlots = savedSlots }
-        let savedWindow = preferences.integer(forKey: "FlashLocal.Flint.DecodeWindow.v1")
-        if [0, 8, 16, 32, 48, 64].contains(savedWindow) { decodeCacheWindow = savedWindow }
+        // Previous experiments could persist nonzero decode residency. The native
+        // runtime now explicitly rejects it; keeping that preference would
+        // make every subsequent model load fail with no visible way to reset.
+        decodeCacheWindow = 0
         if let data = preferences.data(forKey: "FlashLocal.Flint.Options.v1"), let saved = try? JSONDecoder().decode(LocalGenerationOptions.self, from: data),
            (try? saved.validate()) != nil {
             options = saved; options.enableThinking = true; options.thinkingBudget = nil
@@ -142,6 +208,21 @@ final class FlintAppModel {
         operationID = nil; operation = nil; isBusy = false; fraction = nil; loadingStartedAt = nil
         gate.setAvailable(sceneIsActive && ready)
     }
+    /// Called only after the destructive confirmation in FlintModelControls.
+    /// A corrupt installed GGUF otherwise blocks the resumable downloader:
+    /// GGUFModelTransfer intentionally refuses to overwrite installed files.
+    func removeInstalledModel() async {
+        guard canStart, !ready, !apiListening, apiServer == nil, hasModel else { return }
+        let id = begin("Tar bort installerad Flint-modellfil…")
+        defer { end(id); refreshFile() }
+        do {
+            try await files.discardInstalled(root: modelsRoot)
+            status = "Modellfilen borttagen. Du kan hämta Flint igen; pågående .partial-filer behålls."
+        } catch {
+            self.error = error.localizedDescription
+            status = "Modellfilen kunde inte tas bort."
+        }
+    }
     func download() {
         guard canStart, !hasModel else { return }
         let id = begin("Hämtar officiell Flint · 25,99 GB")
@@ -162,6 +243,7 @@ final class FlintAppModel {
     func load() {
         guard canStart, !ready, hasModel else { return }
         savePreferences()
+        numericalReportURL = nil
         let id = begin("Verifierar Flint-filen…"); loadingStartedAt = Date()
         let requestedContext = contextProfile
         let requestedExpertSlots = expertCacheSlots
@@ -202,7 +284,20 @@ final class FlintAppModel {
             }
         }
     }
-    func stop() { gate.cancel(); session.cancel(); activeGeneration?.cancel(); operation?.cancel() }
+    func stop() {
+        gate.cancel()
+        // Stop can be tapped while session.start is suspended, before an API
+        // forwarding task exists. Invalidate that pending admission so a
+        // late native result cannot resume a stopped request.
+        _ = apiStartup.invalidate()
+        session.cancel()
+        activeGeneration?.cancel()
+        operation?.cancel()
+        // A LAN request has its own forwarding Task, separate from the chat
+        // operation. Cancelling only the native producer can still leave its
+        // buffered events flowing to the client after Stop/backgrounding.
+        apiOperation?.cancel()
+    }
     func unloadModel() async {
         if let shutdownOperation { await shutdownOperation.value; return }
         isShuttingDown = true; ready = false; gate.setAvailable(false); stop()
@@ -216,7 +311,24 @@ final class FlintAppModel {
     func clearChat() {
         guard canStart else { return }
         history = []; saveHistory()
-        if ready { Task { do { try await session.resetConversation() } catch { self.error = error.localizedDescription } } }
+        guard ready else { return }
+        // Keep the shared chat/LAN session unavailable until the native KV
+        // reset has actually finished. Otherwise a new request can start with
+        // the previous conversation's state while reset is still queued.
+        let id = begin("Rensar samtalets modellminne…")
+        operation = Task {
+            defer { end(id) }
+            do {
+                try await session.resetConversation()
+                status = "Chatten rensad · modellminnet nollställt."
+            } catch {
+                // Never continue serving from a potentially stale KV cache.
+                ready = false
+                await session.unload()
+                self.error = "Modellminnet kunde inte rensas. Ladda om Flint: " + error.localizedDescription
+                status = "Flint måste laddas om."
+            }
+        }
     }
     private func request() throws -> LocalChatRequest {
         guard history.count < 128, systemPrompt.utf8.count <= 32768, try JSONEncoder().encode(history).count < 12 << 20 else {
@@ -239,6 +351,8 @@ final class FlintAppModel {
         guard canSend, !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         do {
             let request = try request(), turn = FlintChatTurn(id: UUID(), prompt: prompt)
+            // Never expose a previous turn's metrics as this request's report.
+            report = nil; reportURL = nil
             history.append(turn); prompt = ""; saveHistory(); savePreferences()
             let id = begin("Läser prompt…")
             operation = Task {
@@ -247,17 +361,29 @@ final class FlintAppModel {
                     let source = try await session.start(request) { [weak self] done, total in
                         Task { @MainActor in guard let self, self.operationID == id else { return }; self.status = "Läser prompt: \(done)/\(total) token" }
                     }
+                    try FlintForegroundStart.requireActive(cancel: source.cancel)
                     activeGeneration = source
+                    defer { source.cancel() }
+                    var completion = FlintEventCompletion()
                     for try await event in source.events {
+                        try completion.observe(event)
                         guard let index = history.firstIndex(where: { $0.id == turn.id }) else { source.cancel(); throw CancellationError() }
                         switch event {
                         case .delta(let text, let thought):
                             history[index].answer += text; history[index].reasoning += thought
                             status = text.isEmpty && !thought.isEmpty ? "Tänker…" : "Genererar…"
                         case .complete:
-                            history[index].completed = true; report = await session.lastReport(); status = "Klar"
+                            break
                         }
                     }
+                    try completion.requireSuccessfulEnd()
+                    guard let completedReport = await session.lastReport() else {
+                        throw FlintFailure.invalid("Flint saknar genereringsrapport för avslutat svar")
+                    }
+                    try Task.checkCancellation()
+                    guard let index = history.firstIndex(where: { $0.id == turn.id }) else { throw CancellationError() }
+                    report = completedReport
+                    history[index].completed = true; status = "Klar"
                 } catch { self.error = error.localizedDescription; status = "Svaret avbröts." }
             }
         } catch { self.error = error.localizedDescription }
@@ -274,6 +400,9 @@ final class FlintAppModel {
     }
     func benchmark(promptTokens: Int) {
         guard canSend, !apiListening else { return }
+        // A previous benchmark report must never be mistaken for this run's
+        // result if the new stream ends early without a completion event.
+        report = nil; reportURL = nil
         let id = begin("Benchmark · förbereder \(promptTokens) verkliga prompttoken")
         operation = Task {
             defer { activeGeneration = nil; end(id) }
@@ -282,12 +411,30 @@ final class FlintAppModel {
                 let source = try await session.start(request) { [weak self] done, total in
                     Task { @MainActor in guard let self, self.operationID == id else { return }; self.status = "Benchmark · prompt \(done)/\(total)" }
                 }
+                try FlintForegroundStart.requireActive(cancel: source.cancel)
                 activeGeneration = source
+                defer { source.cancel() }
+                var completion = FlintEventCompletion()
                 for try await event in source.events {
-                    if case .complete = event { report = await session.lastReport() }
+                    try completion.observe(event)
                 }
-                status = (report?.generatedTokenIDs.count ?? 0) >= 128 ? "Benchmark klar · minst 128 genererade token" :
-                    "Körningen tog slut före 128 token · inte ett jämförbart decode-benchmark"
+                // Do not publish measurements until the entire stream has
+                // ended with exactly one terminal event. Late events or an
+                // incomplete stream invalidate this run, not just its status.
+                try completion.requireSuccessfulEnd()
+                guard let completedReport = await session.lastReport() else {
+                    throw FlintFailure.invalid("Benchmark saknar genereringsrapport · ingen giltig mätning")
+                }
+                try Task.checkCancellation()
+                // A short or non-finite run must not populate the shared
+                // report: the UI/export would otherwise present its token/s
+                // as a comparable benchmark despite the warning in status.
+                guard completedReport.isComparableDecodeBenchmark else {
+                    status = "Ej jämförbar mätning · kräver exakt prompt och minst 128 token"
+                    return
+                }
+                report = completedReport
+                status = "Benchmark klar · minst 128 genererade token"
             } catch { self.error = error.localizedDescription; status = "Benchmark stoppades." }
         }
     }
@@ -309,7 +456,7 @@ final class FlintAppModel {
                 capabilities: .init(context: contextProfile, family: .flint), canServe: { gate.canServe() },
                 handler: { [weak self] request in
                     guard let self else { throw LocalAPIError(status: 503, message: "Phone owner is closed") }
-                    return try await self.openAPI(request)
+                    return try await self.openAPI(request, listenerID: id)
                 }, onState: { [weak self] state in
                     Task { @MainActor in
                         guard let self, self.apiID == id else { return }
@@ -325,24 +472,39 @@ final class FlintAppModel {
                 })
         } catch { self.error = error.localizedDescription; stopAPI() }
     }
-    private func openAPI(_ request: LocalChatRequest) async throws -> LocalChatGeneration {
+    private func openAPI(_ request: LocalChatRequest, listenerID: UUID) async throws -> LocalChatGeneration {
+        // The handler captures the listener that accepted the connection.
+        // Reject work queued before a stop/restart, before native admission.
+        guard FlintAPIListenerIdentity.accepts(listenerID, active: apiID), apiServer != nil else {
+            throw LocalAPIError(status: 503, message: "The originating Flint API listener has stopped")
+        }
         guard canSend else { throw LocalAPIError(status: isBusy ? 429 : 503, message: "Flint is busy, unloaded or the phone app is not active") }
         let id = begin("API · läser prompt…")
+        apiStartup.begin(id)
         apiPromptProcessed = 0; apiPromptTotal = 0; apiGeneratedTokens = 0
+        report = nil; reportURL = nil
         apiRequestPhase = "Tar emot och tokeniserar prompt…"
         let source: LocalChatGeneration
         do {
             source = try await session.start(request, progress: { [weak self] processed, total in
                 Task { @MainActor [weak self] in
-                    guard let self, self.isBusy else { return }
+                    guard let self, self.operationID == id else { return }
                     self.apiPromptProcessed = processed
                     self.apiPromptTotal = total
                     self.apiRequestPhase = "Läser prompt · \(processed)/\(total) token"
                 }
             })
         } catch {
-            apiRequestPhase = "Förfrågan misslyckades"
+            if apiStartup.accept(id) { apiRequestPhase = "Förfrågan misslyckades" }
             end(id); throw error
+        }
+        // The listener may have been stopped while native admission was
+        // running. Never start forwarding a late generation to a closed API.
+        guard apiStartup.accept(id), FlintAPIListenerIdentity.accepts(listenerID, active: apiID),
+              apiServer != nil, sceneIsActive else {
+            source.cancel()
+            end(id)
+            throw CancellationError()
         }
         activeGeneration = source
         let pair = AsyncThrowingStream<LocalChatEvent, Error>.makeStream(bufferingPolicy: .bufferingOldest(512))
@@ -350,21 +512,38 @@ final class FlintAppModel {
         apiOperation = Task {
             defer { activeGeneration = nil; apiOperation = nil; end(id) }
             do {
+                var completion = FlintEventCompletion()
+                var terminal: LocalChatEvent?
                 for try await event in source.events {
+                    try completion.observe(event)
                     switch event {
                     case .delta:
                         apiRequestPhase = "Genererar svar…"
+                        switch pair.continuation.yield(event) {
+                        case .enqueued: break
+                        case .dropped, .terminated: source.cancel(); throw CancellationError()
+                        @unknown default: source.cancel(); throw CancellationError()
+                        }
                     case .complete:
-                        break
-                    }
-                    switch pair.continuation.yield(event) {
-                    case .enqueued: break
-                    case .dropped, .terminated: source.cancel(); throw CancellationError()
-                    @unknown default: source.cancel(); throw CancellationError()
+                        // Do not expose success to the LAN client until the
+                        // upstream stream has really ended. A later error or
+                        // duplicate completion must fail closed.
+                        terminal = event
                     }
                 }
-                report = await session.lastReport()
-                apiGeneratedTokens = report?.generatedTokenIDs.count ?? 0
+                try completion.requireSuccessfulEnd()
+                guard let completedReport = await session.lastReport() else {
+                    throw FlintFailure.invalid("Flint saknar genereringsrapport för API-svaret")
+                }
+                try Task.checkCancellation()
+                guard let terminal else { throw FlintEventCompletion.Failure.missingCompletion }
+                switch pair.continuation.yield(terminal) {
+                case .enqueued: break
+                case .dropped, .terminated: source.cancel(); throw CancellationError()
+                @unknown default: source.cancel(); throw CancellationError()
+                }
+                report = completedReport
+                apiGeneratedTokens = completedReport.generatedTokenIDs.count
                 apiRequestPhase = "Klar · \(apiGeneratedTokens) genererade token"
                 status = "API · klar"; pair.continuation.finish()
             } catch { self.error = error.localizedDescription; pair.continuation.finish(throwing: error) }
@@ -372,6 +551,10 @@ final class FlintAppModel {
         return .init(events: pair.stream, cancel: source.cancel)
     }
     func stopAPI() {
+        // session.start may still be executing before apiOperation exists.
+        // Cancel that specific startup rather than leaving native work alive
+        // after the listener has been shut down.
+        if apiStartup.invalidate() { gate.cancel(); session.cancel() }
         apiID = nil; apiServer?.stop(); apiServer = nil; apiListening = false; apiStatus = "Avstängd"; apiURLs = []; apiAccessKey = ""
         apiPromptProcessed = 0; apiPromptTotal = 0; apiGeneratedTokens = 0
         apiRequestPhase = "Ingen aktiv förfrågan"

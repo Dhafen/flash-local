@@ -48,6 +48,7 @@ struct FlintView: View {
 private struct FlintModelControls: View {
     @Bindable var model: FlintAppModel
     @State private var temperature = ""
+    @State private var confirmingModelRemoval = false
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Recursive Flint · 40B-A2.5B").font(.headline)
@@ -76,6 +77,14 @@ private struct FlintModelControls: View {
                     Button("Ladda modell") { model.load() }.buttonStyle(.borderedProminent).disabled(!model.canStart || model.ready)
                     Button("Ladda ur modell") { Task { await model.unloadModel() } }.buttonStyle(.bordered)
                         .disabled(model.isShuttingDown || (!model.ready && !model.isBusy))
+                }
+                if !model.ready {
+                    Button("Ta bort installerad modellfil", role: .destructive) {
+                        confirmingModelRemoval = true
+                    }
+                    .disabled(!model.canStart || model.apiListening)
+                    Text("Om SHA256-kontrollen misslyckas måste den felaktiga installerade filen tas bort innan hämtning kan göras om. Chatt och delvis hämtade filer behålls.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
             }
             DisclosureGroup("Inställningar") {
@@ -121,6 +130,14 @@ private struct FlintModelControls: View {
                 Text("Första aktiveringen jämför fyra verkliga logitpositioner och beräknade top-6-expertval mellan CPU och Metal. Godkänd kontroll sparas per modell, appbygge och inställning. Full modellkvalitet och lång kontext behöver fortfarande testas.")
                     .font(.caption2).foregroundStyle(.secondary)
             }
+        }
+        .confirmationDialog("Ta bort den installerade Flint-modellfilen?", isPresented: $confirmingModelRemoval,
+                            titleVisibility: .visible) {
+            Button("Ta bort modellfilen (25,99 GB)", role: .destructive) {
+                Task { await model.removeInstalledModel() }
+            }
+        } message: {
+            Text("Endast den installerade Flint-GGUF-filen tas bort. Chatt och återupptagbara .partial-hämtningar behålls. Modellen måste hämtas igen.")
         }
     }
 }
@@ -205,8 +222,12 @@ private struct FlintMeasurementPage: View {
 
 private struct FlintAPIControls: View {
     @Bindable var model: FlintAppModel
-    @State private var client: LocalAgentSetup.Client = .opencode
-    @State private var computer: LocalAgentSetup.Computer = .windows
+    // Remember only the selected setup UI options, never the LAN API key.
+    // Raw string storage also tolerates a client removed in a later build.
+    @AppStorage("FlashLocal.Flint.API.Client.v1") private var selectedClient = LocalAgentSetup.Client.opencode.rawValue
+    @AppStorage("FlashLocal.Flint.API.Computer.v1") private var selectedComputer = LocalAgentSetup.Computer.windows.rawValue
+    private var client: LocalAgentSetup.Client { .init(rawValue: selectedClient) ?? .opencode }
+    private var computer: LocalAgentSetup.Computer { .init(rawValue: selectedComputer) ?? .windows }
     private var setup: LocalAgentSetup? {
         guard let url = model.apiURLs.first else { return nil }
         return try? .init(client: client, computer: computer, baseURL: url,
@@ -243,8 +264,16 @@ private struct FlintAPIControls: View {
             if !model.apiListening { SecureField("Egen API-nyckel · valfritt", text: $model.apiKeyDraft).textFieldStyle(.roundedBorder) }
             ForEach(model.apiURLs, id: \.self) { Text($0).font(.system(.callout, design: .monospaced)).textSelection(.enabled) }
             if !model.apiAccessKey.isEmpty { Button("Kopiera API-nyckeln") { Self.copy(model.apiAccessKey) } }
-            Picker("Dator", selection: $computer) { ForEach(LocalAgentSetup.Computer.allCases) { Text($0.title).tag($0) } }
-            Picker("Agentverktyg", selection: $client) { ForEach(LocalAgentSetup.Client.allCases) { Text($0.title).tag($0) } }
+            // Bind to a known enum value even when older defaults contain a
+            // client that this app version no longer supports.
+            Picker("Dator", selection: Binding(
+                get: { computer.rawValue }, set: { selectedComputer = $0 })) {
+                ForEach(LocalAgentSetup.Computer.allCases) { Text($0.title).tag($0.rawValue) }
+            }
+            Picker("Agentverktyg", selection: Binding(
+                get: { client.rawValue }, set: { selectedClient = $0 })) {
+                ForEach(LocalAgentSetup.Client.allCases) { Text($0.title).tag($0.rawValue) }
+            }
             if let setup {
                 Text("1. Hämta startskriptet").font(.headline)
                 Text(setup.installCommand).font(.system(.caption, design: .monospaced)).textSelection(.enabled)

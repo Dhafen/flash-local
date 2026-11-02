@@ -27,8 +27,31 @@ public struct FlintGenerationReport: Codable, Sendable {
     public var expertCacheSlots: Int? = nil
     /// This indicates the opt-in request; it does not prove faster storage reads.
     public var expertReadAheadRequested: Bool? = nil
+    /// Advisory worker counters for this generation only, not measured NAND traffic.
+    /// Nil for older reports. Zero means no advisory activity observed.
+    public var advisoryRequests: UInt64? = nil
+    public var advisoryAccepted: UInt64? = nil
+    public var advisoryDuplicates: UInt64? = nil
+    public var advisoryDrops: UInt64? = nil
+    public var advisoryBytes: UInt64? = nil
+    public var advisoryFailures: UInt64? = nil
     public var evaluatedPromptTokens: Int { promptTokenIDs.count - reusedPromptTokens }
+    /// A decode benchmark is publishable only with the exact requested prompt
+    /// length, at least 128 sampled tokens and finite measured timings.
+    /// This is a measurement-quality gate, NOT full-model numerical admission.
+    public var isComparableDecodeBenchmark: Bool {
+        [1000, 4000, 10000].contains(promptTokenIDs.count) &&
+        generatedTokenIDs.count >= 128 &&
+        decodeForwardSeconds.isFinite && decodeForwardSeconds > 0 &&
+        prefillSeconds.isFinite && prefillSeconds >= 0 &&
+        elapsedSeconds.isFinite && elapsedSeconds > 0 &&
+        (timeToFirstTokenSeconds.map { $0.isFinite && $0 >= 0 && $0 <= elapsedSeconds } ?? true) &&
+        (0...promptTokenIDs.count).contains(reusedPromptTokens) &&
+        decodeTokensPerSecond != nil
+    }
     public var decodeTokensPerSecond: Double? {
-        decodeForwardSeconds > 0 ? Double(generatedTokenIDs.count) / decodeForwardSeconds : nil
+        guard decodeForwardSeconds.isFinite && decodeForwardSeconds > 0 else { return nil }
+        let rate = Double(generatedTokenIDs.count) / decodeForwardSeconds
+        return rate.isFinite ? rate : nil
     }
 }

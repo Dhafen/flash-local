@@ -86,12 +86,18 @@ public struct FlintMetrics: Codable, Sendable {
     public let expertIOBytes, expertIOCalls, cachedTokens, evaluatedTokens, stateOnlyTokens: UInt64
     public let estimatedProcessBytes, expertBankBytes, estimatedKVBytes: UInt64
     public let forwardSeconds: Double
+    /// Advisory OS hints only; NOT physical NAND reads or cache hits.
+    public let adviceRequests, adviceAccepted, adviceDuplicates, adviceDrops: UInt64
+    public let adviceBytes, adviceFailures: UInt64
     public let flashAttentionActive: Bool
     init(_ value: flf_metrics) {
         expertIOBytes = value.io_bytes; expertIOCalls = value.io_calls; cachedTokens = value.cached_tokens
         evaluatedTokens = value.evaluated_tokens; stateOnlyTokens = value.state_only_tokens
         estimatedProcessBytes = value.estimated_process_bytes; expertBankBytes = value.expert_bank_bytes
         estimatedKVBytes = value.estimated_kv_bytes; forwardSeconds = value.forward_seconds
+        adviceRequests = value.advice_requests; adviceAccepted = value.advice_accepted
+        adviceDuplicates = value.advice_duplicates; adviceDrops = value.advice_drops
+        adviceBytes = value.advice_bytes; adviceFailures = value.advice_failures
         flashAttentionActive = value.flash_attention_active
     }
 }
@@ -101,7 +107,7 @@ public struct FlintMetrics: Codable, Sendable {
 // cleared only after its loader workers return; cancellation never accesses it.
 // No native pointer crosses this bridge. Replace the lock with checked atomic
 // storage when the project's minimum Swift toolchain supports that migration.
-private final class FlintCancellation: @unchecked Sendable {
+final class FlintCancellation: @unchecked Sendable {
     private let lock = NSLock()
     private var cancelled = false
     private var ceiling: UInt64 = 0
@@ -113,6 +119,12 @@ private final class FlintCancellation: @unchecked Sendable {
         maximumThermal = ProcessInfo.processInfo.thermalState.rawValue; lock.unlock()
     }
     func cancel() { lock.lock(); cancelled = true; lock.unlock() }
+    // The stream may be cancelled by its consumer without cancelling the
+    // producer Task. Check the shared flag at the terminal publication gate.
+    func checkCancellation() throws {
+        lock.lock(); let stopped = cancelled; lock.unlock()
+        if stopped { throw CancellationError() }
+    }
     func observation() -> (peak: UInt64, thermal: Int) {
         lock.lock(); defer { lock.unlock() }; return (peak, maximumThermal)
     }
@@ -120,8 +132,9 @@ private final class FlintCancellation: @unchecked Sendable {
         lock.lock(); let stopped = cancelled, limit = ceiling; lock.unlock()
         guard let memory = ProcessFootprint.current() else { return true }
         lock.lock(); peak = max(peak, memory.footprintBytes)
-        maximumThermal = max(maximumThermal, ProcessInfo.processInfo.thermalState.rawValue); lock.unlock()
-        return stopped || memory.footprintBytes >= limit - min(limit, 128 << 20) ||
+        maximumThermal = max(maximumThermal, ProcessInfo.processInfo.thermalState.rawValue)
+        let cancelledDuringSampling = cancelled; lock.unlock()
+        return stopped || cancelledDuringSampling || memory.footprintBytes >= limit - min(limit, 128 << 20) ||
             memory.availableBytes.map({ $0 < 128 << 20 }) == true
     }
 }
@@ -232,15 +245,23 @@ public actor FlintSession {
 
     public func unload() {
         cancellation.cancel(); native = nil; artifact = nil; stateTokens.removeAll(); lastLogits = nil; hasCurrentLogits = false; numericalAdmission = false; activeServingMode = nil
+        generationReport = nil
     }
     public func resetConversation() throws {
         guard activeRequest == nil else { throw LocalAPIError(status: 429, message: "Stop the current Flint request before clearing its context") }
         try resetKV()
+        generationReport = nil
         cancellation.begin(ceiling: activeCeiling)
     }
     private func resetKV() throws {
         let owner = try self.owner()
-        guard flf_reset(owner.pointer) == 0 else { throw failure() }
+        guard flf_reset(owner.pointer) == 0 else {
+            // A failed native reset leaves the KV state unknown. Never admit
+            // another request on this handle, even if the caller recovers.
+            let error = failure()
+            unload()
+            throw error
+        }
         stateTokens.removeAll(); lastLogits = nil; hasCurrentLogits = false
     }
     public func metrics() throws -> FlintMetrics { .init(flf_snapshot(try owner().pointer)) }
@@ -289,7 +310,14 @@ public actor FlintSession {
     private func append(tokens: [Int32], finalRow: Bool, copyLogits: Bool) throws -> [Float]? {
         let owner = try self.owner()
         guard !tokens.isEmpty, tokens.count <= configuration.evaluationBatch else { throw FlintFailure.invalid("Invalid Flint evaluation batch") }
-        try artifact?.assertUnchanged()
+        do {
+            try artifact?.assertUnchanged()
+        } catch {
+            // Do not retain a native handle after its verified model identity
+            // is invalidated, even when no new evaluation has started.
+            unload()
+            throw error
+        }
         if Task.isCancelled { cancellation.cancel() }
         var output = copyLogits ? [Float](repeating: 0, count: Int(flf_vocab_size(owner.pointer))) : []
         let status = tokens.withUnsafeBufferPointer { ids in
@@ -300,11 +328,24 @@ public actor FlintSession {
         }
         guard status == 0 else {
             let error = failure()
-            _ = flf_reset(owner.pointer)
-            stateTokens.removeAll(); lastLogits = nil; hasCurrentLogits = false
+            if flf_reset(owner.pointer) != 0 {
+                // A failed evaluation followed by a failed reset cannot
+                // safely reuse this native context for later generation.
+                unload()
+            } else {
+                stateTokens.removeAll(); lastLogits = nil; hasCurrentLogits = false
+            }
             throw error
         }
-        try artifact?.assertUnchanged()
+        do {
+            try artifact?.assertUnchanged()
+        } catch {
+            // Native evaluation may already have advanced KV. If the verified
+            // model changed during that call, the session cannot be reused:
+            // never publish token state or continue with a stale mapping.
+            unload()
+            throw error
+        }
         stateTokens.append(contentsOf: tokens); lastLogits = copyLogits ? output : nil; hasCurrentLogits = finalRow
         return lastLogits
     }
@@ -341,7 +382,7 @@ public actor FlintSession {
 
 /// One request's cancellation cannot cancel a later request using the same
 /// loaded model. Only the locked cancellation flag crosses the actor boundary.
-private final class FlintRequestLease: @unchecked Sendable {
+final class FlintRequestLease: @unchecked Sendable {
     private let lock = NSLock()
     private var finished = false
     private let control: FlintCancellation
@@ -355,6 +396,9 @@ extension FlintSession {
     /// can serve foreground chat and LAN requests without a second model copy.
     public func start(_ request: LocalChatRequest,
                       progress: @escaping @Sendable (Int, Int) -> Void = { _, _ in }) throws -> LocalChatGeneration {
+        // A cancelled caller must not create a new producer whose native
+        // cancellation flag would be reset by admission.
+        try Task.checkCancellation()
         _ = try owner()
         guard numericalAdmission, activeServingMode != nil else { throw LocalAPIError(status: 503, message: "Complete Flint's CPU/Metal admission before generation") }
         guard activeRequest == nil else { throw LocalAPIError(status: 429, message: "Flint is already serving a request") }
@@ -374,6 +418,9 @@ extension FlintSession {
                 try produce(request, started: started, progress: progress, continuation: pair.continuation)
                 lease.finish(); pair.continuation.finish()
             } catch {
+                // A failed, cancelled or backpressured stream must never
+                // leave a publishable report, even if native decode finished.
+                generationReport = nil
                 try? resetKV()
                 lease.finish(); pair.continuation.finish(throwing: error)
             }
@@ -440,7 +487,7 @@ extension FlintSession {
             peakMemoryBytes: observation.peak, thermalStateAtStart: thermal, maximumThermalState: observation.thermal,
             platform: Self.platform, appBuild: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String,
             nativeRevision: Self.nativeRevision, memoryBudgetBytes: activeCeiling, timeToFirstTokenSeconds: firstToken)
-        generationReport = .init(modelSHA256: FlintArtifact.manifest.sha256, nativeRevision: Self.nativeRevision,
+        var finishedReport = FlintGenerationReport(modelSHA256: FlintArtifact.manifest.sha256, nativeRevision: Self.nativeRevision,
             contextTokens: configuration.contextTokens, evaluationBatch: configuration.evaluationBatch,
             physicalBatch: configuration.physicalBatch, cpuThreads: configuration.cpuThreads,
             servingMode: activeServingMode, f32KV: configuration.conservativeMetal, flashAttentionActive: final.flashAttentionActive,
@@ -452,10 +499,33 @@ extension FlintSession {
             elapsedSeconds: elapsed, timeToFirstTokenSeconds: firstToken, maximumObservedFootprintBytes: observation.peak,
             explicitExpertBytesRead: final.expertIOBytes - initial.expertIOBytes, maximumThermalState: observation.thermal,
             finishReason: finish)
-        generationReport?.expertCacheSlots = configuration.expertCacheSlots
-        generationReport?.expertReadAheadRequested = configuration.expertCacheSlots > 0
+        finishedReport.expertCacheSlots = configuration.expertCacheSlots
+        finishedReport.expertReadAheadRequested = configuration.expertCacheSlots > 0
+        finishedReport.advisoryRequests = final.adviceRequests - initial.adviceRequests
+        finishedReport.advisoryAccepted = final.adviceAccepted - initial.adviceAccepted
+        finishedReport.advisoryDuplicates = final.adviceDuplicates - initial.adviceDuplicates
+        finishedReport.advisoryDrops = final.adviceDrops - initial.adviceDrops
+        finishedReport.advisoryBytes = final.adviceBytes - initial.adviceBytes
+        finishedReport.advisoryFailures = final.adviceFailures - initial.adviceFailures
+        // The last native sample may be EOS (no append), and the verified
+        // model could have changed after the final token evaluation. Check
+        // the pinned artifact once more before publishing a successful stream.
+        // A mismatch invalidates the entire native KV/session state.
+        do {
+            try artifact?.assertUnchanged()
+        } catch {
+            unload()
+            throw error
+        }
+        try Task.checkCancellation()
+        try cancellation.checkCancellation()
         try emit(.complete(.init(promptTokens: prompt.count, completionTokens: generated.count, reasoningTokens: reasoningTokens,
             forcedTokens: 0, finishReason: finish, metrics: metrics)))
+        try Task.checkCancellation()
+        try cancellation.checkCancellation()
+        // Publish only after the terminal event was accepted. The consumer
+        // independently validates EOF and cancellation before using it.
+        generationReport = finishedReport
     }
     private static var platform: String {
         #if targetEnvironment(simulator)

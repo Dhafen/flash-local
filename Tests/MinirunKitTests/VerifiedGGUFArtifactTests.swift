@@ -114,12 +114,32 @@ final class VerifiedGGUFArtifactTests: XCTestCase {
         }
     }
 
+    func testCachedCapabilityRejectsReplacedInstalledPathEvenWithIdenticalBytes() throws {
+        try withModel { root, manifest in
+            let file = root.appendingPathComponent(manifest.fileName)
+            let oldFile = root.appendingPathComponent("old-verified.gguf")
+            let artifact = try VerifiedGGUFArtifact.verify(insideRoot: root, manifest: manifest)
+            try artifact.assertStillInstalled(insideRoot: root)
+            // Atomic replacement does not mutate the already-open descriptor.
+            // A stamp check on that descriptor alone would accept stale cache.
+            try FileManager.default.moveItem(at: file, to: oldFile)
+            try FileManager.default.copyItem(at: oldFile, to: file)
+            try artifact.assertUnchanged()
+            XCTAssertThrowsError(try artifact.assertStillInstalled(insideRoot: root))
+            let replacement = try VerifiedGGUFArtifact.verify(insideRoot: root, manifest: manifest)
+            XCTAssertNoThrow(try replacement.assertStillInstalled(insideRoot: root))
+        }
+    }
+
     func testNoFollowRejectsModelSymlink() throws {
         try withModel { root, manifest in
             let file = root.appendingPathComponent(manifest.fileName)
             let moved = root.appendingPathComponent("target")
+            let cached = try VerifiedGGUFArtifact.verify(insideRoot: root, manifest: manifest)
             try FileManager.default.moveItem(at: file, to: moved)
             try FileManager.default.createSymbolicLink(at: file, withDestinationURL: moved)
+            XCTAssertNoThrow(try cached.assertUnchanged())
+            XCTAssertThrowsError(try cached.assertStillInstalled(insideRoot: root))
             XCTAssertThrowsError(try VerifiedGGUFArtifact.verify(insideRoot: root, manifest: manifest))
         }
     }
