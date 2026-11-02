@@ -28,7 +28,7 @@ public:
     };
     struct Stats {
         uint64_t requests = 0, accepted = 0, duplicates = 0;
-        uint64_t drops = 0, advised_bytes = 0, failures = 0;
+        uint64_t drops = 0, advised_bytes = 0, failures = 0, coalesced = 0;
     };
     static constexpr size_t max_pending = 48;
     FlintExpertReadAhead(int descriptor, std::vector<Family> families)
@@ -58,11 +58,33 @@ public:
                     }
                     const Job job{f.offset + uint64_t(expert) * f.bytes_per_expert, f.bytes_per_expert};
                     if (job.bytes > limit - job.offset) { ++stats_.drops; continue; }
-                    bool duplicate = in_flight_ && active_job_.offset == job.offset && active_job_.bytes == job.bytes;
+                    // The same expert may be requested again before a previous
+                    // coalesced hint reaches the OS. Count it as a duplicate,
+                    // not another disk advice request.
+                    const auto covers = [&job](const Job & prior) {
+                        return job.offset >= prior.offset && job.bytes <= prior.bytes &&
+                            job.offset - prior.offset <= prior.bytes - job.bytes;
+                    };
+                    bool duplicate = in_flight_ && covers(active_job_);
                     for (const auto & queued : queue_) {
-                        if (queued.offset == job.offset && queued.bytes == job.bytes) { duplicate = true; break; }
+                        if (covers(queued)) { duplicate = true; break; }
                     }
                     if (duplicate) { ++stats_.duplicates; continue; }
+                    // Consecutive routed expert extents can share one advisory
+                    // hint. Merge only adjacent, pending extents; never change
+                    // real expert reads, routing or the pinned model file.
+                    if (!queue_.empty()) {
+                        auto & tail = queue_.back();
+                        if (tail.bytes <= uint64_t(INT32_MAX) &&
+                            job.bytes <= uint64_t(INT32_MAX) - tail.bytes &&
+                            tail.offset <= limit - tail.bytes &&
+                            tail.offset + tail.bytes == job.offset) {
+                            tail.bytes += job.bytes;
+                            ++stats_.coalesced;
+                            ++stats_.accepted;
+                            continue;
+                        }
+                    }
                     if (queue_.size() >= max_pending) { ++stats_.drops; continue; }
                     queue_.push_back(job);
                     ++stats_.accepted;
