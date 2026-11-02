@@ -20,6 +20,14 @@ private final class FlintAppGate: @unchecked Sendable {
 // Tracks the request admitted while session.start is still suspended on the
 // native actor. Stopping the LAN server invalidates its late result without
 // cancelling an unrelated foreground chat or benchmark.
+// A queued callback from a stopped listener must not be admitted by a
+// replacement listener merely because both share the same Flint session.
+struct FlintAPIListenerIdentity {
+    static func accepts(_ requested: UUID, active: UUID?) -> Bool {
+        active == requested
+    }
+}
+
 struct FlintAPIStartupLease {
     private(set) var pending: UUID?
     mutating func begin(_ id: UUID) { pending = id }
@@ -420,7 +428,7 @@ final class FlintAppModel {
                 capabilities: .init(context: contextProfile, family: .flint), canServe: { gate.canServe() },
                 handler: { [weak self] request in
                     guard let self else { throw LocalAPIError(status: 503, message: "Phone owner is closed") }
-                    return try await self.openAPI(request)
+                    return try await self.openAPI(request, listenerID: id)
                 }, onState: { [weak self] state in
                     Task { @MainActor in
                         guard let self, self.apiID == id else { return }
@@ -436,7 +444,12 @@ final class FlintAppModel {
                 })
         } catch { self.error = error.localizedDescription; stopAPI() }
     }
-    private func openAPI(_ request: LocalChatRequest) async throws -> LocalChatGeneration {
+    private func openAPI(_ request: LocalChatRequest, listenerID: UUID) async throws -> LocalChatGeneration {
+        // The handler captures the listener that accepted the connection.
+        // Reject work queued before a stop/restart, before native admission.
+        guard FlintAPIListenerIdentity.accepts(listenerID, active: apiID), apiServer != nil else {
+            throw LocalAPIError(status: 503, message: "The originating Flint API listener has stopped")
+        }
         guard canSend else { throw LocalAPIError(status: isBusy ? 429 : 503, message: "Flint is busy, unloaded or the phone app is not active") }
         let id = begin("API · läser prompt…")
         apiStartup.begin(id)
@@ -459,7 +472,8 @@ final class FlintAppModel {
         }
         // The listener may have been stopped while native admission was
         // running. Never start forwarding a late generation to a closed API.
-        guard apiStartup.accept(id), apiID != nil, sceneIsActive else {
+        guard apiStartup.accept(id), FlintAPIListenerIdentity.accepts(listenerID, active: apiID),
+              apiServer != nil, sceneIsActive else {
             source.cancel()
             end(id)
             throw CancellationError()

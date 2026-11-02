@@ -12,6 +12,16 @@ import AppKit
 /// Actual native control captures. Empty model storage; no inference or fake metrics.
 @MainActor
 final class FlintRenderTests: XCTestCase {
+    func testStoppedAPIListenerCannotSubmitWorkThroughReplacementListener() {
+        let original = UUID(), replacement = UUID()
+        XCTAssertTrue(FlintAPIListenerIdentity.accepts(original, active: original))
+        XCTAssertFalse(FlintAPIListenerIdentity.accepts(original, active: nil),
+                       "A queued request from a stopped listener must be rejected")
+        XCTAssertFalse(FlintAPIListenerIdentity.accepts(original, active: replacement),
+                       "A new listener must not adopt an old listener's queued request")
+        XCTAssertTrue(FlintAPIListenerIdentity.accepts(replacement, active: replacement))
+    }
+
     func testStoppingAPIInvalidatesPendingNativeStartupWithoutPoisoningNextRequest() {
         var startup = FlintAPIStartupLease()
         let first = UUID(), second = UUID()
