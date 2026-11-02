@@ -20,7 +20,17 @@ private final class FlintAppGate: @unchecked Sendable {
 private actor FlintFileStore {
     private var verified: VerifiedGGUFArtifact?
     func artifact(root: URL, gate: FlintAppGate) throws -> VerifiedGGUFArtifact {
-        if let verified { try verified.assertUnchanged(); return verified }
+        if let verified {
+            do {
+                try verified.assertUnchanged()
+                return verified
+            } catch {
+                // The previously pinned file may have been replaced after a
+                // failed download or Files import. Reverify the current bytes
+                // rather than permanently pinning a stale artifact identity.
+                self.verified = nil
+            }
+        }
         try LocalModelStorage.prepare(root: root)
         let result = try VerifiedGGUFArtifact.verify(insideRoot: root, manifest: FlintArtifact.manifest,
             cancellationRequested: { gate.cancelled() })
@@ -328,13 +338,14 @@ final class FlintAppModel {
                 // ended with exactly one terminal event. Late events or an
                 // incomplete stream invalidate this run, not just its status.
                 try completion.requireSuccessfulEnd()
-                report = await session.lastReport()
-                try Task.checkCancellation()
-                guard let report else {
-                    status = "Benchmark saknar genereringsrapport · ingen giltig mätning"
-                    return
+                guard let completedReport = await session.lastReport() else {
+                    throw FlintFailure.invalid("Benchmark saknar genereringsrapport · ingen giltig mätning")
                 }
-                status = report.generatedTokenIDs.count >= 128 ? "Benchmark klar · minst 128 genererade token" :
+                try Task.checkCancellation()
+                // A cancellation during the actor hop must not leave a
+                // successful-looking report behind after the catch path.
+                report = completedReport
+                status = completedReport.generatedTokenIDs.count >= 128 ? "Benchmark klar · minst 128 genererade token" :
                     "Körningen tog slut före 128 token · inte ett jämförbart decode-benchmark"
             } catch { self.error = error.localizedDescription; status = "Benchmark stoppades." }
         }
