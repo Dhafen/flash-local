@@ -504,6 +504,16 @@ extension FlintSession {
         finishedReport.advisoryDrops = final.adviceDrops - initial.adviceDrops
         finishedReport.advisoryBytes = final.adviceBytes - initial.adviceBytes
         finishedReport.advisoryFailures = final.adviceFailures - initial.adviceFailures
+        // The last native sample may be EOS (no append), and the verified
+        // model could have changed after the final token evaluation. Check
+        // the pinned artifact once more before publishing a successful stream.
+        // A mismatch invalidates the entire native KV/session state.
+        do {
+            try artifact?.assertUnchanged()
+        } catch {
+            unload()
+            throw error
+        }
         try Task.checkCancellation()
         try cancellation.checkCancellation()
         try emit(.complete(.init(promptTokens: prompt.count, completionTokens: generated.count, reasoningTokens: reasoningTokens,
