@@ -115,7 +115,9 @@ jobs:
     if: ${{ !inputs.check_delivery_tools && !inputs.regenerate_project_only && !inputs.provisioning_only }}
     uses: ./.github/workflows/ornith-performance.yml
     with:
-      use_macos15: ${{ github.event_name != 'workflow_dispatch' || inputs.use_macos15 }}
+      # Keep the optional manual macOS 15 selection. PRs must not remain
+      # blocked by the macOS 15 pool before reaching the actual iOS build.
+      use_macos15: ${{ github.event_name == 'workflow_dispatch' && inputs.use_macos15 }}
   regenerate-project:
     if: github.event_name == 'workflow_dispatch' && inputs.regenerate_project_only
     runs-on: ${{ (github.event_name != 'workflow_dispatch' || inputs.use_macos15) && 'macos-15' || 'macos-26' }}
