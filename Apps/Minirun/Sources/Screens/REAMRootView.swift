@@ -1,8 +1,5 @@
 import MinirunKit
 import SwiftUI
-#if canImport(FlintEngine)
-import FlintEngine
-#endif
 #if os(iOS)
 import UIKit
 import SafariServices
@@ -25,15 +22,14 @@ struct REAMRootView: View {
     #if canImport(OrnithLES)
     private var lesModel: OrnithLESAppModel { model.ornithSession }
     #endif
-    #if canImport(FlintEngine) && canImport(OrnithLES)
+    #if canImport(OrnithLES)
     private enum Runner: String, CaseIterable, Identifiable {
-        case ornith, ream, flint
+        case ornith, ream
         var id: String { rawValue }
         var title: String {
             switch self {
             case .ornith: "Ornith 1.5 · 35B-A3B"
             case .ream: "Qwen3.8 · REAM"
-            case .flint: "Recursive Flint · 40B-A2.5B"
             }
         }
     }
@@ -72,7 +68,7 @@ struct REAMRootView: View {
                     #endif
                 }
                 .padding(.horizontal)
-                Text("Välj en av tre verifierade körmotorer eller hämta andra GGUF-filer från Hugging Face. Community-filer sparas lokalt och SHA-256-kontrolleras, men kräver en kompatibel motor innan de kan köras.")
+                Text("Välj Ornith eller REAM som verifierad motor, eller hämta fler GGUF-filer från Hugging Face. Community-modeller behöver en kompatibel inferensmotor innan de kan köras.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .padding(.horizontal)
@@ -81,8 +77,6 @@ struct REAMRootView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     switch activeRunner {
-                    case .flint:
-                        FlintView(model: model.flintSession)
                     case .ream:
                         REAMChatPage(model: model, discard: { confirmation = .discard })
                             .navigationTitle("Qwen3.8 · REAM")
@@ -105,20 +99,12 @@ struct REAMRootView: View {
         #if canImport(FlintEngine) && canImport(OrnithLES)
         .task {
             if activeRunner == .ream { model.activateForChatModel(.ream) }
-            model.showsFlint = activeRunner == .flint
-            // Restoring the Flint page must not make its LAN API available
-            // while the app is backgrounded or transitioning to foreground.
-            if activeRunner == .flint { model.flintSession.setActive(scenePhase == .active) }
         }
         .onChange(of: scenePhase) { _, phase in
             switch activeRunner {
             case .ream:
                 if phase == .background { model.releaseInferenceResources() }
                 else if phase == .active { model.refreshStorage() }
-            case .flint:
-                // Flint owns both chat and LAN serving. Invalidate its gate
-                // and cancel active work before iOS suspends the process.
-                model.flintSession.setActive(phase == .active)
             case .ornith:
                 break // OrnithLESView manages its own lifecycle.
             }
@@ -143,11 +129,8 @@ struct REAMRootView: View {
             switch activeRunner {
             case .ornith: await lesModel.shutdown()
             case .ream: await model.pauseForAlternateRunner()
-            case .flint: await model.flintSession.shutdown()
             }
             if target == .ream { model.activateForChatModel(.ream) }
-            if target == .flint { model.flintSession.setActive(scenePhase == .active) }
-            model.showsFlint = target == .flint
             activeRunner = target
             UserDefaults.standard.set(target.rawValue, forKey: "FlashLocal.activeInferenceRunner")
             model.isSwitchingInferenceModel = false
@@ -156,7 +139,7 @@ struct REAMRootView: View {
     #endif
 }
 
-#if os(iOS) && canImport(FlintEngine) && canImport(OrnithLES)
+#if os(iOS) && canImport(OrnithLES)
 /// Only exact, SHA-256-pinned GGUF files are admitted by the current engines.
 /// Other files in the same repositories are not automatically compatible.
 private struct HuggingFaceGGUFBrowser: View {
@@ -258,10 +241,7 @@ private struct HuggingFaceGGUFBrowser: View {
                   downloadURL: PinnedGGUFDownload.primaryOrnith.url),
             .init(id: "ream", title: "Qwen3.8 · REAM",
                   fileName: PinnedGGUFDownload.primaryREAM.manifest.fileName,
-                  downloadURL: PinnedGGUFDownload.primaryREAM.url),
-            .init(id: "flint", title: "Recursive Flint · 40B-A2.5B",
-                  fileName: FlintArtifact.manifest.fileName,
-                  downloadURL: FlintArtifact.sourceURL)
+                  downloadURL: PinnedGGUFDownload.primaryREAM.url)
         ]
     }
     // Derive repository pages from the very same pinned URLs used by the
