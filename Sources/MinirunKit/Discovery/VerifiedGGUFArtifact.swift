@@ -182,6 +182,26 @@ public final class VerifiedGGUFArtifact: @unchecked Sendable {
         }
     }
 
+    /// A cached capability remains pinned to its original descriptor even if
+    /// another file replaces its pathname. Before reusing that capability for
+    /// a NEW model load, require the installed pathname to name the same file.
+    /// This is intentionally separate from assertUnchanged(): active inference
+    /// must keep reading the verified descriptor, not follow a mutable path.
+    public func assertStillInstalled(insideRoot root: URL) throws {
+        try assertUnchanged()
+        guard root.isFileURL else { throw GGUFError.invalid("non-file model root") }
+        let directory = Darwin.open(root.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        guard directory >= 0 else { throw Self.posixError() }
+        defer { _ = Darwin.close(directory) }
+        let installed = Darwin.openat(directory, manifest.fileName, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+        guard installed >= 0 else { throw Self.posixError() }
+        defer { _ = Darwin.close(installed) }
+        guard Stamp(try Self.status(installed)) == stamp else {
+            throw GGUFError.invalid("installed model pathname no longer names the verified file")
+        }
+        try assertUnchanged()
+    }
+
     /// TileReader takes ownership of this duplicate. The verified file is never
     /// reopened by pathname, including after a Files rename/replacement.
     public func duplicateForReading() throws -> Int32 {
