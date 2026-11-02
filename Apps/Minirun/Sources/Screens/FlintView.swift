@@ -264,10 +264,14 @@ private struct FlintAPIControls: View {
             if !model.apiListening { SecureField("Egen API-nyckel · valfritt", text: $model.apiKeyDraft).textFieldStyle(.roundedBorder) }
             ForEach(model.apiURLs, id: \.self) { Text($0).font(.system(.callout, design: .monospaced)).textSelection(.enabled) }
             if !model.apiAccessKey.isEmpty { Button("Kopiera API-nyckeln") { Self.copy(model.apiAccessKey) } }
-            Picker("Dator", selection: $selectedComputer) {
+            // Bind to a known enum value even when older defaults contain a
+            // client that this app version no longer supports.
+            Picker("Dator", selection: Binding(
+                get: { computer.rawValue }, set: { selectedComputer = $0 })) {
                 ForEach(LocalAgentSetup.Computer.allCases) { Text($0.title).tag($0.rawValue) }
             }
-            Picker("Agentverktyg", selection: $selectedClient) {
+            Picker("Agentverktyg", selection: Binding(
+                get: { client.rawValue }, set: { selectedClient = $0 })) {
                 ForEach(LocalAgentSetup.Client.allCases) { Text($0.title).tag($0.rawValue) }
             }
             if let setup {
