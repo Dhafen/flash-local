@@ -620,8 +620,11 @@ enum RemoteModelBrowserPresentation {
               url.user == nil, url.password == nil, url.port == nil,
               url.query == nil, url.fragment == nil else { return nil }
         let parts = url.pathComponents.filter { $0 != "/" }
-        guard parts.count >= 2, !parts[0].isEmpty, !parts[1].isEmpty,
-              !parts.contains("..") else { return nil }
+        guard parts.count >= 2,
+              parts[0].range(of: #"^[A-Za-z0-9][A-Za-z0-9._-]*$"#, options: .regularExpression) != nil,
+              parts[1].range(of: #"^[A-Za-z0-9][A-Za-z0-9._-]*$"#, options: .regularExpression) != nil,
+              parts[0] != ".", parts[0] != "..",
+              parts[1] != ".", parts[1] != ".." else { return nil }
         return url
     }
 
