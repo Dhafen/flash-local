@@ -330,7 +330,15 @@ public actor FlintSession {
             }
             throw error
         }
-        try artifact?.assertUnchanged()
+        do {
+            try artifact?.assertUnchanged()
+        } catch {
+            // Native evaluation may already have advanced KV. If the verified
+            // model changed during that call, the session cannot be reused:
+            // never publish token state or continue with a stale mapping.
+            unload()
+            throw error
+        }
         stateTokens.append(contentsOf: tokens); lastLogits = copyLogits ? output : nil; hasCurrentLogits = finalRow
         return lastLogits
     }
