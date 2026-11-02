@@ -245,6 +245,7 @@ private struct RemoteModelBrowserView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
+    @State private var repositoryLink = ""
 
     var body: some View {
         NavigationStack {
@@ -304,6 +305,7 @@ private struct RemoteModelBrowserView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 statusBar
+                repositoryLinkEntry
 
                 if let error = model.catalogError {
                     NamedErrorCard(
@@ -354,6 +356,35 @@ private struct RemoteModelBrowserView: View {
             }
         }
         .mrProductPage()
+    }
+
+    /// An explicit entry point for arbitrary Hugging Face repositories. Opening
+    /// the repository does not claim that its weights or tokenizer are runnable.
+    private var repositoryLinkEntry: some View {
+        VStack(alignment: .leading, spacing: MRSpace.s2) {
+            Text("Explore a Hugging Face link")
+                .font(MRType.headline)
+            HStack(spacing: MRSpace.s2) {
+                TextField("https://huggingface.co/owner/model", text: $repositoryLink)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .accessibilityIdentifier("huggingface-repository-link")
+                if let url = RemoteModelBrowserPresentation.repositoryURL(repositoryLink) {
+                    Link("Open", destination: url)
+                        .accessibilityIdentifier("huggingface-open-repository")
+                }
+            }
+            Text("Opens the repository for inspection only. Arbitrary GGUF/MLX download and inference are not yet supported.")
+                .font(MRType.caption)
+                .foregroundStyle(MRColor.secondary)
+            if !repositoryLink.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && RemoteModelBrowserPresentation.repositoryURL(repositoryLink) == nil {
+                Text("Enter a public huggingface.co model repository URL.")
+                    .font(MRType.caption)
+                    .foregroundStyle(MRColor.caution)
+            }
+        }
+        .padding(MRSpace.s4)
     }
 
     private var statusBar: some View {
@@ -576,6 +607,20 @@ enum RemoteModelBrowserPresentation {
 
     static func summary(count: Int) -> String {
         count == 1 ? "1 published model" : "\(count) published models"
+    }
+
+    /// Accept only a repository on Hugging Face; never open arbitrary hosts
+    /// or URLs containing credentials via the model-browser entry point.
+    static func repositoryURL(_ raw: String) -> URL? {
+        guard let url = URL(string: raw.trimmingCharacters(in: .whitespacesAndNewlines)),
+              url.scheme?.lowercased() == "https",
+              url.host?.lowercased() == "huggingface.co",
+              url.user == nil, url.password == nil, url.port == nil,
+              url.query == nil, url.fragment == nil else { return nil }
+        let parts = url.pathComponents.filter { $0 != "/" }
+        guard parts.count >= 2, !parts[0].isEmpty, !parts[1].isEmpty,
+              !parts.contains("..") else { return nil }
+        return url
     }
 
     static func matches(_ published: PublishedModelReference, query: String) -> Bool {
