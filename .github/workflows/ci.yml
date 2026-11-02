@@ -51,6 +51,7 @@ concurrency:
   # Hourly project commits must not abort a running test or signing job.
   # Delivery runs remain in their separate -delivery concurrency group.
   cancel-in-progress: false
+  queue: max
 
 permissions:
   contents: read
