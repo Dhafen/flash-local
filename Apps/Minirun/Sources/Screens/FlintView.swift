@@ -222,8 +222,12 @@ private struct FlintMeasurementPage: View {
 
 private struct FlintAPIControls: View {
     @Bindable var model: FlintAppModel
-    @State private var client: LocalAgentSetup.Client = .opencode
-    @State private var computer: LocalAgentSetup.Computer = .windows
+    // Remember only the selected setup UI options, never the LAN API key.
+    // Raw string storage also tolerates a client removed in a later build.
+    @AppStorage("FlashLocal.Flint.API.Client.v1") private var selectedClient = LocalAgentSetup.Client.opencode.rawValue
+    @AppStorage("FlashLocal.Flint.API.Computer.v1") private var selectedComputer = LocalAgentSetup.Computer.windows.rawValue
+    private var client: LocalAgentSetup.Client { .init(rawValue: selectedClient) ?? .opencode }
+    private var computer: LocalAgentSetup.Computer { .init(rawValue: selectedComputer) ?? .windows }
     private var setup: LocalAgentSetup? {
         guard let url = model.apiURLs.first else { return nil }
         return try? .init(client: client, computer: computer, baseURL: url,
@@ -260,8 +264,12 @@ private struct FlintAPIControls: View {
             if !model.apiListening { SecureField("Egen API-nyckel · valfritt", text: $model.apiKeyDraft).textFieldStyle(.roundedBorder) }
             ForEach(model.apiURLs, id: \.self) { Text($0).font(.system(.callout, design: .monospaced)).textSelection(.enabled) }
             if !model.apiAccessKey.isEmpty { Button("Kopiera API-nyckeln") { Self.copy(model.apiAccessKey) } }
-            Picker("Dator", selection: $computer) { ForEach(LocalAgentSetup.Computer.allCases) { Text($0.title).tag($0) } }
-            Picker("Agentverktyg", selection: $client) { ForEach(LocalAgentSetup.Client.allCases) { Text($0.title).tag($0) } }
+            Picker("Dator", selection: $selectedComputer) {
+                ForEach(LocalAgentSetup.Computer.allCases) { Text($0.title).tag($0.rawValue) }
+            }
+            Picker("Agentverktyg", selection: $selectedClient) {
+                ForEach(LocalAgentSetup.Client.allCases) { Text($0.title).tag($0.rawValue) }
+            }
             if let setup {
                 Text("1. Hämta startskriptet").font(.headline)
                 Text(setup.installCommand).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
