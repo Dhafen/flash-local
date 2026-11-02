@@ -56,8 +56,8 @@ int main() {
         auto stats = worker.snapshot();
         if (stats.advised_bytes == 0 && stats.failures == 0)
             throw std::runtime_error("Read-ahead worker never attempted an advisory operation");
-        if (stats.requests != 6 + 2 + 6 + 600 || stats.accepted == 0 || stats.drops < 8)
-            throw std::runtime_error("Read-ahead queue rejected its bounded test invariants");
+        if (stats.requests != 6 + 2 + 6 + 600 || stats.accepted == 0 || stats.drops < 8 || stats.coalesced == 0)
+            throw std::runtime_error("Read-ahead queue or adjacent range coalescing rejected its bounded invariants");
         std::printf("FLINT_ADVICE_CONTROL accepted=%llu drops=%llu duplicates=%llu advised=%llu failures=%llu joined=true\n",
             (unsigned long long)stats.accepted, (unsigned long long)stats.drops,
             (unsigned long long)stats.duplicates, (unsigned long long)stats.advised_bytes,
