@@ -204,13 +204,14 @@ private struct HuggingFaceGGUFBrowser: View {
                 // Recover from a completed download whose index write was
                 // interrupted: always re-verify before recording the entry.
                 let fileURL = root.appendingPathComponent(entry.installedName)
+                let verified: VerifiedGGUFArtifact
                 if FileManager.default.fileExists(atPath: fileURL.path) {
-                    _ = try await Task.detached(priority: .utility) {
+                    verified = try await Task.detached(priority: .utility) {
                         try VerifiedGGUFArtifact.verify(insideRoot: root, manifest: source.manifest)
                     }.value
                 } else {
                     let transfer = try GGUFModelTransfer()
-                    _ = try await transfer.download(insideRoot: root, source: source,
+                    verified = try await transfer.download(insideRoot: root, source: source,
                         onProgress: { progress in
                             Task { @MainActor in
                                 guard downloadingID == entry.id else { return }
@@ -223,7 +224,7 @@ private struct HuggingFaceGGUFBrowser: View {
                         })
                 }
                 try Task.checkCancellation()
-                try CommunityGGUFCatalog.recordVerified(entry, in: root)
+                try CommunityGGUFCatalog.recordVerified(entry, artifact: verified, in: root)
                 completedFraction = 1
                 communityStatus = "\(entry.name) är nedladdad och verifierad. Körning kräver en kompatibel motor."
             } catch is CancellationError {
