@@ -1695,6 +1695,22 @@ final class HuggingFaceRepositoryLinkTests: XCTestCase {
         XCTAssertEqual(RemoteModelBrowserPresentation.repositoryID(url), "owner/model-name")
     }
 
+    func testDeepHuggingFaceLinksOpenOnlyValidatedRepositoryRoot() {
+        let pasted = [
+            "https://huggingface.co/owner/model-name/tree/main",
+            "https://huggingface.co/owner/model-name/resolve/main/weights.gguf",
+            "https://huggingface.co/owner/model-name/../../unrelated",
+            "https://huggingface.co/owner/model-name/%2e%2e/unrelated",
+        ]
+        for input in pasted {
+            let url = RemoteModelBrowserPresentation.repositoryURL(input)
+            XCTAssertEqual(url?.absoluteString, "https://huggingface.co/owner/model-name", input)
+            if let url {
+                XCTAssertEqual(RemoteModelBrowserPresentation.repositoryID(url), "owner/model-name")
+            }
+        }
+    }
+
     func testRejectsUntrustedOrMalformedLocations() {
         let invalid = [
             "https://huggingface.co.evil.example/owner/model",
