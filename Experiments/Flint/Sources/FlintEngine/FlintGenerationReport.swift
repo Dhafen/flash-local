@@ -45,6 +45,7 @@ public struct FlintGenerationReport: Codable, Sendable {
         decodeForwardSeconds.isFinite && decodeForwardSeconds > 0 &&
         prefillSeconds.isFinite && prefillSeconds >= 0 &&
         elapsedSeconds.isFinite && elapsedSeconds > 0 &&
+        (timeToFirstTokenSeconds.map { $0.isFinite && $0 >= 0 && $0 <= elapsedSeconds } ?? true) &&
         (0...promptTokenIDs.count).contains(reusedPromptTokens) &&
         decodeTokensPerSecond != nil
     }
