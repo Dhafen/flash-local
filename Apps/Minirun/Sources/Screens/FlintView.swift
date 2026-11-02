@@ -48,6 +48,7 @@ struct FlintView: View {
 private struct FlintModelControls: View {
     @Bindable var model: FlintAppModel
     @State private var temperature = ""
+    @State private var confirmingModelRemoval = false
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Recursive Flint · 40B-A2.5B").font(.headline)
@@ -76,6 +77,14 @@ private struct FlintModelControls: View {
                     Button("Ladda modell") { model.load() }.buttonStyle(.borderedProminent).disabled(!model.canStart || model.ready)
                     Button("Ladda ur modell") { Task { await model.unloadModel() } }.buttonStyle(.bordered)
                         .disabled(model.isShuttingDown || (!model.ready && !model.isBusy))
+                }
+                if !model.ready {
+                    Button("Ta bort installerad modellfil", role: .destructive) {
+                        confirmingModelRemoval = true
+                    }
+                    .disabled(!model.canStart || model.apiListening)
+                    Text("Om SHA256-kontrollen misslyckas måste den felaktiga installerade filen tas bort innan hämtning kan göras om. Chatt och delvis hämtade filer behålls.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
             }
             DisclosureGroup("Inställningar") {
@@ -121,6 +130,14 @@ private struct FlintModelControls: View {
                 Text("Första aktiveringen jämför fyra verkliga logitpositioner och beräknade top-6-expertval mellan CPU och Metal. Godkänd kontroll sparas per modell, appbygge och inställning. Full modellkvalitet och lång kontext behöver fortfarande testas.")
                     .font(.caption2).foregroundStyle(.secondary)
             }
+        }
+        .confirmationDialog("Ta bort den installerade Flint-modellfilen?", isPresented: $confirmingModelRemoval,
+                            titleVisibility: .visible) {
+            Button("Ta bort modellfilen (25,99 GB)", role: .destructive) {
+                Task { await model.removeInstalledModel() }
+            }
+        } message: {
+            Text("Endast den installerade Flint-GGUF-filen tas bort. Chatt och återupptagbara .partial-hämtningar behålls. Modellen måste hämtas igen.")
         }
     }
 }
