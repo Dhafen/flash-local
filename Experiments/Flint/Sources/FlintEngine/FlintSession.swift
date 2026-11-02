@@ -310,7 +310,14 @@ public actor FlintSession {
     private func append(tokens: [Int32], finalRow: Bool, copyLogits: Bool) throws -> [Float]? {
         let owner = try self.owner()
         guard !tokens.isEmpty, tokens.count <= configuration.evaluationBatch else { throw FlintFailure.invalid("Invalid Flint evaluation batch") }
-        try artifact?.assertUnchanged()
+        do {
+            try artifact?.assertUnchanged()
+        } catch {
+            // Do not retain a native handle after its verified model identity
+            // is invalidated, even when no new evaluation has started.
+            unload()
+            throw error
+        }
         if Task.isCancelled { cancellation.cancel() }
         var output = copyLogits ? [Float](repeating: 0, count: Int(flf_vocab_size(owner.pointer))) : []
         let status = tokens.withUnsafeBufferPointer { ids in
