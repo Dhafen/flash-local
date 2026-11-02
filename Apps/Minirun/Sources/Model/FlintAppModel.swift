@@ -273,7 +273,16 @@ final class FlintAppModel {
             }
         }
     }
-    func stop() { gate.cancel(); session.cancel(); activeGeneration?.cancel(); operation?.cancel() }
+    func stop() {
+        gate.cancel()
+        session.cancel()
+        activeGeneration?.cancel()
+        operation?.cancel()
+        // A LAN request has its own forwarding Task, separate from the chat
+        // operation. Cancelling only the native producer can still leave its
+        // buffered events flowing to the client after Stop/backgrounding.
+        apiOperation?.cancel()
+    }
     func unloadModel() async {
         if let shutdownOperation { await shutdownOperation.value; return }
         isShuttingDown = true; ready = false; gate.setAvailable(false); stop()
