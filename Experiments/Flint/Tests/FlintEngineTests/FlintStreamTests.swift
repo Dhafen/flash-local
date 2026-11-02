@@ -352,7 +352,8 @@ final class FlintStreamTests: XCTestCase {
 
     func testDecodeBenchmarkPublicationRejectsShortOrInvalidMeasurements() {
         func report(prompt: Int = 1000, generated: Int = 128, decode: Double = 2,
-                    reused: Int = 0, prefill: Double = 1, elapsed: Double = 4) -> FlintGenerationReport {
+                    reused: Int = 0, prefill: Double = 1, elapsed: Double = 4,
+                    ttft: Double? = nil) -> FlintGenerationReport {
             FlintGenerationReport(modelSHA256: "test", nativeRevision: "test", contextTokens: 8192,
                 evaluationBatch: 128, physicalBatch: 4, cpuThreads: 4,
                 servingMode: nil, f32KV: nil, flashAttentionActive: nil,
@@ -362,7 +363,7 @@ final class FlintStreamTests: XCTestCase {
                 generatedTokenIDs: Array(repeating: 2, count: generated),
                 reusedPromptTokens: reused, prefillSeconds: prefill,
                 decodeForwardSeconds: decode, elapsedSeconds: elapsed,
-                timeToFirstTokenSeconds: nil, maximumObservedFootprintBytes: 0,
+                timeToFirstTokenSeconds: ttft, maximumObservedFootprintBytes: 0,
                 explicitExpertBytesRead: 0, maximumThermalState: 0, finishReason: "length")
         }
         XCTAssertTrue(report().isComparableDecodeBenchmark)
@@ -377,6 +378,11 @@ final class FlintStreamTests: XCTestCase {
         XCTAssertNil(report(decode: .leastNonzeroMagnitude).decodeTokensPerSecond)
         XCTAssertFalse(report(prefill: -.infinity).isComparableDecodeBenchmark)
         XCTAssertFalse(report(elapsed: 0).isComparableDecodeBenchmark)
+        XCTAssertTrue(report(ttft: 0.3).isComparableDecodeBenchmark)
+        XCTAssertFalse(report(ttft: .nan).isComparableDecodeBenchmark)
+        XCTAssertFalse(report(ttft: .infinity).isComparableDecodeBenchmark)
+        XCTAssertFalse(report(ttft: -0.1).isComparableDecodeBenchmark)
+        XCTAssertFalse(report(ttft: 5).isComparableDecodeBenchmark)
         XCTAssertFalse(report(reused: 1001).isComparableDecodeBenchmark)
         XCTAssertNil(report(decode: .nan).decodeTokensPerSecond)
         XCTAssertEqual(report().decodeTokensPerSecond, 64)
