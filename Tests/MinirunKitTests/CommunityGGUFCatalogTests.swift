@@ -54,7 +54,7 @@ final class CommunityGGUFCatalogTests: XCTestCase {
                                                            revision: revision).isEmpty)
     }
 
-    func testInstalledLibraryRequiresLocalVerifiedFilenameAndDoesNotEnableInference() throws {
+    func testUnverifiedLocalFileIsNotAdmittedToCommunityLibrary() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -63,9 +63,9 @@ final class CommunityGGUFCatalogTests: XCTestCase {
         ]), repository: "owner/repo", revision: revision).first)
         XCTAssertTrue(CommunityGGUFCatalog.installed(in: root).isEmpty)
         try Data("model".utf8).write(to: root.appendingPathComponent(item.installedName))
-        try CommunityGGUFCatalog.recordVerified(item, in: root)
-        XCTAssertEqual(CommunityGGUFCatalog.installed(in: root), [item])
-        try FileManager.default.removeItem(at: root.appendingPathComponent(item.installedName))
-        XCTAssertTrue(CommunityGGUFCatalog.installed(in: root).isEmpty)
+        XCTAssertThrowsError(try VerifiedGGUFArtifact.verify(
+            insideRoot: root, manifest: item.pinnedSource().manifest))
+        XCTAssertTrue(CommunityGGUFCatalog.installed(in: root).isEmpty,
+                      "An unverified local file must not be shown as installed")
     }
 }
