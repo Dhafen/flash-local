@@ -19,6 +19,9 @@ struct REAMRootView: View {
     }
     @State private var alternateRunner: AlternateRunner?
     @State private var performanceModel = OrnithPerformanceAppModel.live()
+    #if os(iOS)
+    @State private var showingHuggingFace = false
+    #endif
     #if canImport(OrnithLES)
     private var lesModel: OrnithLESAppModel { model.ornithSession }
     #endif
@@ -35,9 +38,6 @@ struct REAMRootView: View {
     }
     @State private var activeRunner: Runner =
         Runner(rawValue: UserDefaults.standard.string(forKey: "FlashLocal.activeInferenceRunner") ?? "") ?? .ornith
-    #if os(iOS)
-    @State private var showingHuggingFace = false
-    #endif
     #endif
 
     var body: some View {
@@ -60,9 +60,6 @@ struct REAMRootView: View {
                     #if os(iOS)
                     Button("Hugging Face") { showingHuggingFace = true }
                         .disabled(model.isSwitchingInferenceModel)
-                        .sheet(isPresented: $showingHuggingFace) {
-                            HuggingFaceGGUFBrowser().ignoresSafeArea()
-                        }
                     #else
                     Link("Hugging Face", destination: URL(string: "https://huggingface.co/models?library=gguf")!)
                     #endif
@@ -94,6 +91,19 @@ struct REAMRootView: View {
             #endif
             #endif
         }
+        #if os(iOS)
+        .sheet(isPresented: $showingHuggingFace) {
+            HuggingFaceGGUFBrowser().ignoresSafeArea()
+        }
+        #if !canImport(OrnithLES)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Hugging Face") { showingHuggingFace = true }
+                    .accessibilityIdentifier("hf-community-open")
+            }
+        }
+        #endif
+        #endif
         // Restore only the selected page. Model files are never downloaded or
         // loaded automatically merely because a preference was restored.
         #if canImport(OrnithLES)
@@ -139,7 +149,7 @@ struct REAMRootView: View {
     #endif
 }
 
-#if os(iOS) && canImport(OrnithLES)
+#if os(iOS)
 /// Only exact, SHA-256-pinned GGUF files are admitted by the current engines.
 /// Other files in the same repositories are not automatically compatible.
 private struct HuggingFaceGGUFBrowser: View {
