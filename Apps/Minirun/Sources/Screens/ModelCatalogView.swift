@@ -368,11 +368,15 @@ private struct RemoteModelBrowserView: View {
                 TextField("https://huggingface.co/owner/model", text: $repositoryLink)
                     .accessibilityIdentifier("huggingface-repository-link")
                 if let url = RemoteModelBrowserPresentation.repositoryURL(repositoryLink) {
+                    Button("Find in catalog") {
+                        query = RemoteModelBrowserPresentation.repositoryID(url) ?? ""
+                    }
+                    .accessibilityIdentifier("huggingface-find-in-catalog")
                     Link("Open", destination: url)
                         .accessibilityIdentifier("huggingface-open-repository")
                 }
             }
-            Text("Opens the repository for inspection only. Arbitrary GGUF/MLX download and inference are not yet supported.")
+            Text("Find checks the supported model catalog; Open shows the repository in Hugging Face. Unlisted GGUF/MLX models cannot yet be imported.")
                 .font(MRType.caption)
                 .foregroundStyle(MRColor.secondary)
             if !repositoryLink.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -619,6 +623,12 @@ enum RemoteModelBrowserPresentation {
         guard parts.count >= 2, !parts[0].isEmpty, !parts[1].isEmpty,
               !parts.contains("..") else { return nil }
         return url
+    }
+
+    static func repositoryID(_ url: URL) -> String? {
+        let parts = url.pathComponents.filter { $0 != "/" }
+        guard parts.count >= 2 else { return nil }
+        return parts[0] + "/" + parts[1]
     }
 
     static func matches(_ published: PublishedModelReference, query: String) -> Bool {
