@@ -205,6 +205,7 @@ final class FlintAppModel {
     func load() {
         guard canStart, !ready, hasModel else { return }
         savePreferences()
+        numericalReportURL = nil
         let id = begin("Verifierar Flint-filen…"); loadingStartedAt = Date()
         let requestedContext = contextProfile
         let requestedExpertSlots = expertCacheSlots
@@ -300,7 +301,7 @@ final class FlintAppModel {
         do {
             let request = try request(), turn = FlintChatTurn(id: UUID(), prompt: prompt)
             // Never expose a previous turn's metrics as this request's report.
-            report = nil
+            report = nil; reportURL = nil
             history.append(turn); prompt = ""; saveHistory(); savePreferences()
             let id = begin("Läser prompt…")
             operation = Task {
@@ -348,7 +349,7 @@ final class FlintAppModel {
         guard canSend, !apiListening else { return }
         // A previous benchmark report must never be mistaken for this run's
         // result if the new stream ends early without a completion event.
-        report = nil
+        report = nil; reportURL = nil
         let id = begin("Benchmark · förbereder \(promptTokens) verkliga prompttoken")
         operation = Task {
             defer { activeGeneration = nil; end(id) }
@@ -420,7 +421,7 @@ final class FlintAppModel {
         guard canSend else { throw LocalAPIError(status: isBusy ? 429 : 503, message: "Flint is busy, unloaded or the phone app is not active") }
         let id = begin("API · läser prompt…")
         apiPromptProcessed = 0; apiPromptTotal = 0; apiGeneratedTokens = 0
-        report = nil
+        report = nil; reportURL = nil
         apiRequestPhase = "Tar emot och tokeniserar prompt…"
         let source: LocalChatGeneration
         do {
