@@ -107,7 +107,7 @@ public struct FlintMetrics: Codable, Sendable {
 // cleared only after its loader workers return; cancellation never accesses it.
 // No native pointer crosses this bridge. Replace the lock with checked atomic
 // storage when the project's minimum Swift toolchain supports that migration.
-private final class FlintCancellation: @unchecked Sendable {
+final class FlintCancellation: @unchecked Sendable {
     private let lock = NSLock()
     private var cancelled = false
     private var ceiling: UInt64 = 0
@@ -119,6 +119,12 @@ private final class FlintCancellation: @unchecked Sendable {
         maximumThermal = ProcessInfo.processInfo.thermalState.rawValue; lock.unlock()
     }
     func cancel() { lock.lock(); cancelled = true; lock.unlock() }
+    // The stream may be cancelled by its consumer without cancelling the
+    // producer Task. Check the shared flag at the terminal publication gate.
+    func checkCancellation() throws {
+        lock.lock(); let stopped = cancelled; lock.unlock()
+        if stopped { throw CancellationError() }
+    }
     func observation() -> (peak: UInt64, thermal: Int) {
         lock.lock(); defer { lock.unlock() }; return (peak, maximumThermal)
     }
@@ -126,8 +132,9 @@ private final class FlintCancellation: @unchecked Sendable {
         lock.lock(); let stopped = cancelled, limit = ceiling; lock.unlock()
         guard let memory = ProcessFootprint.current() else { return true }
         lock.lock(); peak = max(peak, memory.footprintBytes)
-        maximumThermal = max(maximumThermal, ProcessInfo.processInfo.thermalState.rawValue); lock.unlock()
-        return stopped || memory.footprintBytes >= limit - min(limit, 128 << 20) ||
+        maximumThermal = max(maximumThermal, ProcessInfo.processInfo.thermalState.rawValue)
+        let cancelledDuringSampling = cancelled; lock.unlock()
+        return stopped || cancelledDuringSampling || memory.footprintBytes >= limit - min(limit, 128 << 20) ||
             memory.availableBytes.map({ $0 < 128 << 20 }) == true
     }
 }
@@ -349,7 +356,7 @@ public actor FlintSession {
 
 /// One request's cancellation cannot cancel a later request using the same
 /// loaded model. Only the locked cancellation flag crosses the actor boundary.
-private final class FlintRequestLease: @unchecked Sendable {
+final class FlintRequestLease: @unchecked Sendable {
     private let lock = NSLock()
     private var finished = false
     private let control: FlintCancellation
@@ -472,9 +479,11 @@ extension FlintSession {
         finishedReport.advisoryBytes = final.adviceBytes - initial.adviceBytes
         finishedReport.advisoryFailures = final.adviceFailures - initial.adviceFailures
         try Task.checkCancellation()
+        try cancellation.checkCancellation()
         try emit(.complete(.init(promptTokens: prompt.count, completionTokens: generated.count, reasoningTokens: reasoningTokens,
             forcedTokens: 0, finishReason: finish, metrics: metrics)))
         try Task.checkCancellation()
+        try cancellation.checkCancellation()
         // Publish only after the terminal event was accepted. The consumer
         // independently validates EOF and cancellation before using it.
         generationReport = finishedReport
