@@ -17,6 +17,24 @@ private final class FlintAppGate: @unchecked Sendable {
     func canServe() -> Bool { lock.lock(); defer { lock.unlock() }; return available }
 }
 
+// Tracks the request admitted while session.start is still suspended on the
+// native actor. Stopping the LAN server invalidates its late result without
+// cancelling an unrelated foreground chat or benchmark.
+struct FlintAPIStartupLease {
+    private(set) var pending: UUID?
+    mutating func begin(_ id: UUID) { pending = id }
+    mutating func invalidate() -> Bool {
+        let wasPending = pending != nil
+        pending = nil
+        return wasPending
+    }
+    mutating func accept(_ id: UUID) -> Bool {
+        guard pending == id else { return false }
+        pending = nil
+        return true
+    }
+}
+
 private actor FlintFileStore {
     private var verified: VerifiedGGUFArtifact?
     func artifact(root: URL, gate: FlintAppGate) throws -> VerifiedGGUFArtifact {
@@ -106,6 +124,7 @@ final class FlintAppModel {
     @ObservationIgnored private let gate = FlintAppGate()
     @ObservationIgnored private var operation: Task<Void, Never>?
     @ObservationIgnored private var apiOperation: Task<Void, Never>?
+    @ObservationIgnored private var apiStartup = FlintAPIStartupLease()
     @ObservationIgnored private var shutdownOperation: Task<Void, Never>?
     @ObservationIgnored private var activeGeneration: LocalChatGeneration?
     @ObservationIgnored private var apiServer: LocalModelAPIServer?
@@ -420,6 +439,7 @@ final class FlintAppModel {
     private func openAPI(_ request: LocalChatRequest) async throws -> LocalChatGeneration {
         guard canSend else { throw LocalAPIError(status: isBusy ? 429 : 503, message: "Flint is busy, unloaded or the phone app is not active") }
         let id = begin("API · läser prompt…")
+        apiStartup.begin(id)
         apiPromptProcessed = 0; apiPromptTotal = 0; apiGeneratedTokens = 0
         report = nil; reportURL = nil
         apiRequestPhase = "Tar emot och tokeniserar prompt…"
@@ -434,8 +454,15 @@ final class FlintAppModel {
                 }
             })
         } catch {
-            apiRequestPhase = "Förfrågan misslyckades"
+            if apiStartup.accept(id) { apiRequestPhase = "Förfrågan misslyckades" }
             end(id); throw error
+        }
+        // The listener may have been stopped while native admission was
+        // running. Never start forwarding a late generation to a closed API.
+        guard apiStartup.accept(id), apiID != nil, sceneIsActive else {
+            source.cancel()
+            end(id)
+            throw CancellationError()
         }
         activeGeneration = source
         let pair = AsyncThrowingStream<LocalChatEvent, Error>.makeStream(bufferingPolicy: .bufferingOldest(512))
@@ -482,6 +509,10 @@ final class FlintAppModel {
         return .init(events: pair.stream, cancel: source.cancel)
     }
     func stopAPI() {
+        // session.start may still be executing before apiOperation exists.
+        // Cancel that specific startup rather than leaving native work alive
+        // after the listener has been shut down.
+        if apiStartup.invalidate() { gate.cancel(); session.cancel() }
         apiID = nil; apiServer?.stop(); apiServer = nil; apiListening = false; apiStatus = "Avstängd"; apiURLs = []; apiAccessKey = ""
         apiPromptProcessed = 0; apiPromptTotal = 0; apiGeneratedTokens = 0
         apiRequestPhase = "Ingen aktiv förfrågan"
