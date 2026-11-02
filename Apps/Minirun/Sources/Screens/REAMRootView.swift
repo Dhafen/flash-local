@@ -72,7 +72,7 @@ struct REAMRootView: View {
                     #endif
                 }
                 .padding(.horizontal)
-                Text("Appen har tre fasta modellprofiler. Hugging Face-knappen låter dig utforska GGUF-modeller, men import av valfria GGUF-filer stöds ännu inte. MLX-import kräver en separat kompatibel motor.")
+                Text("Välj en av tre verifierade körmotorer eller hämta andra GGUF-filer från Hugging Face. Community-filer sparas lokalt och SHA-256-kontrolleras, men kräver en kompatibel motor innan de kan köras.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .padding(.horizontal)
@@ -162,6 +162,84 @@ struct REAMRootView: View {
 private struct HuggingFaceGGUFBrowser: View {
     @Environment(\.dismiss) private var dismiss
     @State private var selectedPage: Page?
+    @State private var repository = "dphn/Dolphin3.0-Llama3.1-8B-GGUF"
+    @State private var availableFiles: [CommunityGGUFFile] = []
+    @State private var installedFiles: [CommunityGGUFFile] = []
+    @State private var isSearching = false
+    @State private var downloadingID: String?
+    @State private var completedFraction: Double = 0
+    @State private var communityStatus = ""
+    @State private var communityError: String?
+    @State private var downloadTask: Task<Void, Never>?
+
+    private var communityRoot: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("FlashLocal/CommunityGGUF", isDirectory: true)
+    }
+
+    private func refreshLibrary() {
+        installedFiles = CommunityGGUFCatalog.installed(in: communityRoot)
+    }
+
+    private func discover() {
+        guard !isSearching, downloadingID == nil else { return }
+        let name = repository.trimmingCharacters(in: .whitespacesAndNewlines)
+        communityError = nil; communityStatus = ""; availableFiles = []; isSearching = true
+        Task { @MainActor in
+            defer { isSearching = false }
+            do {
+                availableFiles = try await CommunityGGUFCatalog.discover(repository: name)
+                communityStatus = availableFiles.isEmpty
+                    ? "Inga GGUF-filer med verifierbart LFS-SHA256 hittades."
+                    : "\(availableFiles.count) verifierbara GGUF-filer hittades."
+            } catch {
+                communityError = error.localizedDescription
+            }
+        }
+    }
+
+    private func download(_ entry: CommunityGGUFFile) {
+        guard downloadingID == nil, !isSearching else { return }
+        communityError = nil; communityStatus = "Förbereder nedladdning…"
+        completedFraction = 0; downloadingID = entry.id
+        let root = communityRoot
+        downloadTask = Task { @MainActor in
+            defer { downloadingID = nil; downloadTask = nil; refreshLibrary() }
+            do {
+                let source = try entry.pinnedSource()
+                try LocalModelStorage.prepare(root: root)
+                // Recover from a completed download whose index write was
+                // interrupted: always re-verify before recording the entry.
+                let fileURL = root.appendingPathComponent(entry.installedName)
+                if FileManager.default.fileExists(atPath: fileURL.path) {
+                    _ = try await Task.detached(priority: .utility) {
+                        try VerifiedGGUFArtifact.verify(insideRoot: root, manifest: source.manifest)
+                    }.value
+                } else {
+                    let transfer = try GGUFModelTransfer()
+                    _ = try await transfer.download(insideRoot: root, source: source,
+                        onProgress: { progress in
+                            Task { @MainActor in
+                                guard downloadingID == entry.id else { return }
+                                completedFraction = progress.totalBytes == 0 ? 0 :
+                                    Double(progress.completedBytes) / Double(progress.totalBytes)
+                                communityStatus = progress.phase == .verifying
+                                    ? "Verifierar SHA-256 och GGUF…"
+                                    : "Hämtar \(entry.name)…"
+                            }
+                        })
+                }
+                try Task.checkCancellation()
+                try CommunityGGUFCatalog.recordVerified(entry, in: root)
+                completedFraction = 1
+                communityStatus = "\(entry.name) är nedladdad och verifierad. Körning kräver en kompatibel motor."
+            } catch is CancellationError {
+                communityStatus = "Hämtningen avbruten. Delvis nedladdade filer kan återupptas."
+            } catch {
+                communityError = error.localizedDescription
+            }
+        }
+    }
 
     private struct Page: Identifiable {
         let id: String
@@ -217,16 +295,60 @@ private struct HuggingFaceGGUFBrowser: View {
                         .accessibilityIdentifier("hf-pinned-\(entry.id)")
                     }
                 }
-                Section("Utforska andra GGUF-filer") {
-                    Button("Visa alla GGUF-modeller på Hugging Face") {
+                Section("Hämta valfri GGUF från Hugging Face") {
+                    TextField("ägare/modell", text: $repository)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .accessibilityIdentifier("hf-community-repository")
+                    Button("Sök GGUF-filer") { discover() }
+                        .disabled(isSearching || downloadingID != nil)
+                        .accessibilityIdentifier("hf-community-search")
+                    if isSearching { ProgressView("Läser filförteckning…") }
+                    ForEach(availableFiles) { entry in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(entry.path).font(.subheadline).textSelection(.enabled)
+                            Text(ByteCountFormatter.string(fromByteCount: Int64(entry.byteCount), countStyle: .file))
+                                .font(.caption).foregroundStyle(.secondary)
+                            if installedFiles.contains(where: { $0.sha256 == entry.sha256 }) {
+                                Label("Nedladdad", systemImage: "checkmark.circle")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            } else {
+                                Button("Hämta den här GGUF-filen") { download(entry) }
+                                    .disabled(downloadingID != nil || isSearching)
+                            }
+                        }
+                    }
+                    if downloadingID != nil {
+                        ProgressView(value: completedFraction)
+                        Button("Avbryt nedladdning", role: .cancel) { downloadTask?.cancel() }
+                    }
+                    if !communityStatus.isEmpty {
+                        Text(communityStatus).font(.caption).foregroundStyle(.secondary)
+                    }
+                    if let communityError {
+                        Text(communityError).font(.caption).foregroundStyle(.red)
+                            .textSelection(.enabled)
+                    }
+                    Text("Filerna hämtas till intern lagring med återupptagbara 8 MiB-intervall och kontrollerad SHA-256. En nedladdad fil är inte automatiskt körbar. Endast kompatibla modeller kan aktiveras i en separat verifierad inferensmotor.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Button("Utforska fler på Hugging Face") {
                         selectedPage = .init(id: "explore",
                             url: URL(string: "https://huggingface.co/models?library=gguf")!)
                     }
-                    Text("Endast de exakta filerna ovan har fasta SHA-256-manifest i appen. Andra GGUF-filer kan inte importeras eller köras ännu. MLX stöds inte av dessa motorer. Full inferens på fysisk iPhone är inte verifierad.")
-                        .font(.caption).foregroundStyle(.secondary)
+                }
+                if !installedFiles.isEmpty {
+                    Section("Nedladdade community-modeller") {
+                        ForEach(installedFiles) { entry in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(entry.name).font(.subheadline)
+                                Text(entry.repository).font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
                 }
             }
             .navigationTitle("Hugging Face")
+            .onAppear { refreshLibrary() }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Stäng") { dismiss() }
