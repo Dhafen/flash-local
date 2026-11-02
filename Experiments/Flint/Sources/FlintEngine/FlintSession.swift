@@ -396,6 +396,9 @@ extension FlintSession {
     /// can serve foreground chat and LAN requests without a second model copy.
     public func start(_ request: LocalChatRequest,
                       progress: @escaping @Sendable (Int, Int) -> Void = { _, _ in }) throws -> LocalChatGeneration {
+        // A cancelled caller must not create a new producer whose native
+        // cancellation flag would be reset by admission.
+        try Task.checkCancellation()
         _ = try owner()
         guard numericalAdmission, activeServingMode != nil else { throw LocalAPIError(status: 503, message: "Complete Flint's CPU/Metal admission before generation") }
         guard activeRequest == nil else { throw LocalAPIError(status: 429, message: "Flint is already serving a request") }
