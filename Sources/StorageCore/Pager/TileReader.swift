@@ -306,6 +306,13 @@ public final class TileReader: @unchecked Sendable {
         monitor.broadcast()
 
         while true {
+            // Cancellation wins over terminal entry states. The dispatcher may
+            // mark an in-flight entry abandoned before this consumer wakes;
+            // reporting regionNotScheduled in that race hides the cancellation.
+            if let reason = cancellationReason {
+                monitor.unlock()
+                throw PagerError.cancelled(reason: reason)
+            }
             switch entry.state {
             case .ready(let slot):
                 entry.state = .delivered
