@@ -261,6 +261,8 @@ final class FlintAppModel {
         guard canSend, !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         do {
             let request = try request(), turn = FlintChatTurn(id: UUID(), prompt: prompt)
+            // Never expose a previous turn's metrics as this request's report.
+            report = nil
             history.append(turn); prompt = ""; saveHistory(); savePreferences()
             let id = begin("Läser prompt…")
             operation = Task {
@@ -282,9 +284,14 @@ final class FlintAppModel {
                             break
                         }
                     }
-                    try completion.requireCompletion()
+                    try completion.requireSuccessfulEnd()
+                    guard let completedReport = await session.lastReport() else {
+                        throw FlintFailure.invalid("Flint saknar genereringsrapport för avslutat svar")
+                    }
+                    try Task.checkCancellation()
                     guard let index = history.firstIndex(where: { $0.id == turn.id }) else { throw CancellationError() }
-                    history[index].completed = true; report = await session.lastReport(); status = "Klar"
+                    report = completedReport
+                    history[index].completed = true; status = "Klar"
                 } catch { self.error = error.localizedDescription; status = "Svaret avbröts." }
             }
         } catch { self.error = error.localizedDescription }
@@ -320,9 +327,9 @@ final class FlintAppModel {
                 // Do not publish measurements until the entire stream has
                 // ended with exactly one terminal event. Late events or an
                 // incomplete stream invalidate this run, not just its status.
-                try completion.requireCompletion()
-                try Task.checkCancellation()
+                try completion.requireSuccessfulEnd()
                 report = await session.lastReport()
+                try Task.checkCancellation()
                 guard let report else {
                     status = "Benchmark saknar genereringsrapport · ingen giltig mätning"
                     return
@@ -370,6 +377,7 @@ final class FlintAppModel {
         guard canSend else { throw LocalAPIError(status: isBusy ? 429 : 503, message: "Flint is busy, unloaded or the phone app is not active") }
         let id = begin("API · läser prompt…")
         apiPromptProcessed = 0; apiPromptTotal = 0; apiGeneratedTokens = 0
+        report = nil
         apiRequestPhase = "Tar emot och tokeniserar prompt…"
         let source: LocalChatGeneration
         do {
@@ -410,7 +418,10 @@ final class FlintAppModel {
                         terminal = event
                     }
                 }
-                try completion.requireCompletion()
+                try completion.requireSuccessfulEnd()
+                guard let completedReport = await session.lastReport() else {
+                    throw FlintFailure.invalid("Flint saknar genereringsrapport för API-svaret")
+                }
                 try Task.checkCancellation()
                 guard let terminal else { throw FlintEventCompletion.Failure.missingCompletion }
                 switch pair.continuation.yield(terminal) {
@@ -418,8 +429,8 @@ final class FlintAppModel {
                 case .dropped, .terminated: source.cancel(); throw CancellationError()
                 @unknown default: source.cancel(); throw CancellationError()
                 }
-                report = await session.lastReport()
-                apiGeneratedTokens = report?.generatedTokenIDs.count ?? 0
+                report = completedReport
+                apiGeneratedTokens = completedReport.generatedTokenIDs.count
                 apiRequestPhase = "Klar · \(apiGeneratedTokens) genererade token"
                 status = "API · klar"; pair.continuation.finish()
             } catch { self.error = error.localizedDescription; pair.continuation.finish(throwing: error) }
