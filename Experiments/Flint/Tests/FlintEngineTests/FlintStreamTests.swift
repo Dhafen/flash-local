@@ -309,6 +309,29 @@ final class FlintStreamTests: XCTestCase {
         control.begin(ceiling: 5_500_000_000)
         XCTAssertNoThrow(try control.checkCancellation())
     }
+    func testCancelledCallerIsRejectedBeforeNativeStreamAdmission() async throws {
+        let capabilities = LocalModelCapabilities(family: .flint)
+        let request = try LocalChatRequest(data: JSONSerialization.data(withJSONObject: [
+            "model": capabilities.modelID,
+            "messages": [["role": "user", "content": "test"]]
+        ]), capabilities: capabilities)
+        let session = FlintSession()
+        let rejected = await Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            do {
+                _ = try await session.start(request)
+                return false
+            } catch is CancellationError {
+                return true
+            } catch {
+                // A cancelled request must be rejected *before* touching the
+                // unloaded native owner or any other admission state.
+                return false
+            }
+        }.value
+        XCTAssertTrue(rejected)
+    }
+
     func testCancelledStreamCannotPublishCompletion() async throws {
         let usage = LocalCompletionUsage(promptTokens: 1, completionTokens: 1,
             reasoningTokens: 0, forcedTokens: 0, finishReason: "stop")
