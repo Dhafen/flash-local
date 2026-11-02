@@ -366,8 +366,6 @@ private struct RemoteModelBrowserView: View {
                 .font(MRType.headline)
             HStack(spacing: MRSpace.s2) {
                 TextField("https://huggingface.co/owner/model", text: $repositoryLink)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
                     .accessibilityIdentifier("huggingface-repository-link")
                 if let url = RemoteModelBrowserPresentation.repositoryURL(repositoryLink) {
                     Link("Open", destination: url)
