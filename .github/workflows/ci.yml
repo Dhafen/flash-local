@@ -47,11 +47,11 @@ on:
         default: false
 
 concurrency:
-  group: ci-${{ github.ref }}${{ inputs.upload_private_testflight && '-delivery' || '' }}
-  # Hourly project commits must not abort a running test or signing job.
-  # Delivery runs remain in their separate -delivery concurrency group.
+  # Never let a new PR commit replace or cancel an older run.
+  # Each run has its own group; cancellation from outside Actions concurrency
+  # (manual, policy, or runner-side) must be diagnosed separately.
+  group: ci-${{ github.run_id }}
   cancel-in-progress: false
-  queue: max
 
 permissions:
   contents: read
