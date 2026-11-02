@@ -134,8 +134,14 @@ public enum CommunityGGUFCatalog {
         }
     }
 
-    public static func recordVerified(_ entry: CommunityGGUFFile, in root: URL) throws {
-        _ = try entry.pinnedSource()
+    /// Require a live verified artifact capability, not a mere file name.
+    /// This prevents unverified or replaced GGUF files entering the library.
+    public static func recordVerified(_ entry: CommunityGGUFFile, artifact: VerifiedGGUFArtifact, in root: URL) throws {
+        let source = try entry.pinnedSource()
+        guard artifact.manifest == source.manifest else {
+            throw GGUFError.invalid("verified file does not match selected community model")
+        }
+        try artifact.assertStillInstalled(insideRoot: root)
         var entries = installed(in: root)
         entries.removeAll { $0.sha256 == entry.sha256 }
         guard entries.count < 128 else { throw GGUFError.limit("too many local community models") }
