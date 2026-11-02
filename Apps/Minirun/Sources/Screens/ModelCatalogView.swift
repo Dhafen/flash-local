@@ -625,7 +625,9 @@ enum RemoteModelBrowserPresentation {
               parts[1].range(of: #"^[A-Za-z0-9][A-Za-z0-9._-]*$"#, options: .regularExpression) != nil,
               parts[0] != ".", parts[0] != "..",
               parts[1] != ".", parts[1] != ".." else { return nil }
-        return url
+        // Always open the validated repository root, not an arbitrary
+        // /tree, /blob, or /resolve path pasted by the user.
+        return URL(string: "https://huggingface.co/\(parts[0])/\(parts[1])")
     }
 
     static func repositoryID(_ url: URL) -> String? {
