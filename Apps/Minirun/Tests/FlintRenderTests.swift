@@ -12,6 +12,20 @@ import AppKit
 /// Actual native control captures. Empty model storage; no inference or fake metrics.
 @MainActor
 final class FlintRenderTests: XCTestCase {
+    func testStoppingAPIInvalidatesPendingNativeStartupWithoutPoisoningNextRequest() {
+        var startup = FlintAPIStartupLease()
+        let first = UUID(), second = UUID()
+        startup.begin(first)
+        XCTAssertEqual(startup.pending, first)
+        XCTAssertTrue(startup.invalidate(), "Stopping the listener must cancel an in-flight native admission")
+        XCTAssertNil(startup.pending)
+        XCTAssertFalse(startup.accept(first), "A late session.start result cannot reopen the stopped API")
+        startup.begin(second)
+        XCTAssertFalse(startup.accept(first), "A late result must not claim the next request")
+        XCTAssertTrue(startup.accept(second))
+        XCTAssertNil(startup.pending)
+        XCTAssertFalse(startup.invalidate(), "A finished startup must not cancel unrelated chat work")
+    }
     func testBackgroundSceneDisablesFlintChatAndLANAdmission() {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let model = FlintAppModel(modelsRoot: directory.appendingPathComponent("Models"),
