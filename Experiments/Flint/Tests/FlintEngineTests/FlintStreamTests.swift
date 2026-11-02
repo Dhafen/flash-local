@@ -283,6 +283,25 @@ final class FlintStreamTests: XCTestCase {
         XCTAssertTrue(FlintPrefixPolicy.requiresReset(cached: [1, 2, 3], prompt: [1, 2]))
         XCTAssertTrue(FlintPrefixPolicy.requiresReset(cached: [1, 2, 3], prompt: [1, 9, 3]))
     }
+    func testCancelledStreamCannotPublishCompletion() async throws {
+        let usage = LocalCompletionUsage(promptTokens: 1, completionTokens: 1,
+            reasoningTokens: 0, forcedTokens: 0, finishReason: "stop")
+        let task = Task {
+            var completion = FlintEventCompletion()
+            try completion.observe(.complete(usage))
+            // Simulate cancellation after the terminal event but before the
+            // UI/API publishes a successful response.
+            withUnsafeCurrentTask { $0?.cancel() }
+            try completion.requireSuccessfulEnd()
+        }
+        do {
+            try await task.value
+            XCTFail("A cancelled stream must never be published as complete")
+        } catch is CancellationError {
+            // Expected: cancellation wins even after the terminal event.
+        }
+    }
+
     func testChatStreamRequiresOneTerminalCompletionEvent() throws {
         let usage = LocalCompletionUsage(promptTokens: 1, completionTokens: 1,
             reasoningTokens: 0, forcedTokens: 0, finishReason: "stop")
