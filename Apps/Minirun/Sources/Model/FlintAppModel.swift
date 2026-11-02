@@ -22,7 +22,7 @@ private actor FlintFileStore {
     func artifact(root: URL, gate: FlintAppGate) throws -> VerifiedGGUFArtifact {
         if let verified {
             do {
-                try verified.assertUnchanged()
+                try verified.assertStillInstalled(insideRoot: root)
                 return verified
             } catch {
                 // The previously pinned file may have been replaced after a
