@@ -1689,6 +1689,12 @@ final class HuggingFaceRepositoryLinkTests: XCTestCase {
             "https://huggingface.co/owner/model-name")
     }
 
+    func testRepositoryIDExtractedForCatalogLookup() {
+        let url = RemoteModelBrowserPresentation.repositoryURL(
+            "https://huggingface.co/owner/model-name/tree/main")!
+        XCTAssertEqual(RemoteModelBrowserPresentation.repositoryID(url), "owner/model-name")
+    }
+
     func testRejectsUntrustedOrMalformedLocations() {
         let invalid = [
             "https://huggingface.co.evil.example/owner/model",
