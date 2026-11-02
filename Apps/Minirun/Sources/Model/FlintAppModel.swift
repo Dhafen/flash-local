@@ -342,11 +342,15 @@ final class FlintAppModel {
                     throw FlintFailure.invalid("Benchmark saknar genereringsrapport · ingen giltig mätning")
                 }
                 try Task.checkCancellation()
-                // A cancellation during the actor hop must not leave a
-                // successful-looking report behind after the catch path.
+                // A short or non-finite run must not populate the shared
+                // report: the UI/export would otherwise present its token/s
+                // as a comparable benchmark despite the warning in status.
+                guard completedReport.isComparableDecodeBenchmark else {
+                    status = "Ej jämförbar mätning · kräver exakt prompt och minst 128 token"
+                    return
+                }
                 report = completedReport
-                status = completedReport.generatedTokenIDs.count >= 128 ? "Benchmark klar · minst 128 genererade token" :
-                    "Körningen tog slut före 128 token · inte ett jämförbart decode-benchmark"
+                status = "Benchmark klar · minst 128 genererade token"
             } catch { self.error = error.localizedDescription; status = "Benchmark stoppades." }
         }
     }
