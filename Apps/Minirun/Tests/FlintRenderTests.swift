@@ -12,6 +12,27 @@ import AppKit
 /// Actual native control captures. Empty model storage; no inference or fake metrics.
 @MainActor
 final class FlintRenderTests: XCTestCase {
+    func testCancelledForegroundStartupCancelsLateGenerationBeforeStreaming() async {
+        // A native actor may return after Stop cancelled the awaiting UI task.
+        // That late generation must be cancelled without consuming its stream.
+        let cancelledProducer = await Task { @MainActor in
+            var cancelledProducer = false
+            withUnsafeCurrentTask { $0?.cancel() }
+            do {
+                try FlintForegroundStart.requireActive { cancelledProducer = true }
+            } catch is CancellationError {
+                return cancelledProducer
+            } catch {
+                return false
+            }
+            return false
+        }.value
+        XCTAssertTrue(cancelledProducer)
+        XCTAssertNoThrow(try FlintForegroundStart.requireActive {
+            XCTFail("A live foreground request must not cancel its producer")
+        })
+    }
+
     func testStoppedAPIListenerCannotSubmitWorkThroughReplacementListener() {
         let original = UUID(), replacement = UUID()
         XCTAssertTrue(FlintAPIListenerIdentity.accepts(original, active: original))
