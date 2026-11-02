@@ -1705,6 +1705,10 @@ final class HuggingFaceRepositoryLinkTests: XCTestCase {
             "https://huggingface.co:443/owner/model",
             "https://huggingface.co/owner/model?token=secret",
             "https://huggingface.co/owner/model#fragment",
+            "https://huggingface.co/../model",
+            "https://huggingface.co/owner/..",
+            "https://huggingface.co/owner/model%2Fother",
+            "https://huggingface.co/owner%20name/model",
         ]
         for input in invalid {
             XCTAssertNil(RemoteModelBrowserPresentation.repositoryURL(input), input)
