@@ -169,7 +169,9 @@ jobs:
     needs: [qpack-validation, les-validation, flint-validation, flint-inputs]
     if: ${{ !cancelled() && !inputs.check_delivery_tools && !inputs.regenerate_project_only && (needs.qpack-validation.result == 'success' || inputs.provisioning_only) && (!inputs.ornith_les || needs.les-validation.result == 'success') && (!inputs.flint || (needs.flint-inputs.result == 'success' && needs.flint-validation.result == 'success')) }}
     name: ${{ inputs.provisioning_only && 'device archive · signing probe (no test coverage)' || 'streaming tests · app tests · package tests · iOS build' }}
-    runs-on: ${{ (github.event_name != 'workflow_dispatch' || inputs.use_macos15) && 'macos-15' || 'macos-26' }}
+    # PR builds use the supported macOS 26 arm64 pool. Its image includes the
+    # same pinned Xcode 26.2, without changing manual release runner selection.
+    runs-on: ${{ github.event_name == 'pull_request' && 'macos-26' || ((github.event_name != 'workflow_dispatch' || inputs.use_macos15) && 'macos-15' || 'macos-26') }}
     timeout-minutes: ${{ inputs.upload_private_testflight && 120 || 90 }}
     env:
       FLASH_LOCAL_ENABLE_LES: ${{ inputs.ornith_les && '1' || '0' }}
