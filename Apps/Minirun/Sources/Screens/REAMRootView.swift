@@ -8,24 +8,16 @@ import SafariServices
 struct REAMRootView: View {
     @Bindable var model: REAMAppModel
     @Environment(\.scenePhase) private var scenePhase
-    private enum Confirmation { case clear, discard }
-    @State private var confirmation: Confirmation?
-    private enum AlternateRunner: String, Identifiable {
-        case qpack
-        #if canImport(OrnithLES)
-        case les
-        #endif
-        var id: String { rawValue }
+    private enum Tab: String, Hashable {
+        case chats, models, api, settings
     }
-    @State private var alternateRunner: AlternateRunner?
+    @State private var selectedTab: Tab =
+        Tab(rawValue: UserDefaults.standard.string(forKey: "FlashLocal.selectedTab.v1") ?? "") ?? .chats
+    @State private var showingDiagnostics = false
     @State private var performanceModel = OrnithPerformanceAppModel.live()
-    #if os(iOS)
-    @State private var showingHuggingFace = false
-    #endif
+
     #if canImport(OrnithLES)
     private var lesModel: OrnithLESAppModel { model.ornithSession }
-    #endif
-    #if canImport(OrnithLES)
     private enum Runner: String, CaseIterable, Identifiable {
         case ornith, ream
         var id: String { rawValue }
@@ -41,71 +33,40 @@ struct REAMRootView: View {
     #endif
 
     var body: some View {
-        NavigationStack {
-            #if canImport(OrnithLES)
-            VStack(spacing: 12) {
-                HStack(spacing: 12) {
-                    Picker("Aktiv modell", selection: Binding(
-                        get: { activeRunner },
-                        set: { selectRunner($0) }
-                    )) {
-                        ForEach(Runner.allCases) { runner in
-                            Text(runner.title).tag(runner)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .disabled(model.isSwitchingInferenceModel)
-                    .accessibilityIdentifier("iphone-model-selector")
-                    Spacer(minLength: 4)
-                    #if os(iOS)
-                    Button("Hugging Face") { showingHuggingFace = true }
-                        .disabled(model.isSwitchingInferenceModel)
-                    #else
-                    Link("Hugging Face", destination: URL(string: "https://huggingface.co/models?library=gguf")!)
-                    #endif
-                }
-                .padding(.horizontal)
-                Text("Välj Ornith eller REAM som verifierad motor, eller hämta fler GGUF-filer från Hugging Face. Community-modeller behöver en kompatibel inferensmotor innan de kan köras.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal)
-                if model.isSwitchingInferenceModel {
-                    ProgressView("Frigör föregående modell…")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    switch activeRunner {
-                    case .ream:
-                        REAMChatPage(model: model, discard: { confirmation = .discard })
-                            .navigationTitle("Qwen3.8 · REAM")
-                    case .ornith:
-                        OrnithLESView(model: lesModel, existing: model.verifiedOrnithForAlternateRunner())
-                    }
-                }
+        TabView(selection: $selectedTab) {
+            NavigationStack {
+                chatContent
+                    .navigationTitle("Chattar")
             }
-            #else
-            #if canImport(OrnithLES)
-            OrnithLESView(model: lesModel, existing: model.verifiedOrnithForAlternateRunner())
-            #else
-            REAMChatPage(model: model, discard: { confirmation = .discard })
-                .navigationTitle("Flash Local")
-            #endif
-            #endif
-        }
-        #if os(iOS)
-        .sheet(isPresented: $showingHuggingFace) {
-            HuggingFaceGGUFBrowser().ignoresSafeArea()
-        }
-        #if !canImport(OrnithLES)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("Hugging Face") { showingHuggingFace = true }
-                    .accessibilityIdentifier("hf-community-open")
+            .tabItem { Label("Chattar", systemImage: "bubble.left.and.bubble.right") }
+            .tag(Tab.chats)
+            .accessibilityIdentifier("flash-tab-chats")
+
+            HuggingFaceGGUFBrowser()
+                .tabItem { Label("Modeller", systemImage: "square.stack.3d.up") }
+                .tag(Tab.models)
+                .accessibilityIdentifier("flash-tab-models")
+
+            NavigationStack {
+                apiContent
+                    .navigationTitle("API")
             }
+            .tabItem { Label("API", systemImage: "network") }
+            .tag(Tab.api)
+            .accessibilityIdentifier("flash-tab-api")
+
+            NavigationStack {
+                settingsContent
+                    .navigationTitle("Inställningar")
+            }
+            .tabItem { Label("Inställningar", systemImage: "gearshape") }
+            .tag(Tab.settings)
+            .accessibilityIdentifier("flash-tab-settings")
         }
-        #endif
-        #endif
-        // Restore only the selected page. Model files are never downloaded or
-        // loaded automatically merely because a preference was restored.
+        .tint(MRColor.tierPinned)
+        .onChange(of: selectedTab) { _, value in
+            UserDefaults.standard.set(value.rawValue, forKey: "FlashLocal.selectedTab.v1")
+        }
         #if canImport(OrnithLES)
         .task {
             if activeRunner == .ream { model.activateForChatModel(.ream) }
@@ -116,14 +77,107 @@ struct REAMRootView: View {
                 if phase == .background { model.releaseInferenceResources() }
                 else if phase == .active { model.refreshStorage() }
             case .ornith:
-                break // OrnithLESView manages its own lifecycle.
+                if phase == .background { Task { await lesModel.enterBackground() } }
+                else if phase == .active { lesModel.enterForeground() }
+                else if phase == .inactive { lesModel.prepareForInactivity() }
             }
         }
-        #elseif !canImport(OrnithLES)
+        #else
         .task { model.prepare() }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .background { model.releaseInferenceResources() }
-            else if phase == .active { model.refreshStorage() }
+            if phase == .background {
+                model.stopAPI()
+                model.releaseInferenceResources()
+            } else if phase == .active {
+                model.refreshStorage()
+            }
+        }
+        #endif
+    }
+
+    @ViewBuilder private var chatContent: some View {
+        #if canImport(OrnithLES)
+        if model.isSwitchingInferenceModel {
+            ProgressView("Frigör föregående modell…")
+        } else if activeRunner == .ornith {
+            OrnithLESChatPage(model: lesModel,
+                activate: { lesModel.activateChat(existing: model.verifiedOrnithForAlternateRunner()) })
+        } else {
+            REAMChatPage(model: model)
+        }
+        #else
+        REAMChatPage(model: model)
+        #endif
+    }
+
+    @ViewBuilder private var apiContent: some View {
+        #if canImport(OrnithLES)
+        if activeRunner == .ornith {
+            OrnithAPIPage(model: lesModel,
+                activate: { lesModel.activateChat(existing: model.verifiedOrnithForAlternateRunner()) })
+        } else {
+            REAMLocalAPIPage(model: model)
+        }
+        #else
+        REAMLocalAPIPage(model: model)
+        #endif
+    }
+
+    private var settingsContent: some View {
+        Form {
+            Section("Aktiv modell") {
+                #if canImport(OrnithLES)
+                Picker("Körmodell", selection: Binding(
+                    get: { activeRunner },
+                    set: { selectRunner($0) }
+                )) {
+                    ForEach(Runner.allCases) { runner in Text(runner.title).tag(runner) }
+                }
+                .disabled(model.isSwitchingInferenceModel)
+                .accessibilityIdentifier("iphone-model-selector")
+                #else
+                Picker("Körmodell", selection: Binding(
+                    get: { model.selectedModel },
+                    set: { model.selectModel($0) }
+                )) {
+                    ForEach(LocalChatModel.allCases) { entry in
+                        Text(entry.title).tag(entry)
+                    }
+                }
+                .disabled(!model.canSelectModel)
+                .accessibilityIdentifier("iphone-model-selector")
+                #endif
+                Text("Community-GGUF visas i Modeller. Nedladdning innebär inte att motorn stöder modellens arkitektur.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section("Lokal inferens") {
+                LabeledContent("Vald modell", value: model.modelTitle)
+                LabeledContent("Kontext i standardmotorn", value: "\(model.contextTokens.formatted()) token")
+                LabeledContent("RAM-gräns", value: String(format: "%.1f GB", Double(model.budgetBytes) / 1_000_000_000))
+                if model.supportsThinking {
+                    Toggle("Tänkande", isOn: Binding(
+                        get: { model.thinkingEnabled },
+                        set: { model.setThinkingEnabled($0) }
+                    ))
+                }
+                #if canImport(OrnithLES)
+                if activeRunner == .ornith {
+                    Button("Avancerade Ornith-kontroller och jämförelser") {
+                        showingDiagnostics = true
+                    }
+                }
+                #endif
+            }
+            Section("Information") {
+                Text("Chatt, modellbibliotek och API har egna flikar och behålls synliga även utan experimentella ramverk.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text("API kan bara svara när en kompatibel lokal motor är verifierad och appen aktiv. iOS kan pausa appen i bakgrunden.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        #if canImport(OrnithLES)
+        .sheet(isPresented: $showingDiagnostics) {
+            OrnithLESView(model: lesModel, existing: model.verifiedOrnithForAlternateRunner())
         }
         #endif
     }
@@ -134,8 +188,6 @@ struct REAMRootView: View {
         guard !model.isSwitchingInferenceModel, target != activeRunner else { return }
         model.isSwitchingInferenceModel = true
         Task { @MainActor in
-            // Await teardown before allowing a second heavyweight engine to
-            // allocate GPU buffers or acquire its own exclusive model lease.
             switch activeRunner {
             case .ornith: await lesModel.shutdown()
             case .ream: await model.pauseForAlternateRunner()
@@ -153,7 +205,6 @@ struct REAMRootView: View {
 /// Only exact, SHA-256-pinned GGUF files are admitted by the current engines.
 /// Other files in the same repositories are not automatically compatible.
 private struct HuggingFaceGGUFBrowser: View {
-    @Environment(\.dismiss) private var dismiss
     @State private var selectedPage: Page?
     @State private var repository = "dphn/Dolphin3.0-Llama3.1-8B-GGUF"
     @State private var availableFiles: [CommunityGGUFFile] = []
@@ -340,11 +391,6 @@ private struct HuggingFaceGGUFBrowser: View {
             }
             .navigationTitle("Hugging Face")
             .onAppear { refreshLibrary() }
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Stäng") { dismiss() }
-                }
-            }
             .sheet(item: $selectedPage) { page in
                 HuggingFaceSafariPage(url: page.url).ignoresSafeArea()
             }
