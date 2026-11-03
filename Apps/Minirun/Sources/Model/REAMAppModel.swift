@@ -208,7 +208,15 @@ final class REAMAppModel {
     private(set) var isPreview = false
     private(set) var alternateRunnerActive = false
     private(set) var thinkingEnabled = false
-    var draft = ""
+    /// Drafting is a text-editing operation, never an inference admission.
+    /// It must remain available while a 21 GB model is being verified.
+    var draft = "" {
+        didSet {
+            if modelSelectionDirectory != nil, draft.utf8.count <= 32_768 {
+                UserDefaults.standard.set(draft, forKey: "FlashLocal.ChatDraft.\(selectedModel.rawValue)")
+            }
+        }
+    }
     let root: URL
     private(set) var source: PinnedGGUFDownload
     private(set) var settings: REAMRunSettings
@@ -302,9 +310,11 @@ final class REAMAppModel {
         let directory = support.appendingPathComponent("FlashLocal", isDirectory: true)
         let selected = UserDefaults.standard.string(forKey: "FlashLocal.selectedChatModel")
             .flatMap(LocalChatModel.init(rawValue:)) ?? .ornith
-        return REAMAppModel(root: documents.appendingPathComponent("Models", isDirectory: true), source: selected.source,
+        let model = REAMAppModel(root: documents.appendingPathComponent("Models", isDirectory: true), source: selected.source,
             chatFile: directory.appendingPathComponent(selected.chatName), settings: selected.settings,
             modelSelectionDirectory: directory)
+        model.draft = UserDefaults.standard.string(forKey: "FlashLocal.ChatDraft.\(selected.rawValue)") ?? ""
+        return model
     }
     func selectModel(_ target: LocalChatModel) {
         guard canSelectModel, target != selectedModel, let directory = modelSelectionDirectory else { return }
@@ -318,7 +328,9 @@ final class REAMAppModel {
             thinkingEnabled = target == .ornith &&
                 (UserDefaults.standard.object(forKey: "FlashLocal.ornithThinking") as? Bool ?? true)
             chatFile = directory.appendingPathComponent(target.chatName)
-            messages.removeAll(); draft = ""; summary = nil; generationProgress = nil
+            messages.removeAll()
+            draft = UserDefaults.standard.string(forKey: "FlashLocal.ChatDraft.\(target.rawValue)") ?? ""
+            summary = nil; generationProgress = nil
             lastMeasurementURL = nil; lastNumericsURL = nil; lastNumericsReport = nil
             UserDefaults.standard.set(target.rawValue, forKey: "FlashLocal.selectedChatModel")
             prepared = false; status = "Modellen är inte hämtad."
