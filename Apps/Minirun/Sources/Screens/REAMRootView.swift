@@ -206,6 +206,9 @@ struct REAMRootView: View {
 /// Other files in the same repositories are not automatically compatible.
 private struct HuggingFaceGGUFBrowser: View {
     @State private var selectedPage: Page?
+    @State private var searchQuery = "dolphin"
+    @State private var searchResults: [CommunityGGUFRepository] = []
+    @State private var searchingModels = false
     @State private var repository = "dphn/Dolphin3.0-Llama3.1-8B-GGUF"
     @State private var availableFiles: [CommunityGGUFFile] = []
     @State private var installedFiles: [CommunityGGUFFile] = []
@@ -225,9 +228,32 @@ private struct HuggingFaceGGUFBrowser: View {
         installedFiles = CommunityGGUFCatalog.installed(in: communityRoot)
     }
 
+    private func searchCatalog() {
+        guard !searchingModels, !isSearching, downloadingID == nil else { return }
+        communityError = nil; communityStatus = ""; searchResults = []
+        searchingModels = true
+        Task { @MainActor in
+            defer { searchingModels = false }
+            do {
+                searchResults = try await CommunityGGUFCatalog.searchModels(query: searchQuery)
+                communityStatus = searchResults.isEmpty ? "Inga matchande GGUF-repositories." :
+                    "\(searchResults.count) modellrepositorier hittades. Välj ett för att se GGUF-filerna."
+            } catch { communityError = error.localizedDescription }
+        }
+    }
+
+    private func normalizedRepository(_ input: String) -> String {
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URLComponents(string: trimmed), url.scheme == "https",
+              url.host == "huggingface.co", url.query == nil, url.fragment == nil else { return trimmed }
+        let parts = url.path.split(separator: "/")
+        guard parts.count >= 2 else { return trimmed }
+        return String(parts[0]) + "/" + String(parts[1])
+    }
+
     private func discover() {
         guard !isSearching, downloadingID == nil else { return }
-        let name = repository.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = normalizedRepository(repository)
         communityError = nil; communityStatus = ""; availableFiles = []; isSearching = true
         Task { @MainActor in
             defer { isSearching = false }
@@ -337,15 +363,44 @@ private struct HuggingFaceGGUFBrowser: View {
                         .accessibilityIdentifier("hf-pinned-\(entry.id)")
                     }
                 }
-                Section("Hämta valfri GGUF från Hugging Face") {
-                    TextField("ägare/modell", text: $repository)
+                Section("Sök modeller på Hugging Face") {
+                    TextField("Sök namn, utvecklare eller modellfamilj", text: $searchQuery)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .submitLabel(.search)
+                        .onSubmit { searchCatalog() }
+                        .accessibilityIdentifier("hf-model-search-input")
+                    Button("Sök bland modeller", systemImage: "magnifyingglass") {
+                        searchCatalog()
+                    }
+                    .disabled(searchingModels || isSearching || downloadingID != nil)
+                    .accessibilityIdentifier("hf-model-search-button")
+                    if searchingModels { ProgressView("Söker Hugging Face…") }
+                    ForEach(searchResults) { result in
+                        Button {
+                            repository = result.id
+                            discover()
+                        } label: {
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(result.name).font(.headline)
+                                Text(result.author).font(.caption).foregroundStyle(.secondary)
+                                Text("\(result.downloads.formatted()) hämtningar")
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .disabled(isSearching || downloadingID != nil)
+                    }
+                }
+                Section("Välj GGUF-filer från ett repository") {
+                    TextField("ägare/modell eller Hugging Face-länk", text: $repository)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .accessibilityIdentifier("hf-community-repository")
                     Button("Sök GGUF-filer") { discover() }
                         .disabled(isSearching || downloadingID != nil)
                         .accessibilityIdentifier("hf-community-search")
-                    if isSearching { ProgressView("Läser filförteckning…") }
+                    if isSearching { ProgressView("Läser verifierbara GGUF-filer…") }
                     ForEach(availableFiles) { entry in
                         VStack(alignment: .leading, spacing: 6) {
                             Text(entry.path).font(.subheadline).textSelection(.enabled)
@@ -404,6 +459,18 @@ private struct HuggingFaceSafariPage: UIViewControllerRepresentable {
         SFSafariViewController(url: url)
     }
     func updateUIViewController(_ controller: SFSafariViewController, context: Context) {}
+}
+#else
+private struct HuggingFaceGGUFBrowser: View {
+    var body: some View {
+        VStack(spacing: 16) {
+            Text("Modellbibliotek").font(.title2.bold())
+            Link("Utforska GGUF på Hugging Face",
+                 destination: URL(string: "https://huggingface.co/models?library=gguf")!)
+            Text("Lokal modellimport och nedladdning från biblioteket sker i iPhone-appen.")
+                .font(.caption).foregroundStyle(.secondary)
+        }.padding()
+    }
 }
 #endif
 
