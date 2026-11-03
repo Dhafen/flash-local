@@ -406,6 +406,16 @@ final class REAMAppModel {
         activity = .stopping; status = "Stoppar arbetet…"
         cancellation?.cancel(); cancelWorker?()
     }
+    /// Unload only active weights/inference state. Keep downloaded GGUF and
+    /// saved conversations; an explicit Verify/Load reopens the same file.
+    func unloadModel() async {
+        stopAPI()
+        if isBusy { stop(); await operation?.value }
+        await inferenceSession.release()
+        artifact = nil
+        status = "Modellen är urladdad. Fil och chatthistorik finns kvar."
+    }
+
     func releaseInferenceResources() {
         stopAPI()
         stop()
