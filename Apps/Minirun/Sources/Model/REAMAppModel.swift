@@ -692,7 +692,7 @@ extension REAMAppModel {
             error = nil
             apiServer = try LocalModelAPIServer(
                 key: key, port: UInt16(apiPort), defaults: .init(),
-                capabilities: .init(context: .legacy4K),
+                capabilities: .init(context: .legacy4K, supportsToolCalls: false),
                 handler: { [weak self] request in
                     guard let self else {
                         throw LocalAPIError(status: 503, message: "The phone service has closed")
