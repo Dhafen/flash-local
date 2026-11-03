@@ -56,6 +56,16 @@ public struct CommunityGGUFFile: Sendable, Identifiable, Codable, Equatable {
     }
 }
 
+/// Search results are repository metadata only. Every model file still needs a
+/// separately pinned revision, LFS digest and explicit compatibility check.
+public struct CommunityGGUFRepository: Sendable, Identifiable, Equatable {
+    public let id: String
+    public let downloads: Int
+    public let likes: Int
+    public var author: String { id.split(separator: "/").first.map(String.init) ?? "" }
+    public var name: String { id.split(separator: "/").last.map(String.init) ?? id }
+}
+
 public enum CommunityGGUFCatalog {
     private struct Identity: Decodable { let sha: String }
     private struct TreeFile: Decodable {
@@ -66,6 +76,44 @@ public enum CommunityGGUFCatalog {
         struct LFS: Decodable { let oid: String; let size: UInt64? }
     }
     private static let maximumJSONBytes = 8 << 20
+    private struct SearchResult: Decodable {
+        let id: String
+        let downloads: Int?
+        let likes: Int?
+    }
+
+    /// Public, bounded Hugging Face search by name, publisher or model family.
+    /// Results are not marked as runnable merely because their repository has
+    /// a GGUF tag.
+    public static func searchModels(query: String, session: URLSession = .shared) async throws -> [CommunityGGUFRepository] {
+        let value = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard (2...100).contains(value.utf8.count) else {
+            throw GGUFError.invalid("Skriv minst två tecken för att söka modeller")
+        }
+        var url = URLComponents(string: "https://huggingface.co/api/models")!
+        url.queryItems = [
+            URLQueryItem(name: "search", value: value),
+            URLQueryItem(name: "filter", value: "gguf"),
+            URLQueryItem(name: "sort", value: "downloads"),
+            URLQueryItem(name: "direction", value: "-1"),
+            URLQueryItem(name: "limit", value: "25")
+        ]
+        let payload = try await checkedJSON(from: url.url!, session: session)
+        return try parseSearch(payload)
+    }
+
+    public static func parseSearch(_ data: Data) throws -> [CommunityGGUFRepository] {
+        guard data.count <= maximumJSONBytes else { throw GGUFError.limit("Model search exceeds response limit") }
+        let entries = try JSONDecoder().decode([SearchResult].self, from: data)
+        guard entries.count <= 25 else { throw GGUFError.limit("Model search has too many entries") }
+        var ids = Set<String>()
+        return entries.compactMap { item in
+            guard CommunityGGUFFile.validRepository(item.id), ids.insert(item.id).inserted else { return nil }
+            return .init(id: item.id, downloads: max(0, item.downloads ?? 0), likes: max(0, item.likes ?? 0))
+        }
+    }
+
+
 
     /// Revision is obtained separately and every download URL pins that
     /// immutable commit; user-typed branch names never become download targets.
