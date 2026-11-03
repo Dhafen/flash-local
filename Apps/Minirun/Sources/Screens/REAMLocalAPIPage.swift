@@ -49,7 +49,6 @@ struct REAMLocalAPIPage: View {
                             Text("Port")
                             Spacer()
                             TextField("Port", value: $model.apiPort, format: .number.grouping(.never))
-                                .keyboardType(.numberPad)
                                 .multilineTextAlignment(.trailing)
                                 .frame(width: 100)
                                 .textFieldStyle(.roundedBorder)
