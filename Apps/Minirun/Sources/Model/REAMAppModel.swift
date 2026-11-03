@@ -717,7 +717,7 @@ extension REAMAppModel {
                     }
                 })
         } catch {
-            error = error.localizedDescription
+            self.error = error.localizedDescription
             stopAPI()
         }
     }
@@ -740,7 +740,7 @@ extension REAMAppModel {
             apiKeyDraft = ""
             apiStatus = "Nyckeln är sparad i iPhones nyckelring."
             error = nil
-        } catch { error = error.localizedDescription }
+        } catch { self.error = error.localizedDescription }
     }
 
     private func openAPIRequest(_ request: LocalChatRequest) throws -> LocalChatGeneration {
