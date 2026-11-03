@@ -94,6 +94,10 @@ public final class VerifiedGGUFArtifact: @unchecked Sendable {
     public let manifest: GGUFModelManifest
     private let descriptor: Int32
     private let stamp: Stamp
+    // A rename may change ctime without changing the already-verified bytes.
+    // Serialize rare re-hashes so a large model is never re-hashed per token.
+    private let stampLock = NSLock()
+    private var lastValidatedStamp: Stamp
 
     private struct Stamp: Equatable {
         let device: dev_t
@@ -115,6 +119,7 @@ public final class VerifiedGGUFArtifact: @unchecked Sendable {
 
     private init(descriptor: Int32, stamp: Stamp, index: GGUFIndex, manifest: GGUFModelManifest) {
         self.descriptor = descriptor; self.stamp = stamp
+        self.lastValidatedStamp = stamp
         self.index = index; self.manifest = manifest
     }
 
@@ -177,8 +182,28 @@ public final class VerifiedGGUFArtifact: @unchecked Sendable {
 
     /// Call before/after each streamed operation, and before publishing logits.
     public func assertUnchanged() throws {
-        guard Stamp(try Self.status(descriptor)) == stamp else {
+        stampLock.lock()
+        defer { stampLock.unlock() }
+        let current = Stamp(try Self.status(descriptor))
+        // Changes to the inode, size or modification time always invalidate
+        // the capability. ctime alone also changes when an intact file moves.
+        guard current.device == stamp.device, current.inode == stamp.inode,
+              current.bytes == stamp.bytes,
+              current.modifiedSeconds == stamp.modifiedSeconds,
+              current.modifiedNanoseconds == stamp.modifiedNanoseconds else {
             throw GGUFError.invalid("verified model file changed")
+        }
+        if current != lastValidatedStamp {
+            // Do not silently trust a ctime change: an in-place rewrite with
+            // restored mtime must still be rejected. Re-hash the pinned open
+            // descriptor once, then cache the attested metadata-only change.
+            let digest = try FileDigestComputer.digest(
+                ofOpenFileDescriptor: descriptor, algorithm: .sha256)
+            guard digest.matches(manifest.sha256),
+                  Stamp(try Self.status(descriptor)) == current else {
+                throw GGUFError.invalid("verified model file changed")
+            }
+            lastValidatedStamp = current
         }
     }
 
@@ -196,7 +221,11 @@ public final class VerifiedGGUFArtifact: @unchecked Sendable {
         let installed = Darwin.openat(directory, manifest.fileName, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
         guard installed >= 0 else { throw Self.posixError() }
         defer { _ = Darwin.close(installed) }
-        guard Stamp(try Self.status(installed)) == stamp else {
+        let installedStamp = Stamp(try Self.status(installed))
+        // The pathname must still point to the exact verified inode. A
+        // legitimate rename can change ctime, so full-stamp equality would
+        // incorrectly reject the same installed file after re-attestation.
+        guard installedStamp.device == stamp.device, installedStamp.inode == stamp.inode else {
             throw GGUFError.invalid("installed model pathname no longer names the verified file")
         }
         try assertUnchanged()

@@ -30,7 +30,9 @@ defaults:
     shell: bash
 jobs:
   isolated-engine:
-    runs-on: ${{ (github.event_name != 'workflow_dispatch' || inputs.use_macos15) && 'macos-15' || 'macos-26' }}
+    # PR builds must use macOS 26 rather than the saturated macOS 15 pool.
+    # Standalone/manual executions keep their explicit runner choice.
+    runs-on: ${{ github.event_name == 'pull_request' && 'macos-26' || ((github.event_name != 'workflow_dispatch' || inputs.use_macos15) && 'macos-15' || 'macos-26') }}
     timeout-minutes: 40
     steps:
       - name: Record runner and run identity before validation
