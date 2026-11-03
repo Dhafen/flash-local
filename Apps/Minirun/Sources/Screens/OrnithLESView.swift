@@ -130,8 +130,9 @@ struct OrnithLESChatPage: View {
             HStack(alignment: .bottom, spacing: 12) {
                 TextField("Skriv ett meddelande…", text: $model.chatDraft, axis: .vertical)
                     .lineLimit(1...6).textFieldStyle(.plain).submitLabel(.send)
-                    .onSubmit { model.sendChat() }.disabled(!model.canSendChat)
+                    .onSubmit { if model.canSendChat { model.sendChat() } }
                     .accessibilityLabel("Meddelande i snabbchatten")
+                    .accessibilityIdentifier("flash-chat-editable-draft")
                 Button { model.sendChat() } label: { Image(systemName: "arrow.up.circle.fill").font(.title) }
                     .accessibilityLabel("Skicka i snabbchatten")
                     .disabled(!model.canSendChat || model.chatDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
