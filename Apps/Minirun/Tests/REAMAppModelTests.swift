@@ -7,6 +7,26 @@ import XCTest
 
 @MainActor
 final class REAMAppModelTests: XCTestCase {
+    func testDraftRemainsEditableBeforeGGUFVerificationAndAPIRequiresModel() {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let model = REAMAppModel(root: root)
+        XCTAssertFalse(model.canChat)
+        model.draft = "Skrivbart utkast medan filen kontrolleras"
+        XCTAssertEqual(model.draft, "Skrivbart utkast medan filen kontrolleras")
+        XCTAssertFalse(model.canStartAPI)
+        model.startAPI()
+        XCTAssertFalse(model.isAPIListening)
+        XCTAssertNotNil(model.error)
+    }
+    func testExplicitUnloadingPreservesUnsavedDraftAndModelFiles() async {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let model = REAMAppModel(root: root)
+        model.draft = "Fråga till senare"
+        await model.unloadModel()
+        XCTAssertEqual(model.draft, "Fråga till senare")
+        XCTAssertFalse(model.canChat)
+        XCTAssertFalse(model.isAPIListening)
+    }
     func testThinkingDefaultsToOrnithAndDoesNotChangeREAM() {
         let root = FileManager.default.temporaryDirectory
         let ornith = REAMAppModel(root: root)
