@@ -3,10 +3,10 @@ import Foundation
 /// Total session window, including template, tools, prompt and generated tokens.
 /// Selecting a larger window requests a memory admission, not a quality claim.
 public enum LocalContextProfile: Int, Codable, CaseIterable, Identifiable, Sendable {
-    case standard = 8192, test16K = 16384, test32K = 32768, test65K = 65536
+    case legacy4K = 4096, standard = 8192, test16K = 16384, test32K = 32768, test65K = 65536
     public var id: Int { rawValue }
     public var title: String {
-        self == .standard ? "8K" : "\(rawValue / 1024)K · test"
+        self == .legacy4K ? "4K · standardmotor" : self == .standard ? "8K" : "\(rawValue / 1024)K · test"
     }
 }
 
