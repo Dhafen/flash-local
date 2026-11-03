@@ -568,10 +568,17 @@ struct REAMChatPage: View {
                     Spacer()
                     Button("Stoppa", role: .cancel) { model.stop() }.disabled(model.activity == .stopping)
                 }
-            } else if !model.canChat {
+            } else if model.canChat {
+                Button("Ladda ur modell", role: .destructive) {
+                    Task { await model.unloadModel() }
+                }
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("flash-unload-model")
+            } else {
                 HStack {
                     if model.hasFile {
-                        Button("Verifiera modellfil") { model.verify() }.buttonStyle(.borderedProminent)
+                        Button("Ladda modell") { model.verify() }.buttonStyle(.borderedProminent)
+                            .accessibilityIdentifier("flash-load-model")
                     } else {
                         Button(model.partialBytes > 0 ? "Återuppta hämtning" : "Hämta modell") { model.download() }
                             .buttonStyle(.borderedProminent)
