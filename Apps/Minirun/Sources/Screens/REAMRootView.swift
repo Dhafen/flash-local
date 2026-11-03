@@ -606,8 +606,9 @@ struct REAMChatPage: View {
         HStack(alignment: .bottom, spacing: 12) {
             TextField("Skriv ett meddelande…", text: $model.draft, axis: .vertical)
                 .lineLimit(1...6).textFieldStyle(.plain).submitLabel(.send)
-                .onSubmit { model.send() }.disabled(!model.canChat)
+                .onSubmit { if model.canChat { model.send() } }
                 .accessibilityLabel("Meddelande")
+                .accessibilityIdentifier("flash-chat-editable-draft")
             Button { model.send() } label: { Image(systemName: "arrow.up.circle.fill").font(.title) }
                 .accessibilityLabel("Skicka meddelande")
                 .disabled(!model.canChat || model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
