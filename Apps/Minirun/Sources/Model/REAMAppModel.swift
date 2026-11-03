@@ -657,3 +657,182 @@ final class REAMAppModel {
     }
     #endif
 }
+
+/// Authenticated LAN inference on the standard, non-LES Ornith engine.
+/// No optional experimental package is required to show or use this API.
+extension REAMAppModel {
+    func startAPI() {
+        guard canStartAPI else {
+            error = "Verifiera och ladda Ornith innan du startar API:t."
+            return
+        }
+        guard (1024...65535).contains(apiPort) else {
+            error = "Välj en port mellan 1024 och 65535."
+            return
+        }
+        do {
+            let store = LocalAPIKeyStore()
+            if !apiKeyDraft.isEmpty { try store.save(apiKeyDraft) }
+            let key = try store.loadOrCreate()
+            let id = UUID()
+            apiAccessKey = key
+            apiKeyDraft = ""
+            apiRequestID = id
+            apiStatus = "Startar lokalt API…"
+            error = nil
+            apiServer = try LocalModelAPIServer(
+                key: key, port: UInt16(apiPort), defaults: .init(),
+                capabilities: .init(context: .legacy4K),
+                handler: { [weak self] request in
+                    guard let self else {
+                        throw LocalAPIError(status: 503, message: "The phone service has closed")
+                    }
+                    return try await self.openAPIRequest(request)
+                },
+                onState: { [weak self] state in
+                    Task { @MainActor in
+                        guard let self, self.apiRequestID == id else { return }
+                        switch state {
+                        case .ready(let port, let addresses):
+                            self.apiURLs = addresses.map { "http://\($0):\(port)/v1" }
+                            self.apiStatus = addresses.isEmpty
+                                ? "Servern lyssnar. Anslut telefonen till Wi-Fi eller Ethernet."
+                                : "API aktivt · Ornith på telefonen"
+                        case .failed(let message):
+                            self.error = message
+                            self.stopAPI()
+                        case .stopped:
+                            self.stopAPI()
+                        }
+                    }
+                })
+        } catch {
+            error = error.localizedDescription
+            stopAPI()
+        }
+    }
+
+    func stopAPI() {
+        apiRequestID = nil
+        apiServer?.stop()
+        apiServer = nil
+        apiCancellation?.cancel()
+        apiCancellation = nil
+        apiURLs = []
+        apiAccessKey = ""
+        apiStatus = "Avstängd"
+    }
+
+    func rotateAPIKey() {
+        guard apiServer == nil, !isBusy else { return }
+        do {
+            try LocalAPIKeyStore().save(LocalModelAPIServer.makeAccessKey())
+            apiKeyDraft = ""
+            apiStatus = "Nyckeln är sparad i iPhones nyckelring."
+            error = nil
+        } catch { error = error.localizedDescription }
+    }
+
+    private func openAPIRequest(_ request: LocalChatRequest) throws -> LocalChatGeneration {
+        guard apiServer != nil, canChat, selectedModel == .ornith, let artifact else {
+            throw LocalAPIError(status: 503, message: "Load Ornith and keep the phone app active")
+        }
+        guard request.tools.isEmpty, request.toolChoice == .none,
+              request.messages.allSatisfy({ ["system", "user", "assistant"].contains($0.role) }) else {
+            throw LocalAPIError.invalid("messages", "The standard Ornith engine supports text messages, not tool calls")
+        }
+        guard request.options.temperature == 0, request.options.topP == 1 else {
+            throw LocalAPIError.invalid("temperature", "This engine supports greedy decoding only")
+        }
+        guard request.options.maximumNewTokens < settings.contextTokens else {
+            throw LocalAPIError.invalid("max_tokens", "The output must fit within the 4096-token context")
+        }
+        let prompt = request.messages.map {
+            Qwen35ChatMessage(role: Qwen35ChatMessage.Role(rawValue: $0.role)!, content: $0.content,
+                              reasoningContent: $0.reasoning)
+        }
+        let chosen = REAMRunSettings(
+            contextTokens: settings.contextTokens, budgetBytes: settings.budgetBytes,
+            maximumNewTokens: request.options.maximumNewTokens, rawCacheBytes: settings.rawCacheBytes,
+            residentCacheBytes: settings.residentCacheBytes)
+        let flag = REAMCancellation(), id = UUID(), session = inferenceSession
+        let output = AsyncThrowingStream<LocalChatEvent, Error>.makeStream(
+            bufferingPolicy: .bufferingOldest(64))
+        output.continuation.onTermination = { if case .cancelled = $0 { flag.cancel() } }
+        let channel = AsyncThrowingStream<Qwen4ExpTextGeneration.Event, Error>.makeStream(
+            bufferingPolicy: .bufferingOldest(64))
+        apiCancellation = flag
+        activeID = id
+        activity = .generating
+        status = "API: läser prompt…"
+        error = nil
+        let owner = Task.detached(priority: .userInitiated) {
+            let result = await session.generate(
+                artifact: artifact, settings: chosen, thinkingEnabled: request.options.thinkingEnabled,
+                messages: prompt, cancellation: flag, events: channel.continuation)
+            switch result {
+            case .success: channel.continuation.finish()
+            case .failure(let failure): channel.continuation.finish(throwing: failure)
+            }
+            return result
+        }
+        operation = Task { [weak self] in
+            guard let self else {
+                flag.cancel(); _ = await owner.value; output.continuation.finish(); return
+            }
+            defer { if activeID == id { apiCancellation = nil; finish(id) } }
+            var rendered = QwenThinkingText(startsInThinking: request.options.thinkingEnabled)
+            var answerBytes = 0, reasoningBytes = 0
+            func emit() throws {
+                let answer = String(decoding: rendered.answer.utf8.dropFirst(answerBytes), as: UTF8.self)
+                let reasoning = String(decoding: rendered.reasoning.utf8.dropFirst(reasoningBytes), as: UTF8.self)
+                answerBytes = rendered.answer.utf8.count
+                reasoningBytes = rendered.reasoning.utf8.count
+                if !answer.isEmpty || !reasoning.isEmpty {
+                    guard case .enqueued = output.continuation.yield(.delta(content: answer, reasoning: reasoning)) else {
+                        flag.cancel()
+                        throw LocalAPIError(status: 503, message: "Streaming client cannot keep up")
+                    }
+                }
+            }
+            do {
+                for try await event in channel.stream {
+                    switch event {
+                    case .prefill(let p):
+                        status = "API: läser prompt \(p.promptTokensCompleted)/\(p.promptTokensTotal)"
+                    case .token(_, let delta, _):
+                        rendered.append(delta)
+                        try emit()
+                        status = rendered.isThinking ? "API: tänker…" : "API: skriver svar…"
+                    case .trailingText(let delta):
+                        rendered.append(delta)
+                        try emit()
+                    }
+                }
+                rendered.finish()
+                try emit()
+            } catch { flag.cancel() }
+            switch await owner.value {
+            case .success(let summary):
+                if flag.requested() {
+                    output.continuation.finish(throwing: CancellationError())
+                    status = "API: avbrutet"
+                } else {
+                    output.continuation.yield(.complete(.init(
+                        promptTokens: summary.promptTokenIDs.count,
+                        completionTokens: summary.generatedTokenIDs.count,
+                        reasoningTokens: 0, forcedTokens: 0,
+                        finishReason: summary.stopReason == .endOfGeneration ? "stop" : "length")))
+                    output.continuation.finish()
+                    apiCompletedRequests += 1
+                    status = "API: klart · \(summary.generatedTokenIDs.count) token"
+                }
+            case .failure(let failure):
+                output.continuation.finish(throwing: failure)
+                if !flag.requested() { error = failure.localizedDescription }
+                status = "API: genereringen stoppades"
+            }
+        }
+        return LocalChatGeneration(events: output.stream, cancel: { flag.cancel() })
+    }
+}
