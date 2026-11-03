@@ -193,6 +193,23 @@ final class REAMAppModel {
     #endif
     // Switching models is a shell concern, independent of optional engine packages.
     var isSwitchingInferenceModel = false
+    @ObservationIgnored private var apiServer: LocalModelAPIServer?
+    @ObservationIgnored private var apiRequestID: UUID?
+    @ObservationIgnored private var apiCancellation: REAMCancellation?
+    var apiPort = 8080 {
+        didSet {
+            if (1024...65535).contains(apiPort), modelSelectionDirectory != nil {
+                UserDefaults.standard.set(apiPort, forKey: "FlashLocal.API.Port.v1")
+            }
+        }
+    }
+    var apiKeyDraft = ""
+    private(set) var apiAccessKey = ""
+    private(set) var apiURLs: [String] = []
+    private(set) var apiStatus = "Avstängd"
+    private(set) var apiCompletedRequests = 0
+    var isAPIListening: Bool { apiServer != nil }
+    var canStartAPI: Bool { canChat && selectedModel == .ornith && !isPreview && apiServer == nil }
     enum Activity { case idle, downloading, verifying, generating, checkingNumerics, resetting, stopping }
     private(set) var activity = Activity.idle
     private(set) var messages: [REAMMessage] = []
@@ -264,6 +281,7 @@ final class REAMAppModel {
     }
 
     func pauseForAlternateRunner() async {
+        stopAPI()
         alternateRunnerActive = true
         stop()
         await operation?.value
@@ -315,10 +333,13 @@ final class REAMAppModel {
             chatFile: directory.appendingPathComponent(selected.chatName), settings: selected.settings,
             modelSelectionDirectory: directory)
         model.draft = UserDefaults.standard.string(forKey: "FlashLocal.ChatDraft.\(selected.rawValue)") ?? ""
+        let savedPort = UserDefaults.standard.integer(forKey: "FlashLocal.API.Port.v1")
+        if (1024...65535).contains(savedPort) { model.apiPort = savedPort }
         return model
     }
     func selectModel(_ target: LocalChatModel) {
         guard canSelectModel, target != selectedModel, let directory = modelSelectionDirectory else { return }
+        stopAPI()
         let (id, flag) = begin(.resetting, status: "Byter modell…")
         let session = inferenceSession
         operation = Task {
@@ -386,6 +407,7 @@ final class REAMAppModel {
         cancellation?.cancel(); cancelWorker?()
     }
     func releaseInferenceResources() {
+        stopAPI()
         stop()
         let session = inferenceSession
         Task { await session.release() }
