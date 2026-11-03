@@ -190,8 +190,9 @@ final class REAMAppModel {
     #if canImport(FlintEngine)
     @ObservationIgnored lazy var flintSession = FlintAppModel.live()
     var showsFlint = false
-    var isSwitchingInferenceModel = false
     #endif
+    // Switching models is a shell concern, independent of optional engine packages.
+    var isSwitchingInferenceModel = false
     enum Activity { case idle, downloading, verifying, generating, checkingNumerics, resetting, stopping }
     private(set) var activity = Activity.idle
     private(set) var messages: [REAMMessage] = []
