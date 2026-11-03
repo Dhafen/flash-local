@@ -105,4 +105,27 @@ final class CommunityGGUFCatalogTests: XCTestCase {
         XCTAssertThrowsError(try CommunityGGUFCatalog.recordVerified(entry, artifact: verified, in: root))
     }
 
+
+    func testHuggingFaceSearchOnlyReturnsValidUniqueRepositories() throws {
+        let payload = try fixture([
+            ["id": "dphn/Dolphin3.0-Llama3.1-8B-GGUF", "downloads": 12000, "likes": 42],
+            ["id": "dphn/Dolphin3.0-Llama3.1-8B-GGUF", "downloads": 12],
+            ["id": "../malicious", "downloads": 15],
+            ["id": "owner/model?unexpected=1", "downloads": 10],
+            ["id": "Qwen/Qwen3.8-GGUF", "downloads": 9, "likes": 4]
+        ])
+        let results = try CommunityGGUFCatalog.parseSearch(payload)
+        XCTAssertEqual(results.map(\.id), [
+            "dphn/Dolphin3.0-Llama3.1-8B-GGUF", "Qwen/Qwen3.8-GGUF"])
+        XCTAssertEqual(results.first?.author, "dphn")
+        XCTAssertEqual(results.first?.downloads, 12000)
+        XCTAssertEqual(results.last?.name, "Qwen3.8-GGUF")
+    }
+
+    func testHuggingFaceSearchRejectsOversizedResultCount() throws {
+        let entries = (0..<26).map { ["id": "owner/model-\($0)"] }
+        XCTAssertThrowsError(try CommunityGGUFCatalog.parseSearch(fixture(entries)))
+    }
+
+
 }
