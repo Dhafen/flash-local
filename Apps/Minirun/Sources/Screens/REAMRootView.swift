@@ -8,24 +8,16 @@ import SafariServices
 struct REAMRootView: View {
     @Bindable var model: REAMAppModel
     @Environment(\.scenePhase) private var scenePhase
-    private enum Confirmation { case clear, discard }
-    @State private var confirmation: Confirmation?
-    private enum AlternateRunner: String, Identifiable {
-        case qpack
-        #if canImport(OrnithLES)
-        case les
-        #endif
-        var id: String { rawValue }
+    private enum Tab: String, Hashable {
+        case chats, models, api, settings
     }
-    @State private var alternateRunner: AlternateRunner?
+    @State private var selectedTab: Tab =
+        Tab(rawValue: UserDefaults.standard.string(forKey: "FlashLocal.selectedTab.v1") ?? "") ?? .chats
+    @State private var showingDiagnostics = false
     @State private var performanceModel = OrnithPerformanceAppModel.live()
-    #if os(iOS)
-    @State private var showingHuggingFace = false
-    #endif
+
     #if canImport(OrnithLES)
     private var lesModel: OrnithLESAppModel { model.ornithSession }
-    #endif
-    #if canImport(OrnithLES)
     private enum Runner: String, CaseIterable, Identifiable {
         case ornith, ream
         var id: String { rawValue }
@@ -41,71 +33,40 @@ struct REAMRootView: View {
     #endif
 
     var body: some View {
-        NavigationStack {
-            #if canImport(OrnithLES)
-            VStack(spacing: 12) {
-                HStack(spacing: 12) {
-                    Picker("Aktiv modell", selection: Binding(
-                        get: { activeRunner },
-                        set: { selectRunner($0) }
-                    )) {
-                        ForEach(Runner.allCases) { runner in
-                            Text(runner.title).tag(runner)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .disabled(model.isSwitchingInferenceModel)
-                    .accessibilityIdentifier("iphone-model-selector")
-                    Spacer(minLength: 4)
-                    #if os(iOS)
-                    Button("Hugging Face") { showingHuggingFace = true }
-                        .disabled(model.isSwitchingInferenceModel)
-                    #else
-                    Link("Hugging Face", destination: URL(string: "https://huggingface.co/models?library=gguf")!)
-                    #endif
-                }
-                .padding(.horizontal)
-                Text("Välj Ornith eller REAM som verifierad motor, eller hämta fler GGUF-filer från Hugging Face. Community-modeller behöver en kompatibel inferensmotor innan de kan köras.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal)
-                if model.isSwitchingInferenceModel {
-                    ProgressView("Frigör föregående modell…")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    switch activeRunner {
-                    case .ream:
-                        REAMChatPage(model: model, discard: { confirmation = .discard })
-                            .navigationTitle("Qwen3.8 · REAM")
-                    case .ornith:
-                        OrnithLESView(model: lesModel, existing: model.verifiedOrnithForAlternateRunner())
-                    }
-                }
+        TabView(selection: $selectedTab) {
+            NavigationStack {
+                chatContent
+                    .navigationTitle("Chattar")
             }
-            #else
-            #if canImport(OrnithLES)
-            OrnithLESView(model: lesModel, existing: model.verifiedOrnithForAlternateRunner())
-            #else
-            REAMChatPage(model: model, discard: { confirmation = .discard })
-                .navigationTitle("Flash Local")
-            #endif
-            #endif
-        }
-        #if os(iOS)
-        .sheet(isPresented: $showingHuggingFace) {
-            HuggingFaceGGUFBrowser().ignoresSafeArea()
-        }
-        #if !canImport(OrnithLES)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("Hugging Face") { showingHuggingFace = true }
-                    .accessibilityIdentifier("hf-community-open")
+            .tabItem { Label("Chattar", systemImage: "bubble.left.and.bubble.right") }
+            .tag(Tab.chats)
+            .accessibilityIdentifier("flash-tab-chats")
+
+            HuggingFaceGGUFBrowser()
+                .tabItem { Label("Modeller", systemImage: "square.stack.3d.up") }
+                .tag(Tab.models)
+                .accessibilityIdentifier("flash-tab-models")
+
+            NavigationStack {
+                apiContent
+                    .navigationTitle("API")
             }
+            .tabItem { Label("API", systemImage: "network") }
+            .tag(Tab.api)
+            .accessibilityIdentifier("flash-tab-api")
+
+            NavigationStack {
+                settingsContent
+                    .navigationTitle("Inställningar")
+            }
+            .tabItem { Label("Inställningar", systemImage: "gearshape") }
+            .tag(Tab.settings)
+            .accessibilityIdentifier("flash-tab-settings")
         }
-        #endif
-        #endif
-        // Restore only the selected page. Model files are never downloaded or
-        // loaded automatically merely because a preference was restored.
+        .tint(MRColor.tierPinned)
+        .onChange(of: selectedTab) { _, value in
+            UserDefaults.standard.set(value.rawValue, forKey: "FlashLocal.selectedTab.v1")
+        }
         #if canImport(OrnithLES)
         .task {
             if activeRunner == .ream { model.activateForChatModel(.ream) }
@@ -116,14 +77,107 @@ struct REAMRootView: View {
                 if phase == .background { model.releaseInferenceResources() }
                 else if phase == .active { model.refreshStorage() }
             case .ornith:
-                break // OrnithLESView manages its own lifecycle.
+                if phase == .background { Task { await lesModel.enterBackground() } }
+                else if phase == .active { lesModel.enterForeground() }
+                else if phase == .inactive { lesModel.prepareForInactivity() }
             }
         }
-        #elseif !canImport(OrnithLES)
+        #else
         .task { model.prepare() }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .background { model.releaseInferenceResources() }
-            else if phase == .active { model.refreshStorage() }
+            if phase == .background {
+                model.stopAPI()
+                model.releaseInferenceResources()
+            } else if phase == .active {
+                model.refreshStorage()
+            }
+        }
+        #endif
+    }
+
+    @ViewBuilder private var chatContent: some View {
+        #if canImport(OrnithLES)
+        if model.isSwitchingInferenceModel {
+            ProgressView("Frigör föregående modell…")
+        } else if activeRunner == .ornith {
+            OrnithLESChatPage(model: lesModel,
+                activate: { lesModel.activateChat(existing: model.verifiedOrnithForAlternateRunner()) })
+        } else {
+            REAMChatPage(model: model)
+        }
+        #else
+        REAMChatPage(model: model)
+        #endif
+    }
+
+    @ViewBuilder private var apiContent: some View {
+        #if canImport(OrnithLES)
+        if activeRunner == .ornith {
+            OrnithAPIPage(model: lesModel,
+                activate: { lesModel.activateChat(existing: model.verifiedOrnithForAlternateRunner()) })
+        } else {
+            REAMLocalAPIPage(model: model)
+        }
+        #else
+        REAMLocalAPIPage(model: model)
+        #endif
+    }
+
+    private var settingsContent: some View {
+        Form {
+            Section("Aktiv modell") {
+                #if canImport(OrnithLES)
+                Picker("Körmodell", selection: Binding(
+                    get: { activeRunner },
+                    set: { selectRunner($0) }
+                )) {
+                    ForEach(Runner.allCases) { runner in Text(runner.title).tag(runner) }
+                }
+                .disabled(model.isSwitchingInferenceModel)
+                .accessibilityIdentifier("iphone-model-selector")
+                #else
+                Picker("Körmodell", selection: Binding(
+                    get: { model.selectedModel },
+                    set: { model.selectModel($0) }
+                )) {
+                    ForEach(LocalChatModel.allCases) { entry in
+                        Text(entry.title).tag(entry)
+                    }
+                }
+                .disabled(!model.canSelectModel)
+                .accessibilityIdentifier("iphone-model-selector")
+                #endif
+                Text("Community-GGUF visas i Modeller. Nedladdning innebär inte att motorn stöder modellens arkitektur.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section("Lokal inferens") {
+                LabeledContent("Vald modell", value: model.modelTitle)
+                LabeledContent("Kontext i standardmotorn", value: "\(model.contextTokens.formatted()) token")
+                LabeledContent("RAM-gräns", value: String(format: "%.1f GB", Double(model.budgetBytes) / 1_000_000_000))
+                if model.supportsThinking {
+                    Toggle("Tänkande", isOn: Binding(
+                        get: { model.thinkingEnabled },
+                        set: { model.setThinkingEnabled($0) }
+                    ))
+                }
+                #if canImport(OrnithLES)
+                if activeRunner == .ornith {
+                    Button("Avancerade Ornith-kontroller och jämförelser") {
+                        showingDiagnostics = true
+                    }
+                }
+                #endif
+            }
+            Section("Information") {
+                Text("Chatt, modellbibliotek och API har egna flikar och behålls synliga även utan experimentella ramverk.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text("API kan bara svara när en kompatibel lokal motor är verifierad och appen aktiv. iOS kan pausa appen i bakgrunden.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        #if canImport(OrnithLES)
+        .sheet(isPresented: $showingDiagnostics) {
+            OrnithLESView(model: lesModel, existing: model.verifiedOrnithForAlternateRunner())
         }
         #endif
     }
@@ -134,8 +188,6 @@ struct REAMRootView: View {
         guard !model.isSwitchingInferenceModel, target != activeRunner else { return }
         model.isSwitchingInferenceModel = true
         Task { @MainActor in
-            // Await teardown before allowing a second heavyweight engine to
-            // allocate GPU buffers or acquire its own exclusive model lease.
             switch activeRunner {
             case .ornith: await lesModel.shutdown()
             case .ream: await model.pauseForAlternateRunner()
@@ -153,8 +205,10 @@ struct REAMRootView: View {
 /// Only exact, SHA-256-pinned GGUF files are admitted by the current engines.
 /// Other files in the same repositories are not automatically compatible.
 private struct HuggingFaceGGUFBrowser: View {
-    @Environment(\.dismiss) private var dismiss
     @State private var selectedPage: Page?
+    @State private var searchQuery = "dolphin"
+    @State private var searchResults: [CommunityGGUFRepository] = []
+    @State private var searchingModels = false
     @State private var repository = "dphn/Dolphin3.0-Llama3.1-8B-GGUF"
     @State private var availableFiles: [CommunityGGUFFile] = []
     @State private var installedFiles: [CommunityGGUFFile] = []
@@ -174,9 +228,32 @@ private struct HuggingFaceGGUFBrowser: View {
         installedFiles = CommunityGGUFCatalog.installed(in: communityRoot)
     }
 
+    private func searchCatalog() {
+        guard !searchingModels, !isSearching, downloadingID == nil else { return }
+        communityError = nil; communityStatus = ""; searchResults = []
+        searchingModels = true
+        Task { @MainActor in
+            defer { searchingModels = false }
+            do {
+                searchResults = try await CommunityGGUFCatalog.searchModels(query: searchQuery)
+                communityStatus = searchResults.isEmpty ? "Inga matchande GGUF-repositories." :
+                    "\(searchResults.count) modellrepositorier hittades. Välj ett för att se GGUF-filerna."
+            } catch { communityError = error.localizedDescription }
+        }
+    }
+
+    private func normalizedRepository(_ input: String) -> String {
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URLComponents(string: trimmed), url.scheme == "https",
+              url.host == "huggingface.co", url.query == nil, url.fragment == nil else { return trimmed }
+        let parts = url.path.split(separator: "/")
+        guard parts.count >= 2 else { return trimmed }
+        return String(parts[0]) + "/" + String(parts[1])
+    }
+
     private func discover() {
         guard !isSearching, downloadingID == nil else { return }
-        let name = repository.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = normalizedRepository(repository)
         communityError = nil; communityStatus = ""; availableFiles = []; isSearching = true
         Task { @MainActor in
             defer { isSearching = false }
@@ -286,15 +363,44 @@ private struct HuggingFaceGGUFBrowser: View {
                         .accessibilityIdentifier("hf-pinned-\(entry.id)")
                     }
                 }
-                Section("Hämta valfri GGUF från Hugging Face") {
-                    TextField("ägare/modell", text: $repository)
+                Section("Sök modeller på Hugging Face") {
+                    TextField("Sök namn, utvecklare eller modellfamilj", text: $searchQuery)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .submitLabel(.search)
+                        .onSubmit { searchCatalog() }
+                        .accessibilityIdentifier("hf-model-search-input")
+                    Button("Sök bland modeller", systemImage: "magnifyingglass") {
+                        searchCatalog()
+                    }
+                    .disabled(searchingModels || isSearching || downloadingID != nil)
+                    .accessibilityIdentifier("hf-model-search-button")
+                    if searchingModels { ProgressView("Söker Hugging Face…") }
+                    ForEach(searchResults) { result in
+                        Button {
+                            repository = result.id
+                            discover()
+                        } label: {
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(result.name).font(.headline)
+                                Text(result.author).font(.caption).foregroundStyle(.secondary)
+                                Text("\(result.downloads.formatted()) hämtningar")
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .disabled(isSearching || downloadingID != nil)
+                    }
+                }
+                Section("Välj GGUF-filer från ett repository") {
+                    TextField("ägare/modell eller Hugging Face-länk", text: $repository)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .accessibilityIdentifier("hf-community-repository")
                     Button("Sök GGUF-filer") { discover() }
                         .disabled(isSearching || downloadingID != nil)
                         .accessibilityIdentifier("hf-community-search")
-                    if isSearching { ProgressView("Läser filförteckning…") }
+                    if isSearching { ProgressView("Läser verifierbara GGUF-filer…") }
                     ForEach(availableFiles) { entry in
                         VStack(alignment: .leading, spacing: 6) {
                             Text(entry.path).font(.subheadline).textSelection(.enabled)
@@ -340,11 +446,6 @@ private struct HuggingFaceGGUFBrowser: View {
             }
             .navigationTitle("Hugging Face")
             .onAppear { refreshLibrary() }
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Stäng") { dismiss() }
-                }
-            }
             .sheet(item: $selectedPage) { page in
                 HuggingFaceSafariPage(url: page.url).ignoresSafeArea()
             }
@@ -358,6 +459,18 @@ private struct HuggingFaceSafariPage: UIViewControllerRepresentable {
         SFSafariViewController(url: url)
     }
     func updateUIViewController(_ controller: SFSafariViewController, context: Context) {}
+}
+#else
+private struct HuggingFaceGGUFBrowser: View {
+    var body: some View {
+        VStack(spacing: 16) {
+            Text("Modellbibliotek").font(.title2.bold())
+            Link("Utforska GGUF på Hugging Face",
+                 destination: URL(string: "https://huggingface.co/models?library=gguf")!)
+            Text("Lokal modellimport och nedladdning från biblioteket sker i iPhone-appen.")
+                .font(.caption).foregroundStyle(.secondary)
+        }.padding()
+    }
 }
 #endif
 
@@ -455,10 +568,17 @@ struct REAMChatPage: View {
                     Spacer()
                     Button("Stoppa", role: .cancel) { model.stop() }.disabled(model.activity == .stopping)
                 }
-            } else if !model.canChat {
+            } else if model.canChat {
+                Button("Ladda ur modell", role: .destructive) {
+                    Task { await model.unloadModel() }
+                }
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("flash-unload-model")
+            } else {
                 HStack {
                     if model.hasFile {
-                        Button("Verifiera modellfil") { model.verify() }.buttonStyle(.borderedProminent)
+                        Button("Ladda modell") { model.verify() }.buttonStyle(.borderedProminent)
+                            .accessibilityIdentifier("flash-load-model")
                     } else {
                         Button(model.partialBytes > 0 ? "Återuppta hämtning" : "Hämta modell") { model.download() }
                             .buttonStyle(.borderedProminent)
@@ -493,8 +613,9 @@ struct REAMChatPage: View {
         HStack(alignment: .bottom, spacing: 12) {
             TextField("Skriv ett meddelande…", text: $model.draft, axis: .vertical)
                 .lineLimit(1...6).textFieldStyle(.plain).submitLabel(.send)
-                .onSubmit { model.send() }.disabled(!model.canChat)
+                .onSubmit { if model.canChat { model.send() } }
                 .accessibilityLabel("Meddelande")
+                .accessibilityIdentifier("flash-chat-editable-draft")
             Button { model.send() } label: { Image(systemName: "arrow.up.circle.fill").font(.title) }
                 .accessibilityLabel("Skicka meddelande")
                 .disabled(!model.canChat || model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)

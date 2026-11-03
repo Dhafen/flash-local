@@ -3,10 +3,10 @@ import Foundation
 /// Total session window, including template, tools, prompt and generated tokens.
 /// Selecting a larger window requests a memory admission, not a quality claim.
 public enum LocalContextProfile: Int, Codable, CaseIterable, Identifiable, Sendable {
-    case standard = 8192, test16K = 16384, test32K = 32768, test65K = 65536
+    case legacy4K = 4096, standard = 8192, test16K = 16384, test32K = 32768, test65K = 65536
     public var id: Int { rawValue }
     public var title: String {
-        self == .standard ? "8K" : "\(rawValue / 1024)K · test"
+        self == .legacy4K ? "4K · standardmotor" : self == .standard ? "8K" : "\(rawValue / 1024)K · test"
     }
 }
 
@@ -14,8 +14,10 @@ public struct LocalModelCapabilities: Sendable {
     public enum Family: Sendable { case ornith, flint }
     public let context: LocalContextProfile
     public let family: Family
-    public init(context: LocalContextProfile = .standard, family: Family = .ornith) {
-        self.context = context; self.family = family
+    public let supportsToolCalls: Bool
+    public init(context: LocalContextProfile = .standard, family: Family = .ornith,
+                supportsToolCalls: Bool = true) {
+        self.context = context; self.family = family; self.supportsToolCalls = supportsToolCalls
     }
     public var modelID: String { family == .ornith ? LocalChatRequest.modelID : "recursive-flint-40b-a2.5b-int4" }
     public var defaultOptions: LocalGenerationOptions {
@@ -32,7 +34,7 @@ public struct LocalModelCapabilities: Sendable {
         ["context_capacity_tokens": context.rawValue, "max_output_tokens": 4096,
          "reasoning_presets": family == .ornith ? ["off", "small", "medium", "ultra"] : [],
          "reasoning_output": true, "thinking_budget_control": family == .ornith,
-         "tool_calls": true, "tool_quality_verified": false, "context_quality_verified": false]
+         "tool_calls": supportsToolCalls, "tool_quality_verified": false, "context_quality_verified": false]
     }
     func parseTools(_ text: String, request: LocalChatRequest) throws -> (content: String, calls: [LocalToolCall]) {
         if family == .flint {

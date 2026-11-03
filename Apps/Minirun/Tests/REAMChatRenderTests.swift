@@ -9,6 +9,18 @@ import AppKit
 
 @MainActor
 final class REAMChatRenderTests: XCTestCase {
+    func testFourTabProductShellDrawsWithNoModelInBothAppearances() throws {
+        for scheme in [ColorScheme.light, .dark] {
+            let content = REAMRootView(model: REAMAppModel.reviewPreview())
+                .environment(\.colorScheme, scheme)
+            let data = try capture(content, scheme: scheme)
+            XCTAssertGreaterThan(data.count, 10000)
+            let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.png")
+            attachment.name = "flash-local-four-tab-shell-\(platform)-\(scheme == .dark ? "dark" : "light").png"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+    }
     func testMissingAndPreviewChatDrawInBothAppearances() throws {
         var captures: [ColorScheme: [Data]] = [:]
         for preview in [false, true] {

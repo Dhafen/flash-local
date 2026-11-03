@@ -16,6 +16,7 @@
 		08B2EF72EB6171E6CD47D0BC /* OrnithLESAppTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6448A9D4326018EB7626C265 /* OrnithLESAppTests.swift */; };
 		0A9ADB03642AB66C21E11150 /* TierBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABDA63AFF2A02004622DE66C /* TierBar.swift */; };
 		0B41D840EC9CD9C371085425 /* InstrumentPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE65194D2A1F359EDB839857 /* InstrumentPanelView.swift */; };
+		0C2201838128A56D6F611BD2 /* REAMLocalAPIPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E162A44EAE6040089B7B4C4 /* REAMLocalAPIPage.swift */; };
 		0F00E556ACA58AD0147C5949 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DB98DAE51D81245C7954BF4 /* RootView.swift */; };
 		1178547199D15C3F00D8EC94 /* AboutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D35B4403E843B5192C63F80 /* AboutView.swift */; };
 		143A0D6815FF6C774E09B8AC /* VolumeAssessments.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4615FE6055CFB662D8CBCE7 /* VolumeAssessments.swift */; };
@@ -53,6 +54,7 @@
 		34BAD95298C4A4E53A80FF1F /* OpenSourceNotices.txt in Resources */ = {isa = PBXBuildFile; fileRef = 4584526402C0C724EA126739 /* OpenSourceNotices.txt */; };
 		371E20A8F3784AF52406A9A4 /* Conversation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9928B43DAB1B47EE7EF21F34 /* Conversation.swift */; };
 		39777DE3E7D384516509B0CD /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D92E22C4947660F2A8812022 /* AppModel.swift */; };
+		399378BD18FA9497432DF229 /* REAMLocalAPIPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E162A44EAE6040089B7B4C4 /* REAMLocalAPIPage.swift */; };
 		399B309F0E74C7E48AD8BD70 /* Primitives.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FD3923DC64AB82EE5FC433C /* Primitives.swift */; };
 		3BED610CF88B2DFFF015966F /* DestinationPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51BE474F9AE32C45E714938D /* DestinationPicker.swift */; };
 		3D6FCE302D8BB4C11B97DC1F /* PanelWindowSizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F2C99A01DEA2FB109264058 /* PanelWindowSizerTests.swift */; };
@@ -285,6 +287,7 @@
 		78C769B3DD2C759399780834 /* MRFormat.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MRFormat.swift; sourceTree = "<group>"; };
 		7D35B4403E843B5192C63F80 /* AboutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutView.swift; sourceTree = "<group>"; };
 		7D5F602A6A195BFA9250B42D /* DownloadsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadsView.swift; sourceTree = "<group>"; };
+		7E162A44EAE6040089B7B4C4 /* REAMLocalAPIPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = REAMLocalAPIPage.swift; sourceTree = "<group>"; };
 		7FB065E4579BEAAA27BC5273 /* FlashLocalMark.svg */ = {isa = PBXFileReference; path = FlashLocalMark.svg; sourceTree = "<group>"; };
 		7FFD1F783466387DCB38A15C /* RunSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunSnapshot.swift; sourceTree = "<group>"; };
 		8295EF8C10708DA25D6703DE /* CatalogFixtures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogFixtures.swift; sourceTree = "<group>"; };
@@ -563,6 +566,7 @@
 				F6534E68BABDC703360D074B /* ModelDetailView.swift */,
 				FEF9601E7D9E23FB5F00C312 /* OrnithLESView.swift */,
 				C2F522404FD75DC76C939972 /* OrnithPerformanceView.swift */,
+				7E162A44EAE6040089B7B4C4 /* REAMLocalAPIPage.swift */,
 				9EFD1C4AD23582687D8423FD /* REAMRootView.swift */,
 				1DB98DAE51D81245C7954BF4 /* RootView.swift */,
 				1C206C2D7B96B01E6C0A3C36 /* SettingsView.swift */,
@@ -849,6 +853,7 @@
 				D36E78D2FC2FCC299211EC7C /* ProjectionStrip.swift in Sources */,
 				4CDC1E1E6A5D12D0101507D6 /* PromptAssembler.swift in Sources */,
 				22215427EF6C2F520A27ED70 /* REAMAppModel.swift in Sources */,
+				0C2201838128A56D6F611BD2 /* REAMLocalAPIPage.swift in Sources */,
 				4F8EF0C58AA12C94C7856D06 /* REAMRootView.swift in Sources */,
 				BBE91A997495CA16DEC39ECA /* RefusalCard.swift in Sources */,
 				0F00E556ACA58AD0147C5949 /* RootView.swift in Sources */,
@@ -916,6 +921,7 @@
 				2B4838F595A71611247C3322 /* ProjectionStrip.swift in Sources */,
 				8BDC18FB1DF57A0ECEF2EDD7 /* PromptAssembler.swift in Sources */,
 				F0F83A631A813D506BB526A7 /* REAMAppModel.swift in Sources */,
+				399378BD18FA9497432DF229 /* REAMLocalAPIPage.swift in Sources */,
 				8C8DD2809FB11E122F244029 /* REAMRootView.swift in Sources */,
 				45AE0FE4723329E6D6B7FB67 /* RefusalCard.swift in Sources */,
 				952F2D0E7D1AF4C13591D00A /* RootView.swift in Sources */,

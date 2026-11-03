@@ -383,7 +383,7 @@ final class LocalModelAPITests: XCTestCase {
         return request
     }
     func testRealTCPAdvertisesTheActiveContextWithoutClaimingLongContextQuality() async throws {
-        XCTAssertEqual(LocalContextProfile.allCases.map(\.rawValue), [8192, 16384, 32768, 65536])
+        XCTAssertEqual(LocalContextProfile.allCases.map(\.rawValue), [4096, 8192, 16384, 32768, 65536])
         XCTAssertThrowsError(try JSONDecoder().decode(LocalContextProfile.self, from: Data("12345".utf8)))
         let calls = APITestBox()
         let (server, base) = try await listen(capabilities: .init(context: .test16K)) { _ in
@@ -401,6 +401,15 @@ final class LocalModelAPITests: XCTestCase {
         XCTAssertEqual(capabilities["context_quality_verified"] as? Bool, false)
         XCTAssertEqual(calls.get(), 0)
         print("LOCAL_API_CAPACITY actualSessionWindow=true default8K=true largerExperimental=true noModelLoaded=true")
+    }
+    func testLegacyOrnithAPICapabilityDoesNotClaim8KOrToolCalling() throws {
+        let caps = LocalModelCapabilities(context: .legacy4K, supportsToolCalls: false)
+        XCTAssertEqual(caps.context.rawValue, 4096)
+        XCTAssertEqual(caps.json["context_capacity_tokens"] as? Int, 4096)
+        XCTAssertEqual(caps.json["tool_calls"] as? Bool, false)
+        XCTAssertEqual(caps.json["context_quality_verified"] as? Bool, false)
+        XCTAssertEqual(LocalModelCapabilities().context.rawValue, 8192,
+                       "Adding a legacy runtime must not silently change the default 8K profile")
     }
     func testRealTCPModelsAuthJSONAndSSE() async throws {
         let calls = APITestBox(), cancelled = APITestBox()

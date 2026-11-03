@@ -30,9 +30,10 @@ defaults:
     shell: bash
 jobs:
   isolated-engine:
-    # PR builds must use macOS 26 rather than the saturated macOS 15 pool.
-    # Standalone/manual executions keep their explicit runner choice.
-    runs-on: ${{ github.event_name == 'pull_request' && 'macos-26' || ((github.event_name != 'workflow_dispatch' || inputs.use_macos15) && 'macos-15' || 'macos-26') }}
+    # Honor the caller's runner selection: the PR parent uses macOS 15 ARM64
+    # for both this prerequisite and its integrated app build.
+    # Manual dispatches still choose between pinned-Xcode macOS 15 and 26.
+    runs-on: ${{ (github.event_name != 'workflow_dispatch' || inputs.use_macos15) && 'macos-15' || 'macos-26' }}
     timeout-minutes: 40
     steps:
       - name: Record runner and run identity before validation
