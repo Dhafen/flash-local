@@ -42,6 +42,24 @@ final class OrnithLESAppTests: XCTestCase {
         XCTAssertNil(ornith.accelerationReport)
     }
 
+    func testExpertCacheSelectionOnlyAppliesToItsMeasuredContext() {
+        let model = OrnithLESAppModel.reviewChatPreview(thinking: false)
+        model.contextProfile = .test32K
+        model.selectedExpertCacheContext = .test32K
+        XCTAssertEqual(model.cacheMode, .boundedExpertCache)
+
+        model.contextProfile = .test65K
+        XCTAssertEqual(model.cacheMode, .osPageCache)
+        XCTAssertEqual(model.activeCacheMode, .osPageCache)
+        XCTAssertEqual(model.activeContextProfile, .standard)
+        XCTAssertTrue(model.batchSettingsChanged)
+
+        model.contextProfile = .test32K
+        XCTAssertEqual(model.cacheMode, .boundedExpertCache)
+        model.selectedExpertCacheContext = nil
+        XCTAssertEqual(model.cacheMode, .osPageCache)
+    }
+
     func testInterruptedAccelerationRecoversDiagnosticWithoutStartingAnyEngine() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("app-acceleration-recovery-" + UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

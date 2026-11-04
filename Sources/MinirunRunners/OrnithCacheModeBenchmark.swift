@@ -89,6 +89,8 @@ public enum OrnithCacheModeBenchmark {
         let modes: [OrnithLESChatGeneration.CacheMode] =
             [.osPageCache, .boundedExpertCache, .boundedExpertCache, .osPageCache]
         let question = Qwen35ChatMessage(role: .user, content: LESBenchmark.prompt)
+        let options = OrnithLESChatGeneration.benchmarkGenerationOptions
+        try options.validate()
         var runs: [Run] = []
         for (index, mode) in modes.enumerated() {
             if control.shouldAbort() { throw CancellationError() }
@@ -97,9 +99,6 @@ public enum OrnithCacheModeBenchmark {
                     check: baseline, control: control, contextProfile: contextProfile,
                     cacheMode: mode, onAdmission: onAdmission)
                 defer { engine.close() }
-                var options = LocalGenerationOptions()
-                options.maximumNewTokens = 129
-                options.enableThinking = true
                 return try engine.generate(messages: [question], options: options) { event in
                     switch event {
                     case .prefill(let value):

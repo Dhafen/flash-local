@@ -7,6 +7,15 @@ import MinirunKit
 @testable import MinirunRunners
 
 final class OrnithLESChatTests: XCTestCase {
+    func testOrnithABBABenchmarksUseValidUnforcedGreedyOptions() throws {
+        let options = OrnithLESChatGeneration.benchmarkGenerationOptions
+        try options.validate()
+        XCTAssertEqual(options.maximumNewTokens, 129)
+        XCTAssertTrue(options.thinkingEnabled)
+        XCTAssertNil(options.thinkingBudget)
+        XCTAssertEqual(options.temperature, 0)
+    }
+
     func testCacheStrategyRequiresMeasuredSpeedAndNeverAutoAdmitsIncompleteReport() throws {
         XCTAssertEqual(OrnithLESChatGeneration.CacheMode.osPageCache.rawValue, "omniPageCache")
         XCTAssertEqual(OrnithLESChatGeneration.CacheMode.boundedExpertCache.rawValue, "boundedExpertCache")

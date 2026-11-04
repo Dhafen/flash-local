@@ -62,6 +62,15 @@ public final class OrnithLESChatGeneration {
     private var running = false
     public let contextTokens: Int
 
+    static let benchmarkGenerationOptions: LocalGenerationOptions = {
+        var options = LocalGenerationOptions()
+        options.maximumNewTokens = 129
+        options.enableThinking = true
+        options.thinkingBudget = nil
+        options.temperature = 0
+        return options
+    }()
+
     static func validatedPrefill(_ check: LESNumericalCheck, modelSHA256: String, nativeRevision: String) throws -> Int {
         guard check.modelSHA256 == modelSHA256, check.nativeRevision == nativeRevision,
               check.nativeBenchmarkAdmitted, check.nativePrefillTokens == 1 || check.nativePrefillTokens == 4 else {
