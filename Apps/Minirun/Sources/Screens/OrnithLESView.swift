@@ -222,7 +222,10 @@ struct OrnithLESChatPage: View {
                             Text(String(format: "Sidcache %.2f token/s · expertcache %.2f token/s",
                                 comparison.pageCacheDecodeTokensPerSecond ?? 0,
                                 comparison.expertCacheDecodeTokensPerSecond ?? 0))
-                            if comparison.preferredCacheMode == .boundedExpertCache {
+                            if comparison.preferredCacheMode == .boundedExpertCache &&
+                                model.measuredCacheContext == model.contextProfile {
+                                Text("Expertcache aktiveras med verifierad grundbatch, inte en äldre sidcacheprofil.")
+                                    .font(.caption2).foregroundStyle(.secondary)
                                 Button("Aktivera uppmätt snabbare expertcache") { model.useMeasuredExpertCache() }
                                     .disabled(!model.canStart)
                             } else {
@@ -234,6 +237,10 @@ struct OrnithLESChatPage: View {
                     }
                     if let url = model.cacheModeBenchmarkURL {
                         ShareLink("Dela expertcachejämförelse", item: url)
+                    }
+                    if model.cacheMode == .boundedExpertCache {
+                        Button("Återgå till sidcache") { model.usePageCache() }
+                            .disabled(!model.canStart)
                     }
                 }
             }.font(.caption)
