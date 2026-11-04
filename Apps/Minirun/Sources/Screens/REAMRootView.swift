@@ -1,5 +1,8 @@
 import MinirunKit
 import SwiftUI
+#if canImport(OrnithLES)
+import OrnithLES
+#endif
 #if os(iOS)
 import UIKit
 import SafariServices
@@ -151,23 +154,43 @@ struct REAMRootView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Lokal inferens") {
-                LabeledContent("Vald modell", value: model.modelTitle)
-                LabeledContent("Kontext i standardmotorn", value: "\(model.contextTokens.formatted()) token")
-                LabeledContent("RAM-gräns", value: String(format: "%.1f GB", Double(model.budgetBytes) / 1_000_000_000))
-                if model.supportsThinking {
-                    Toggle("Tänkande", isOn: Binding(
-                        get: { model.thinkingEnabled },
-                        set: { model.setThinkingEnabled($0) }
-                    ))
-                }
                 #if canImport(OrnithLES)
                 if activeRunner == .ornith {
-                    Button("Avancerade Ornith-kontroller och jämförelser") {
-                        showingDiagnostics = true
+                    LabeledContent("Vald modell", value: activeRunner.title)
+                    LabeledContent("Ornith-motor", value: lesModel.loadState)
+                    LabeledContent("Aktiv kontext", value: lesModel.chatReady
+                        ? "\(lesModel.contextCapacityTokens.formatted()) token" : "Ej laddad")
+                    LabeledContent("RAM-tak (fast)", value: "5,5 GB")
+                    Text("RAM-taket skyddar mot minnesstopp. iOS filcache räknas inte in i appens minnesmätning.")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    LabeledContent("Vald modell", value: model.modelTitle)
+                    LabeledContent("Kontext i standardmotorn", value: "\(model.contextTokens.formatted()) token")
+                    LabeledContent("RAM-tak (fast)", value: String(format: "%.1f GB", Double(model.budgetBytes) / 1_000_000_000))
+                    if model.supportsThinking {
+                        Toggle("Tänkande", isOn: Binding(
+                            get: { model.thinkingEnabled }, set: { model.setThinkingEnabled($0) }
+                        ))
                     }
+                }
+                #else
+                LabeledContent("Vald modell", value: model.modelTitle)
+                LabeledContent("Kontext i standardmotorn", value: "\(model.contextTokens.formatted()) token")
+                LabeledContent("RAM-tak (fast)", value: String(format: "%.1f GB", Double(model.budgetBytes) / 1_000_000_000))
+                if model.supportsThinking {
+                    Toggle("Tänkande", isOn: Binding(
+                        get: { model.thinkingEnabled }, set: { model.setThinkingEnabled($0) }
+                    ))
                 }
                 #endif
             }
+            #if canImport(OrnithLES)
+            if activeRunner == .ornith {
+                OrnithActiveSettingsSections(model: lesModel,
+                    activate: { lesModel.activateChat(existing: model.verifiedOrnithForAlternateRunner()) },
+                    openAdvanced: { showingDiagnostics = true })
+            }
+            #endif
             Section("Information") {
                 Text("Chatt, modellbibliotek och API har egna flikar och behålls synliga även utan experimentella ramverk.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -200,6 +223,180 @@ struct REAMRootView: View {
     }
     #endif
 }
+
+
+#if canImport(OrnithLES)
+/// The settings tab edits the SAME retained Ornith owner used by Chat and API.
+/// No shadow REAM state, no implicit benchmark, no unverified auto-reload.
+struct OrnithActiveSettingsSections: View {
+    @Bindable var model: OrnithLESAppModel
+    let activate: () -> Void
+
+    private var editable: Bool { model.canStart && !model.isAPIListening }
+
+    var body: some View {
+        Section("Ornith · kontext och batch") {
+            Picker("Kontext vid nästa laddning", selection: $model.contextProfile) {
+                ForEach(LocalContextProfile.allCases) { profile in
+                    Text(profile.title).tag(profile)
+                }
+            }
+            .accessibilityIdentifier("ornith-settings-context")
+            .disabled(!editable)
+            Text("Vald: \(model.contextProfile.rawValue.formatted()) token. 8K är grundprofilen; 16K, 32K och 65K är experimentella och kräver ny minneskontroll.")
+                .font(.caption).foregroundStyle(.secondary)
+            Picker("Evaluation batch", selection: Binding(
+                get: { model.batchConfiguration.evaluationTokens },
+                set: { value in
+                    var selected = model.batchConfiguration
+                    selected.evaluationTokens = value
+                    if selected.physicalTokens > value { selected.physicalTokens = 0 }
+                    model.batchConfiguration = selected
+                })) {
+                    ForEach([1, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048], id: \.self) { count in
+                        Text("\(count) token").tag(count)
+                    }
+                }
+                .disabled(!editable)
+                .accessibilityIdentifier("ornith-settings-evaluation-batch")
+            Picker("Fysisk batch", selection: Binding(
+                get: { model.batchConfiguration.physicalTokens },
+                set: { value in
+                    var selected = model.batchConfiguration
+                    selected.physicalTokens = value
+                    selected.evaluationTokens = max(selected.evaluationTokens, value)
+                    model.batchConfiguration = selected
+                })) {
+                    Text("Auto · 1/4").tag(0)
+                    ForEach([1, 4, 8, 16], id: \.self) { count in
+                        Text("\(count) token").tag(count)
+                    }
+                }
+                .disabled(!editable)
+            Toggle("Automatisk uppmätt batchprofil", isOn: $model.automaticBatch)
+                .disabled(!editable)
+            Text("Fysisk batch över 16 är inte verifierad. Större evaluation-batch ger inte automatiskt snabbare inferens.")
+                .font(.caption).foregroundStyle(.secondary)
+            if model.batchSettingsChanged {
+                Text("Kontext eller batch har ändrats. Den laddade motorn har fortfarande sin tidigare konfiguration.")
+                    .font(.caption).foregroundStyle(.orange)
+            }
+            if !model.chatReady || model.batchSettingsChanged {
+                Button(model.chatReady ? "Kontrollera och ladda om Ornith" : "Kontrollera och ladda Ornith") {
+                    activate()
+                }
+                .disabled(!editable || !model.sceneIsActive)
+            }
+            if model.isAPIListening {
+                Text("Stoppa den lokala API-servern innan du ändrar motorns konfiguration.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        Section("Ornith · generering") {
+            Toggle("Tänkande", isOn: Binding(
+                get: { model.chatThinkingEnabled },
+                set: { model.chatThinkingEnabled = $0 }
+            ))
+            .disabled(!editable)
+            .accessibilityIdentifier("ornith-settings-thinking")
+            Picker("Tänkandenivå", selection: Binding(
+                get: { OrnithThinkingPreset.matching(model.chatOptions) ?? .medium },
+                set: { model.chatOptions = $0.applying(to: model.chatOptions) })) {
+                    ForEach(OrnithThinkingPreset.allCases) { preset in
+                        Text(preset.title).tag(preset)
+                    }
+                }
+                .disabled(!editable)
+            HStack {
+                Text("Temperatur")
+                Spacer()
+                OrnithDecimalField(title: "Temperatur", value: $model.chatOptions.temperature,
+                                   minimum: 0, maximum: 2)
+            }
+            .disabled(!editable)
+            HStack {
+                Text("Top-p")
+                Spacer()
+                OrnithDecimalField(title: "Top-p", value: $model.chatOptions.topP,
+                                   minimum: 0, maximum: 1, excludingMinimum: true)
+            }
+            .disabled(!editable)
+            HStack {
+                Text("Slumpfrö")
+                Spacer()
+                TextField("Slumpfrö", value: $model.chatOptions.seed,
+                          format: .number.grouping(.never))
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 115)
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityIdentifier("ornith-settings-seed")
+            }
+            .disabled(!editable)
+            Text("Värdena gäller nästa chattfråga och sparas när de är giltiga. API:t använder en kopia av standardvärdena när servern startas.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        Section("Ornith · hastighet och jämförelser") {
+            if let summary = model.chatSummary {
+                if let rate = summary.decodeTokensPerSecond {
+                    LabeledContent("Senaste generering", value: String(format: "%.2f token/s", rate))
+                }
+                if summary.prefillSeconds > 0 {
+                    LabeledContent("Senaste promptinläsning", value:
+                        String(format: "%.2f token/s", Double(summary.evaluatedPromptTokens) / summary.prefillSeconds))
+                }
+                LabeledContent("Vikthantering", value: summary.backend)
+            } else {
+                Text("Ingen uppmätt normal generering i denna session.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            if let report = model.cacheModeBenchmark {
+                if report.comparable, let page = report.pageCacheDecodeTokensPerSecond,
+                   let expert = report.expertCacheDecodeTokensPerSecond {
+                    LabeledContent("iOS-sidcache", value: String(format: "%.2f token/s", page))
+                    LabeledContent("Expertcache", value: String(format: "%.2f token/s", expert))
+                    Text(report.preferredCacheMode == .boundedExpertCache
+                        ? "Expertcache klarade mätkravet; aktivering sker separat i snabbchatten."
+                        : "Sidcache behålls efter jämförelsen.")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Text("Expertcachejämförelsen blev inte jämförbar; ingen vinnare har verifierats.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            } else {
+                Text("Ingen jämförbar sidcache-/expertcachemätning i denna session.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            if let report = model.accelerationReport {
+                Text("Separat \(report.candidate == .dflash ? "DFlash" : "Flash Attention")-test")
+                    .font(.subheadline.weight(.semibold))
+                if report.comparable {
+                    ForEach(report.runs) { run in
+                        if let rate = run.decodeTokensPerSecond {
+                            LabeledContent("\(run.mode) · körning \(run.number + 1)",
+                                value: String(format: "%.2f token/s", rate))
+                        }
+                    }
+                } else {
+                    Text("Ingen godkänd acceleratorjämförelse.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                if let failure = report.failure { Text(failure).font(.caption).foregroundStyle(.orange) }
+            } else {
+                Text("Ingen färdig DFlash-/Flash Attention-jämförelserapport i denna session. En journal ensam är inget hastighetsresultat.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Text("Mätningar från denna session. Ingen cache eller accelerator väljs automatiskt.")
+                .font(.caption).foregroundStyle(.secondary)
+            Button("Avancerade Ornith-kontroller och mätrapporter") {
+                // The parent owns the existing diagnostic sheet.
+                // This navigation action is injected by REAMRootView.
+                openAdvanced()
+            }
+        }
+    }
+    var openAdvanced: () -> Void = {}
+}
+#endif
 
 #if os(iOS)
 /// Only exact, SHA-256-pinned GGUF files are admitted by the current engines.
