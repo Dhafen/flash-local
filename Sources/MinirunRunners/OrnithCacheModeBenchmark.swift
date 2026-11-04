@@ -1,5 +1,6 @@
 #if canImport(OrnithLES)
 import Foundation
+import GGUFCore
 import OrnithLES
 import MinirunKit
 import ModelAdapters
