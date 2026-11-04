@@ -11,6 +11,37 @@ import AppKit
 
 @MainActor
 final class OrnithLESAppTests: XCTestCase {
+    func testActiveOrnithSettingsPreserveRunningContextUntilExplicitReload() {
+        let owner = REAMAppModel(root: FileManager.default.temporaryDirectory)
+        let ornith = owner.ornithSession
+        let legacyContext = owner.contextTokens
+        let originalContext = ornith.contextCapacityTokens
+
+        // This is the SAME owner used by the root chat/API and its settings.
+        _ = OrnithActiveSettingsSections(model: ornith, activate: {}, openAdvanced: {})
+        XCTAssertTrue(ornith === owner.ornithSession)
+        XCTAssertEqual(owner.contextTokens, legacyContext)
+
+        ornith.contextProfile = .test32K
+        XCTAssertEqual(ornith.contextProfile.rawValue, 32768)
+        XCTAssertEqual(ornith.contextCapacityTokens, originalContext)
+        XCTAssertEqual(owner.contextTokens, legacyContext)
+
+        ornith.chatThinkingEnabled = false
+        XCTAssertFalse(ornith.chatOptions.enableThinking)
+        ornith.chatThinkingEnabled = true
+        XCTAssertTrue(ornith.chatOptions.enableThinking)
+
+        ornith.batchConfiguration.evaluationTokens = 128
+        XCTAssertEqual(ornith.batchConfiguration.evaluationTokens, 128)
+        XCTAssertEqual(owner.contextTokens, legacyContext)
+        // A settings edit never loads weights or creates an inferred result.
+        XCTAssertFalse(ornith.chatReady)
+        XCTAssertNil(ornith.chatSummary)
+        XCTAssertNil(ornith.cacheModeBenchmark)
+        XCTAssertNil(ornith.accelerationReport)
+    }
+
     func testInterruptedAccelerationRecoversDiagnosticWithoutStartingAnyEngine() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("app-acceleration-recovery-" + UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
