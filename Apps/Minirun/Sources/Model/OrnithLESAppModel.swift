@@ -515,13 +515,18 @@ final class OrnithLESAppModel {
     private(set) var prefillBenchmarkURL: URL?
     private(set) var cacheBenchmark: OrnithCacheBenchmark.Report?
     private(set) var cacheBenchmarkURL: URL?
+    private(set) var cacheModeBenchmark: OrnithCacheModeBenchmark.Report?
+    private(set) var cacheModeBenchmarkURL: URL?
+    /// Session-only: a new app build must remeasure this acceleration.
+    var cacheMode: OrnithLESChatGeneration.CacheMode = .osPageCache
+    private(set) var activeCacheMode: OrnithLESChatGeneration.CacheMode = .osPageCache
     private(set) var accelerationReport: LESAccelerationBenchmark.Report?
     private(set) var accelerationReportURL: URL?
     var accelerationCandidate: LESAccelerationBenchmark.Candidate = .flashAttention
     private(set) var accelerationDraftPresent = false
     private(set) var batchOptimizationRows: [OrnithPrefillBenchmark.Measurement] = []
     private(set) var batchOptimizationURL: URL?
-    var batchSettingsChanged: Bool { chatReady && (activeBatchConfiguration != batchConfiguration || activeContextProfile != contextProfile || activeAutomaticBatch != automaticBatch) }
+    var batchSettingsChanged: Bool { chatReady && (activeBatchConfiguration != batchConfiguration || activeContextProfile != contextProfile || activeAutomaticBatch != automaticBatch || activeCacheMode != cacheMode) }
     var systemPrompt = "" {
         didSet {
             if persistOptions, systemPrompt.utf8.count <= 32768 {
@@ -741,6 +746,7 @@ final class OrnithLESAppModel {
         let requestedBatch = batchConfiguration
         let requestedContext = contextProfile
         let useAutomatic = automaticBatch
+        let requestedCacheMode = cacheMode
         let activationStart = MonotonicClock.now()
         activationSeconds = nil; startupAdmissionReused = false
         loadingStartedAt = Date()
@@ -753,7 +759,8 @@ final class OrnithLESAppModel {
             defer { if activeID == id { activeID = nil; control = nil; isBusy = false; operation = nil; loadingStartedAt = nil } }
             do {
                 let check = try await worker.prepareChat(modelsRoot: modelsRoot, privateRoot: privateRoot, existing: existing,
-                    control: flag, configuration: requestedBatch, contextProfile: requestedContext, preferAutomatic: useAutomatic, progress: { [weak self] value in
+                    control: flag, configuration: requestedBatch, contextProfile: requestedContext,
+                    cacheMode: requestedCacheMode, preferAutomatic: useAutomatic, progress: { [weak self] value in
                         Task { @MainActor in guard let self, self.activeID == id else { return }; self.status = value }
                     }, onCheck: { [weak self] value in
                         Task { @MainActor in guard let self, self.activeID == id else { return }; self.numericalCheck = value }
@@ -767,7 +774,7 @@ final class OrnithLESAppModel {
                 if flag.isCancellationRequested { throw CancellationError() }
                 let effective = await worker.usedConfiguration()
                 activeBatchConfiguration = effective; batchConfiguration = effective; activeAutomaticBatch = useAutomatic
-                activeContextProfile = requestedContext
+                activeContextProfile = requestedContext; activeCacheMode = requestedCacheMode
                 if effective == LESPrefillConfiguration() { activePrefillCheck = nil }
                 else { activePrefillCheck = await worker.prefillAdmission() }
                 startupAdmissionReused = await worker.admissionWasReused()
@@ -939,6 +946,51 @@ final class OrnithLESAppModel {
                     "Cachetest klart · återanvändning eller svar avvek. Se rapporten."
             } catch { self.error = error.localizedDescription; status = "Cachetestet stoppades."; await worker.closeChat() }
         }
+    }
+    func startCacheModeBenchmark() {
+        guard canBenchmark, sceneIsActive else { return }
+        let flag = LESControl(), id = UUID(), context = contextProfile
+        activeID = id; control = flag; isBusy = true; chatReady = false; chatControl = nil
+        error = nil; cacheModeBenchmark = nil; cacheModeBenchmarkURL = nil
+        status = "Jämför iOS-sidcache och expertcache med identiska token…"
+        operation = Task { [weak self] in
+            guard let self else { return }
+            defer { if activeID == id { activeID = nil; control = nil; isBusy = false; operation = nil } }
+            do {
+                let report = try await worker.benchmarkCacheModes(modelsRoot: modelsRoot, privateRoot: privateRoot,
+                    control: flag, context: context, progress: { [weak self] value in
+                        Task { @MainActor in guard let self, self.activeID == id else { return }; self.status = value }
+                    })
+                cacheModeBenchmark = report
+                struct Export: Encodable {
+                    let sourceRevision, nativeRevision, modelSHA256, device, os: String
+                    let timestamp: Date
+                    let report: OrnithCacheModeBenchmark.Report
+                }
+                let folder = documents.appendingPathComponent("Diagnostics")
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                let url = folder.appendingPathComponent("ornith-expert-cache-abba-" + UUID().uuidString + ".json")
+                let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]; encoder.dateEncodingStrategy = .iso8601
+                try encoder.encode(Export(sourceRevision: BuildInfo.gitRevision, nativeRevision: LESContext.revision,
+                    modelSHA256: GGUFModelManifest.primaryOrnith.sha256,
+                    device: Sysctl.string("hw.machine") ?? "unknown",
+                    os: ProcessInfo.processInfo.operatingSystemVersionString,
+                    timestamp: Date(), report: report)).write(to: url, options: .atomic)
+                cacheModeBenchmarkURL = url
+                status = report.comparable ? "ABBA klart · identiska token och jämförbar termik. Se hastigheterna." :
+                    "ABBA ej jämförbart: token, termik, minne eller längd avvek. Sidcache behålls."
+            } catch {
+                self.error = error.localizedDescription
+                status = "Cachejämförelsen stoppades."
+                await worker.closeChat()
+            }
+        }
+    }
+    func useMeasuredExpertCache() {
+        guard canStart, cacheModeBenchmark?.preferredCacheMode == .boundedExpertCache else { return }
+        cacheMode = .boundedExpertCache
+        status = "Uppmätt snabbare expertcache vald. Ny KV/SSM-kontroll krävs."
+        activateChat()
     }
     func refreshAccelerationDraftPresence() {
         accelerationDraftPresent = FileManager.default.fileExists(atPath:
