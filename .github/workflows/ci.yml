@@ -47,9 +47,9 @@ on:
         default: false
 
 concurrency:
-  # Only the newest commit needs PR validation. Keep manual release/TestFlight
-  # dispatches isolated by run ID so a later commit can never cancel delivery.
-  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  # PRs supersede older PR checks. Private deliveries share one slot and
+  # cannot interrupt an active delivery. Other manual checks remain independent.
+  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || inputs.upload_private_testflight && 'private-testflight' || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -67,7 +67,23 @@ env:
   XCODEBUILD_FLAGS: -skipPackagePluginValidation -skipMacroValidation
 
 jobs:
+  portable-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Prepare portable test dependencies
+        run: |
+          python3 -m venv .work/portable-checks
+          .work/portable-checks/bin/python -m pip install 'PyYAML==6.0.3'
+          echo "$PWD/.work/portable-checks/bin" >> "$GITHUB_PATH"
+      - name: Delivery logic tests
+        run: python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
+
   flint-inputs:
+    needs: portable-checks
     if: ${{ inputs.flint }}
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -107,11 +123,14 @@ jobs:
     with:
       use_macos15: ${{ github.event_name != 'workflow_dispatch' || inputs.use_macos15 }}
   les-validation:
+    # Keep one macOS prerequisite in the queue per Ornith release.
+    needs: qpack-validation
     if: ${{ inputs.ornith_les && !inputs.provisioning_only && !inputs.check_delivery_tools && !inputs.regenerate_project_only }}
     uses: ./.github/workflows/ornith-les.yml
     with:
       use_macos15: ${{ github.event_name != 'workflow_dispatch' || inputs.use_macos15 }}
   qpack-validation:
+    needs: portable-checks
     if: ${{ !inputs.check_delivery_tools && !inputs.regenerate_project_only && !inputs.provisioning_only }}
     uses: ./.github/workflows/ornith-performance.yml
     with:
@@ -119,6 +138,7 @@ jobs:
       # Preserve the explicit 15/26 selection for manually dispatched workflows.
       use_macos15: ${{ github.event_name != 'workflow_dispatch' || inputs.use_macos15 }}
   regenerate-project:
+    needs: portable-checks
     if: github.event_name == 'workflow_dispatch' && inputs.regenerate_project_only
     runs-on: ${{ (github.event_name != 'workflow_dispatch' || inputs.use_macos15) && 'macos-15' || 'macos-26' }}
     timeout-minutes: 10
@@ -147,6 +167,7 @@ jobs:
           retention-days: 7
 
   delivery-tool-check:
+    needs: portable-checks
     if: github.event_name == 'workflow_dispatch' && inputs.check_delivery_tools && !inputs.regenerate_project_only
     runs-on: ${{ (github.event_name != 'workflow_dispatch' || inputs.use_macos15) && 'macos-15' || 'macos-26' }}
     timeout-minutes: 10
@@ -158,7 +179,6 @@ jobs:
           test '${{ inputs.upload_private_testflight }}' = false
           test "$(uname -m)" = arm64
           sudo xcode-select -s /Applications/Xcode_26.2.app
-          python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
           python3 scripts/deliver_testflight.py --check-tools
       - uses: actions/upload-artifact@v4
         if: always()
@@ -168,8 +188,8 @@ jobs:
           retention-days: 7
 
   build-and-test:
-    needs: [qpack-validation, les-validation, flint-validation, flint-inputs]
-    if: ${{ !cancelled() && !inputs.check_delivery_tools && !inputs.regenerate_project_only && (needs.qpack-validation.result == 'success' || inputs.provisioning_only) && (!inputs.ornith_les || needs.les-validation.result == 'success') && (!inputs.flint || (needs.flint-inputs.result == 'success' && needs.flint-validation.result == 'success')) }}
+    needs: [portable-checks, qpack-validation, les-validation, flint-validation, flint-inputs]
+    if: ${{ !cancelled() && needs.portable-checks.result == 'success' && !inputs.check_delivery_tools && !inputs.regenerate_project_only && (needs.qpack-validation.result == 'success' || inputs.provisioning_only) && (!inputs.ornith_les || needs.les-validation.result == 'success') && (!inputs.flint || (needs.flint-inputs.result == 'success' && needs.flint-validation.result == 'success')) }}
     name: ${{ inputs.provisioning_only && 'device archive · signing probe (no test coverage)' || 'streaming tests · app tests · package tests · iOS build' }}
     # PR builds run on macOS 15 arm64, which carries the pinned Xcode 26.2.
     # Do not force this long-running gate onto the more constrained macOS 26
@@ -232,9 +252,6 @@ jobs:
           if test -n "$FLASH_LOCAL_REAM_HEADER_KEY"; then
             node scripts/ream_header_backup.mjs restore .github/fixtures/ream-header.enc .test-fixtures/ream.header
           fi
-
-      - name: Delivery logic tests
-        run: python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
 
       - name: Build pinned tokenizer XCFramework (Mac, iPhone, Simulator)
         run: python3 scripts/build_tokenizer_xcframework.py
