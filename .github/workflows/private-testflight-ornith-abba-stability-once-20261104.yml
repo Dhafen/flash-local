@@ -1,0 +1,61 @@
+name: Queue corrected Ornith private TestFlight
+on:
+  push:
+    branches: [release/ornith-abba-stability-private-testflight-20261104]
+    paths: [.github/workflows/private-testflight-ornith-abba-stability-once-20261104.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: flash-local-ornith-abba-private-delivery-20261104
+  cancel-in-progress: false
+
+jobs:
+  launch:
+    if: github.repository == 'Dhafen/flash-local' && github.ref == 'refs/heads/release/ornith-abba-stability-private-testflight-20261104'
+    runs-on: ubuntu-latest
+    timeout-minutes: 110
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Wait for the active release and dispatch the existing private delivery gates once
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_PARENT: dec30d8b1e61bd14f292f84887bf8f23784fdfe2
+          PREVIOUS_RUN: '41835239587'
+          PREVIOUS_SHA: f25b7c55e97ad9c032e720c4224e5ce55704eb2e
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_PARENT"
+          test "$(git diff --name-only HEAD^ HEAD)" = '.github/workflows/private-testflight-ornith-abba-stability-once-20261104.yml'
+          for attempt in $(seq 1 100); do
+            row=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PREVIOUS_RUN" --jq '[.head_sha, .status, .conclusion] | @tsv')
+            read -r previous_sha status conclusion <<< "$row"
+            test "$previous_sha" = "$PREVIOUS_SHA"
+            if [[ "$status" == completed ]]; then break; fi
+            echo "Run $PREVIOUS_RUN is $status; waiting before starting a new delivery."
+            sleep 60
+          done
+          if [[ "$status" != completed || "$conclusion" != success ]]; then
+            echo 'The previous release did not pass. Inspect its result before dispatching another delivery.' >&2
+            exit 1
+          fi
+          current=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$GITHUB_REF_NAME" --jq .object.sha)
+          test "$current" = "$GITHUB_SHA"
+          existing=$(gh api --method GET "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs" \
+            -f branch="$GITHUB_REF_NAME" -f head_sha="$GITHUB_SHA" -f event=workflow_dispatch --jq .total_count)
+          if [[ "$existing" != 0 ]]; then
+            echo 'A delivery already exists for this exact release commit.'
+            exit 0
+          fi
+          gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" \
+            -f use_macos15=true -f ornith_les=true -f flint=false -f release_archive=true \
+            -f probe_automatic_signing=true -f provisioning_only=false -f check_delivery_tools=false \
+            -f upload_private_testflight=true -f regenerate_project_only=false
