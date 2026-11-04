@@ -98,6 +98,8 @@ public enum OrnithPrefillBenchmark {
             }
             return text
         }
+        let options = OrnithLESChatGeneration.benchmarkGenerationOptions
+        try options.validate()
         for (index, mode) in ["baseline", "candidate", "candidate", "baseline"].enumerated() {
             let summary = try autoreleasepool {
                 let engine = try OrnithLESChatGeneration(artifact: artifact, prepared: prepared, check: baseline,
@@ -106,7 +108,6 @@ public enum OrnithPrefillBenchmark {
                     prefixCheckpointAdmitted: prefixCheckpointAdmitted,
                     stateOnlyPrefillAdmitted: stateOnlyPrefillAdmitted, onAdmission: onAdmission)
                 defer { engine.close() }
-                var options = LocalGenerationOptions(); options.maximumNewTokens = 129
                 return try engine.generate(messages: [.init(role: .user, content: prompt)], options: options) { event in
                     switch event {
                     case .prefill(let value): progress("Batchtest \(index + 1)/4 · \(mode) · prompt \(value.promptTokensCompleted)/\(value.promptTokensTotal)")
