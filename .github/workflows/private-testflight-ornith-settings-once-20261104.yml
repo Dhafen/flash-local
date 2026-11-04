@@ -1,0 +1,97 @@
+# One-time private delivery of the active Ornith settings UI from PR #15.
+# No app source changes on this branch. The existing CI performs the full
+# isolated Ornith, numerical, macOS/iOS and Apple signing gates BEFORE upload.
+name: One-time Flash Local active Ornith settings private TestFlight
+on:
+  push:
+    branches:
+      - release/ornith-active-settings-private-testflight-20261104
+    paths:
+      - .github/workflows/private-testflight-ornith-settings-once-20261104.yml
+
+permissions:
+  contents: read
+
+jobs:
+  launch-source-pinned:
+    if: ${{ github.repository == 'Dhafen/flash-local' && github.ref == 'refs/heads/release/ornith-active-settings-private-testflight-20261104' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Verify exact PR source and dispatch existing full Ornith and internal-only delivery gates
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_PARENT: '799bbb212f89aaccd200fe4b3b848b132606b9d9'
+          VERIFIED_BASE: 'cc98bf1bd9fc983345de871e0294eb687c65547b'
+          TESTED_BASE_RUN: '41807657925'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_PARENT"
+          test "$(git diff --name-only HEAD^ HEAD)" = ".github/workflows/private-testflight-ornith-settings-once-20261104.yml"
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          repo = 'Dhafen/flash-local'
+          branch = 'release/ornith-active-settings-private-testflight-20261104'
+          headers = {
+              'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
+              'Accept': 'application/vnd.github+json',
+              'X-GitHub-Api-Version': '2022-11-28',
+              'User-Agent': 'flash-local-ornith-settings-private-delivery',
+          }
+
+          def get(path):
+              with urllib.request.urlopen(
+                  urllib.request.Request('https://api.github.com/repos/' + repo + path, headers=headers),
+                  timeout=25,
+              ) as response:
+                  return json.load(response)
+
+          baseline = get('/actions/runs/' + os.environ['TESTED_BASE_RUN'])
+          if (baseline.get('head_sha'), baseline.get('status'), baseline.get('conclusion')) != (
+              os.environ['VERIFIED_BASE'], 'completed', 'success'
+          ):
+              raise RuntimeError('Refusing delivery: parent Ornith baseline has not passed CI')
+          pr = get('/pulls/15')
+          if (pr['head']['sha'], pr['head']['repo']['full_name']) != (
+              os.environ['EXPECTED_PARENT'], repo
+          ):
+              raise RuntimeError('Refusing delivery: PR #15 no longer matches this source')
+          if pr['base']['sha'] != os.environ['VERIFIED_BASE']:
+              raise RuntimeError('Refusing delivery: PR #15 baseline changed')
+          print('Verified exact PR #15 source pinned for private delivery')
+          payload = {
+              'ref': branch,
+              'inputs': {
+                  'use_macos15': 'true',
+                  'ornith_les': 'true',
+                  'flint': 'false',
+                  'release_archive': 'true',
+                  'probe_automatic_signing': 'true',
+                  'provisioning_only': 'false',
+                  'check_delivery_tools': 'false',
+                  'upload_private_testflight': 'true',
+                  'regenerate_project_only': 'false',
+              }
+          }
+          request = urllib.request.Request(
+              'https://api.github.com/repos/' + repo + '/actions/workflows/ci.yml/dispatches',
+              data=json.dumps(payload).encode('utf-8'),
+              headers={**headers, 'Content-Type': 'application/json'},
+              method='POST',
+          )
+          with urllib.request.urlopen(request, timeout=25) as response:
+              if response.status != 204:
+                  raise RuntimeError('GitHub did not accept private delivery request')
+          print('Full numerical, app, iOS and signed own-tester-only TestFlight gates dispatched')
+          PY
