@@ -469,7 +469,7 @@ struct OrnithGenerationControls: View {
 
 /// Keep an incomplete keyboard draft (e.g. `0,`) separate from the persisted
 /// numeric value. The formatted-value TextField used to fight decimal edits.
-private struct OrnithDecimalField: View {
+struct OrnithDecimalField: View {
     let title: String
     @Binding var value: Double
     let minimum: Double
