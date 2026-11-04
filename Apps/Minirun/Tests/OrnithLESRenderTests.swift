@@ -16,7 +16,7 @@ final class OrnithLESRenderTests: XCTestCase {
         case apiMissing = "api-missing", apiReady = "api-ready", generation
         case loading, apiPaused = "api-paused"
         case acceleration
-        case prefill = "prefill-controls", profile = "prompt-profile"
+        case prefill = "prefill-controls", profile = "prompt-profile", settings = "active-settings"
         case agentUnix = "agent-unix", agentWindows = "agent-windows", agentHermes = "agent-hermes"
     }
     func testMissingAndPreviewChatDrawInBothAppearances() throws {
@@ -40,6 +40,7 @@ final class OrnithLESRenderTests: XCTestCase {
                 model = .reviewPreview(); model.accelerationCandidate = .dflash; model.contextProfile = .test32K
             case .profile:
                 model = .reviewPreview(); model.systemPrompt = LocalChatProfile.programming.systemPrompt
+            case .settings: model = .reviewPreview()
             case .agentUnix, .agentWindows, .agentHermes: model = .reviewAPIPreview()
             }
             for scheme in [ColorScheme.light, .dark] {
@@ -51,6 +52,7 @@ final class OrnithLESRenderTests: XCTestCase {
                     else if fixture == .apiMissing || fixture == .apiReady || fixture == .apiPaused { OrnithAPIPage(model: model) }
                     else if fixture == .generation { OrnithGenerationControls(options: .constant(model.chatOptions), expanded: true).padding(20) }
                     else if fixture == .prefill { OrnithPrefillControls(model: model, expanded: true).padding(20) }
+                    else if fixture == .settings { Form { OrnithActiveSettingsSections(model: model, activate: {}, openAdvanced: {}) } }
                     else if fixture == .acceleration { OrnithAccelerationControls(model: model, expanded: true).padding(20) }
                     else if fixture == .profile { OrnithPromptControls(model: model, expanded: true).padding(20) }
                     else if fixture == .agentUnix || fixture == .agentWindows || fixture == .agentHermes {
