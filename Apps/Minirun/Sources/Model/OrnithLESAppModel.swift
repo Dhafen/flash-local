@@ -227,6 +227,13 @@ private actor LESAppWorker {
             configuration = automaticConfiguration
             progress("Använder sparad, jämförd batchprofil för samma modell, motor, telefon och kontext…")
         }
+        // The candidate's 129-token parity test uses the default batch. A
+        // previously optimized page-cache batch has not been admitted for the
+        // bounded expert-cache graph and must never be silently reused.
+        if cacheMode == .boundedExpertCache && configuration != LESPrefillConfiguration() {
+            progress("Expertcache använder verifierad grundbatch; tidigare profil gäller endast sidcache.")
+            configuration = .init()
+        }
         prefixCheckpointValidated = prefixCheckpointValidated && prefixCheckpointContextTokens == contextProfile.rawValue &&
             prefixCheckpointConfiguration == configuration && prefixCheckpointCacheMode == cacheMode
         stateOnlyPrefillValidated = stateOnlyPrefillValidated && prefixCheckpointValidated
@@ -517,6 +524,7 @@ final class OrnithLESAppModel {
     private(set) var cacheBenchmarkURL: URL?
     private(set) var cacheModeBenchmark: OrnithCacheModeBenchmark.Report?
     private(set) var cacheModeBenchmarkURL: URL?
+    private(set) var measuredCacheContext: LocalContextProfile?
     /// Session-only: a new app build must remeasure this acceleration.
     var cacheMode: OrnithLESChatGeneration.CacheMode = .osPageCache
     private(set) var activeCacheMode: OrnithLESChatGeneration.CacheMode = .osPageCache
@@ -951,7 +959,7 @@ final class OrnithLESAppModel {
         guard canBenchmark, sceneIsActive else { return }
         let flag = LESControl(), id = UUID(), context = contextProfile
         activeID = id; control = flag; isBusy = true; chatReady = false; chatControl = nil
-        error = nil; cacheModeBenchmark = nil; cacheModeBenchmarkURL = nil
+        error = nil; cacheModeBenchmark = nil; cacheModeBenchmarkURL = nil; measuredCacheContext = nil
         status = "Jämför iOS-sidcache och expertcache med identiska token…"
         operation = Task { [weak self] in
             guard let self else { return }
@@ -961,7 +969,7 @@ final class OrnithLESAppModel {
                     control: flag, context: context, progress: { [weak self] value in
                         Task { @MainActor in guard let self, self.activeID == id else { return }; self.status = value }
                     })
-                cacheModeBenchmark = report
+                cacheModeBenchmark = report; measuredCacheContext = context
                 struct Export: Encodable {
                     let sourceRevision, nativeRevision, modelSHA256, device, os: String
                     let timestamp: Date
@@ -987,9 +995,16 @@ final class OrnithLESAppModel {
         }
     }
     func useMeasuredExpertCache() {
-        guard canStart, cacheModeBenchmark?.preferredCacheMode == .boundedExpertCache else { return }
+        guard canStart, measuredCacheContext == contextProfile,
+              cacheModeBenchmark?.preferredCacheMode == .boundedExpertCache else { return }
         cacheMode = .boundedExpertCache
         status = "Uppmätt snabbare expertcache vald. Ny KV/SSM-kontroll krävs."
+        activateChat()
+    }
+    func usePageCache() {
+        guard canStart, cacheMode == .boundedExpertCache else { return }
+        cacheMode = .osPageCache
+        status = "Återgår till iOS-sidcache med ny kontroll."
         activateChat()
     }
     func refreshAccelerationDraftPresence() {
