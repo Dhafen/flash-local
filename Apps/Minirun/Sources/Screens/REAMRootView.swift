@@ -336,6 +336,12 @@ struct OrnithActiveSettingsSections: View {
                 .font(.caption).foregroundStyle(.secondary)
         }
         Section("Ornith · hastighet och jämförelser") {
+            if model.chatReady {
+                LabeledContent("Aktiv cache", value: model.activeCacheMode == .boundedExpertCache ? "Expertcache" : "iOS-sidcache")
+                if model.cacheMode != model.activeCacheMode {
+                    LabeledContent("Cache vid nästa laddning", value: model.cacheMode == .boundedExpertCache ? "Expertcache" : "iOS-sidcache")
+                }
+            }
             if let summary = model.chatSummary {
                 if let rate = summary.decodeTokensPerSecond {
                     LabeledContent("Senaste generering", value: String(format: "%.2f token/s", rate))
@@ -344,7 +350,6 @@ struct OrnithActiveSettingsSections: View {
                     LabeledContent("Senaste promptinläsning", value:
                         String(format: "%.2f token/s", Double(summary.evaluatedPromptTokens) / summary.prefillSeconds))
                 }
-                LabeledContent("Vikthantering", value: summary.backend)
             } else {
                 Text("Ingen uppmätt normal generering i denna session.")
                     .font(.caption).foregroundStyle(.secondary)

@@ -525,8 +525,11 @@ final class OrnithLESAppModel {
     private(set) var cacheModeBenchmark: OrnithCacheModeBenchmark.Report?
     private(set) var cacheModeBenchmarkURL: URL?
     private(set) var measuredCacheContext: LocalContextProfile?
-    /// Session-only: a new app build must remeasure this acceleration.
-    var cacheMode: OrnithLESChatGeneration.CacheMode = .osPageCache
+    /// Session-only approval from the explicit on-device comparison.
+    var selectedExpertCacheContext: LocalContextProfile?
+    var cacheMode: OrnithLESChatGeneration.CacheMode {
+        selectedExpertCacheContext == contextProfile ? .boundedExpertCache : .osPageCache
+    }
     private(set) var activeCacheMode: OrnithLESChatGeneration.CacheMode = .osPageCache
     private(set) var accelerationReport: LESAccelerationBenchmark.Report?
     private(set) var accelerationReportURL: URL?
@@ -960,6 +963,7 @@ final class OrnithLESAppModel {
         let flag = LESControl(), id = UUID(), context = contextProfile
         activeID = id; control = flag; isBusy = true; chatReady = false; chatControl = nil
         error = nil; cacheModeBenchmark = nil; cacheModeBenchmarkURL = nil; measuredCacheContext = nil
+        selectedExpertCacheContext = nil
         status = "Jämför iOS-sidcache och expertcache med identiska token…"
         operation = Task { [weak self] in
             guard let self else { return }
@@ -995,15 +999,15 @@ final class OrnithLESAppModel {
         }
     }
     func useMeasuredExpertCache() {
-        guard canStart, measuredCacheContext == contextProfile,
+        guard canStart, !isAPIListening, measuredCacheContext == contextProfile,
               cacheModeBenchmark?.preferredCacheMode == .boundedExpertCache else { return }
-        cacheMode = .boundedExpertCache
+        selectedExpertCacheContext = contextProfile
         status = "Uppmätt snabbare expertcache vald. Ny KV/SSM-kontroll krävs."
         activateChat()
     }
     func usePageCache() {
-        guard canStart, cacheMode == .boundedExpertCache else { return }
-        cacheMode = .osPageCache
+        guard canStart, !isAPIListening, selectedExpertCacheContext != nil else { return }
+        selectedExpertCacheContext = nil
         status = "Återgår till iOS-sidcache med ny kontroll."
         activateChat()
     }
@@ -1179,6 +1183,7 @@ final class OrnithLESAppModel {
         do {
             let check = try await worker.prepareChat(modelsRoot: modelsRoot, privateRoot: privateRoot, existing: nil,
                 control: recovery, configuration: activeBatchConfiguration ?? .init(), contextProfile: activeContextProfile,
+                cacheMode: activeCacheMode,
                 progress: { _ in }, onCheck: { _ in })
             guard check.nativeBenchmarkAdmitted, !recovery.isCancellationRequested else { throw CancellationError() }
             numericalCheck = check; chatControl = recovery; chatReady = true; status = "Modellen är redo för nästa anrop."

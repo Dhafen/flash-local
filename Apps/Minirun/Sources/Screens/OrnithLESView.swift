@@ -222,12 +222,14 @@ struct OrnithLESChatPage: View {
                             Text(String(format: "Sidcache %.2f token/s · expertcache %.2f token/s",
                                 comparison.pageCacheDecodeTokensPerSecond ?? 0,
                                 comparison.expertCacheDecodeTokensPerSecond ?? 0))
-                            if comparison.preferredCacheMode == .boundedExpertCache &&
-                                model.measuredCacheContext == model.contextProfile {
+                            if model.measuredCacheContext != model.contextProfile {
+                                Text("Jämförelsen gäller en annan kontext. Kör ett nytt test för den valda kontexten.")
+                                    .foregroundStyle(.secondary)
+                            } else if comparison.preferredCacheMode == .boundedExpertCache {
                                 Text("Expertcache aktiveras med verifierad grundbatch, inte en äldre sidcacheprofil.")
                                     .font(.caption2).foregroundStyle(.secondary)
                                 Button("Aktivera uppmätt snabbare expertcache") { model.useMeasuredExpertCache() }
-                                    .disabled(!model.canStart)
+                                    .disabled(!model.canStart || model.isAPIListening)
                             } else {
                                 Text("Sidcache är snabbare eller gav bättre helhetsresultat.").foregroundStyle(.secondary)
                             }
@@ -238,9 +240,9 @@ struct OrnithLESChatPage: View {
                     if let url = model.cacheModeBenchmarkURL {
                         ShareLink("Dela expertcachejämförelse", item: url)
                     }
-                    if model.cacheMode == .boundedExpertCache {
+                    if model.selectedExpertCacheContext != nil {
                         Button("Återgå till sidcache") { model.usePageCache() }
-                            .disabled(!model.canStart)
+                            .disabled(!model.canStart || model.isAPIListening)
                     }
                 }
             }.font(.caption)
