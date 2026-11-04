@@ -92,6 +92,7 @@ private actor LESAppWorker {
         var stateOnlyPrefillValidated: Bool? = nil
         var prefixCheckpointContextTokens: Int? = nil
         var prefixCheckpointConfiguration: LESPrefillConfiguration? = nil
+        var prefixCheckpointCacheMode: OrnithLESChatGeneration.CacheMode? = nil
         var automaticScore: Double? = nil
         var automaticPrefillCheck: LESPrefillCheck? = nil
         var completedBatchMeasurements: [OrnithPrefillBenchmark.Measurement]? = nil
@@ -109,6 +110,7 @@ private actor LESAppWorker {
     private var stateOnlyPrefillValidated = false
     private var prefixCheckpointContextTokens: Int?
     private var prefixCheckpointConfiguration: LESPrefillConfiguration?
+    private var prefixCheckpointCacheMode: OrnithLESChatGeneration.CacheMode?
     private var automaticScore: Double?
     private var automaticPrefillCheck: LESPrefillCheck?
     private var completedBatchMeasurements: [OrnithPrefillBenchmark.Measurement] = []
@@ -116,7 +118,7 @@ private actor LESAppWorker {
     private var admissions: [LESMemoryAdmission] = []
     func memoryAdmissionReport() -> [LESMemoryAdmission] { admissions }
     func admissionWasReused() -> Bool { reusedAdmission }
-    func release() { chat?.close(); chat = nil; chatCheck = nil; prefillCheck = nil; artifact = nil; prepared = nil; prefixCheckpointValidated = false; stateOnlyPrefillValidated = false }
+    func release() { chat?.close(); chat = nil; chatCheck = nil; prefillCheck = nil; artifact = nil; prepared = nil; prefixCheckpointValidated = false; stateOnlyPrefillValidated = false; prefixCheckpointCacheMode = nil }
     func resetChat() { chat?.resetConversation() }
     func closeChat() { chat?.close(); chat = nil }
     private func admissionIdentity(_ artifact: VerifiedGGUFArtifact, _ prepared: URL) throws -> [String: String] {
@@ -157,6 +159,7 @@ private actor LESAppWorker {
                 prefixCheckpointValidated: prefixCheckpointValidated, stateOnlyPrefillValidated: stateOnlyPrefillValidated,
                 prefixCheckpointContextTokens: prefixCheckpointContextTokens,
                 prefixCheckpointConfiguration: prefixCheckpointConfiguration,
+                prefixCheckpointCacheMode: prefixCheckpointCacheMode,
                 automaticScore: automaticScore, automaticPrefillCheck: automaticPrefillCheck,
                 completedBatchMeasurements: completedBatchMeasurements)),
                 identity: admissionIdentity(artifact, prepared), key: key)
@@ -189,6 +192,7 @@ private actor LESAppWorker {
     func prepareChat(modelsRoot: URL, privateRoot: URL, existing: VerifiedGGUFArtifact?, control: LESControl,
                      configuration requested: LESPrefillConfiguration = .init(),
                      contextProfile: LocalContextProfile = .standard,
+                     cacheMode: OrnithLESChatGeneration.CacheMode = .osPageCache,
                      preferAutomatic: Bool = false,
                      progress: @Sendable (String) -> Void,
                      onCheck: @Sendable (LESNumericalCheck) -> Void) throws -> LESNumericalCheck {
@@ -204,6 +208,7 @@ private actor LESAppWorker {
             stateOnlyPrefillValidated = saved.stateOnlyPrefillValidated == true
             prefixCheckpointContextTokens = saved.prefixCheckpointContextTokens
             prefixCheckpointConfiguration = saved.prefixCheckpointConfiguration
+            prefixCheckpointCacheMode = saved.prefixCheckpointCacheMode
             automaticScore = saved.automaticScore; automaticPrefillCheck = saved.automaticPrefillCheck
             completedBatchMeasurements = saved.completedBatchMeasurements ?? []
             reusedAdmission = true
@@ -223,7 +228,7 @@ private actor LESAppWorker {
             progress("Använder sparad, jämförd batchprofil för samma modell, motor, telefon och kontext…")
         }
         prefixCheckpointValidated = prefixCheckpointValidated && prefixCheckpointContextTokens == contextProfile.rawValue &&
-            prefixCheckpointConfiguration == configuration
+            prefixCheckpointConfiguration == configuration && prefixCheckpointCacheMode == cacheMode
         stateOnlyPrefillValidated = stateOnlyPrefillValidated && prefixCheckpointValidated
         try configuration.validate()
         if configuration != LESPrefillConfiguration() {
@@ -243,6 +248,7 @@ private actor LESAppWorker {
                 control: control, prefillConfiguration: value, prefillCheck: prefillCheck, contextProfile: contextProfile,
                 prefixCheckpointAdmitted: prefixCheckpointValidated,
                 stateOnlyPrefillAdmitted: stateOnlyPrefillValidated,
+                cacheMode: cacheMode,
                 onAdmission: { self.admissions.append($0) })
         }
         do { chat = try open(configuration) }
@@ -255,7 +261,7 @@ private actor LESAppWorker {
             progress("Verifierar KV/SSM-återställning mot en färsk körning på din modell…")
             try chat.validatePrefixCheckpoint()
             prefixCheckpointValidated = true; prefixCheckpointContextTokens = contextProfile.rawValue
-            prefixCheckpointConfiguration = configuration
+            prefixCheckpointConfiguration = configuration; prefixCheckpointCacheMode = cacheMode
             stateOnlyPrefillValidated = chat.stateOnlyPrefillAdmitted
             if !stateOnlyPrefillValidated { progress("KV-kontrollen passerade. Behåller vanlig promptberäkning för denna konfiguration.") }
         }
@@ -263,6 +269,23 @@ private actor LESAppWorker {
         return check
     }
     func prefillAdmission() -> LESPrefillCheck? { prefillCheck }
+
+    /// Existing original-weight numerical admission precedes this isolated
+    /// comparison. The benchmark never changes the active chat owner.
+    func benchmarkCacheModes(modelsRoot: URL, privateRoot: URL, control: LESControl,
+                             context: LocalContextProfile,
+                             progress: @Sendable (String) -> Void) throws -> OrnithCacheModeBenchmark.Report {
+        let baseline = try prepareChat(modelsRoot: modelsRoot, privateRoot: privateRoot,
+            existing: nil, control: control, contextProfile: context,
+            progress: progress, onCheck: { _ in })
+        chat?.close(); chat = nil
+        guard baseline.nativeBenchmarkAdmitted, let artifact, let prepared else {
+            throw LESChatPresentationError.numericalCheck
+        }
+        return try OrnithCacheModeBenchmark.execute(artifact: artifact, prepared: prepared,
+            baseline: baseline, control: control, contextProfile: context,
+            progress: progress, onAdmission: { self.admissions.append($0) })
+    }
     func downloadAccelerationDraft(privateRoot: URL, control: LESControl,
                                    progress: @escaping @Sendable (String) -> Void) async throws {
         chat?.close(); chat = nil
