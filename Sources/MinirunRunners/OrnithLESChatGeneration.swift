@@ -12,8 +12,13 @@ import StorageCore
 /// device-key-authenticated receipt after model/prepared integrity validation;
 /// imported reports never enable this runner.
 public final class OrnithLESChatGeneration {
+    /// Weight residency only: no model, precision or routing changes.
+    public enum CacheMode: String, Codable, Sendable {
+        case osPageCache = "omniPageCache"
+        case boundedExpertCache
+    }
     public struct Summary: Codable, Sendable {
-        public let backend = "omniPageCache"
+        public let backend: String
         public let fullModelNumericsVerified = false
         public let promptTokenIDs, generatedTokenIDs: [Int]
         public let reusedPromptTokens, evaluatedPromptTokens, decodeForwardPasses: Int
@@ -46,6 +51,7 @@ public final class OrnithLESChatGeneration {
     private let physicalBatchSize: Int
     private let prefillConfiguration: LESPrefillConfiguration
     private let prefillCheck: LESPrefillCheck?
+    private let cacheMode: CacheMode
     private var stateTokens: [Int] = []
     private var stateLogits: [Float] = []
     private var prefixTokens: [Int] = []
@@ -90,18 +96,23 @@ public final class OrnithLESChatGeneration {
                 contextProfile: LocalContextProfile = .standard,
                 prefixCheckpointAdmitted: Bool = false,
                 stateOnlyPrefillAdmitted: Bool = false,
+                cacheMode: CacheMode = .osPageCache,
                 onAdmission: (LESMemoryAdmission) -> Void = { _ in }) throws {
         let batch = try Self.validatedBatch(prefillConfiguration, proof: prefillCheck, baseline: check, modelSHA256: artifact.manifest.sha256,
             nativeRevision: LESContext.revision)
         batchSize = batch.0; physicalBatchSize = batch.1
         self.prefillConfiguration = prefillConfiguration; self.prefillCheck = prefillCheck
-        self.artifact = artifact; self.control = control
+        self.artifact = artifact; self.control = control; self.cacheMode = cacheMode
         prefixRestorationAdmitted = prefixCheckpointAdmitted
         self.stateOnlyPrefillAdmitted = prefixCheckpointAdmitted && stateOnlyPrefillAdmitted
         contextTokens = contextProfile.rawValue
         tokenizer = try CanonicalQwen35Tokenizer(artifact: artifact)
-        let plan = try LESBenchmark.plan(artifact, context: contextProfile.rawValue, depth: 0, pageCache: true,
-            phase: "chat.omniPageCache", physicalBatchTokens: batch.1, onAdmission: onAdmission)
+        let plan = try LESBenchmark.plan(artifact, context: contextProfile.rawValue, depth: 0,
+            pageCache: cacheMode == .osPageCache,
+            phase: "chat.\(cacheMode.rawValue)", physicalBatchTokens: batch.1, onAdmission: onAdmission)
+        if cacheMode == .boundedExpertCache && plan.cacheSlotsPerLayer < 8 {
+            throw GGUFError.limit("Expertcache saknar utrymme för alla åtta valda experter per lager.")
+        }
         native = try LESContext(artifact: artifact, prepared: prepared, plan: plan, control: control)
         guard native.vocabularySize == tokenizer.vocabularySize else {
             native.close(); throw GGUFError.invalid("Tokenizer and native vocabulary disagree")
@@ -283,7 +294,7 @@ public final class OrnithLESChatGeneration {
             throw GGUFError.invalid("Native I/O accounting regressed")
         }
         completed = true
-        return Summary(promptTokenIDs: prompt, generatedTokenIDs: generated, reusedPromptTokens: reused,
+        return Summary(backend: cacheMode.rawValue, promptTokenIDs: prompt, generatedTokenIDs: generated, reusedPromptTokens: reused,
             evaluatedPromptTokens: prompt.count - reused, decodeForwardPasses: passes,
             prefillSeconds: prefillSeconds, decodeForwardSeconds: decodeSeconds, elapsedSeconds: MonotonicClock.seconds(since: start),
             timeToFirstTokenSeconds: firstTokenSeconds, prefixCheckpointBytes: checkpointBytes, prefixReuseSource: reuseSource,
