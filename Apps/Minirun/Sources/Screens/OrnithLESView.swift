@@ -212,6 +212,36 @@ struct OrnithLESChatPage: View {
                         Text(String(format: "Uppmätt skillnad i prompttid: %.2f s · identiska svar: %@", report.observedPrefillSecondsDifference, report.exactOutputsMatch ? "ja" : "nej"))
                     }
                     if let url = model.cacheBenchmarkURL { ShareLink("Dela cachetest", item: url) }
+                    Divider()
+                    Text("Jämför iOS-sidcache med motorns begränsade expertcache i fyra riktiga ABBA-körningar. Samma Ornith-modell och token; ingen automatisk aktivering.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Button("Jämför expertcache mot sidcache") { model.startCacheModeBenchmark() }
+                        .disabled(!model.canBenchmark)
+                    if let comparison = model.cacheModeBenchmark {
+                        if comparison.comparable {
+                            Text(String(format: "Sidcache %.2f token/s · expertcache %.2f token/s",
+                                comparison.pageCacheDecodeTokensPerSecond ?? 0,
+                                comparison.expertCacheDecodeTokensPerSecond ?? 0))
+                            if comparison.preferredCacheMode == .boundedExpertCache &&
+                                model.measuredCacheContext == model.contextProfile {
+                                Text("Expertcache aktiveras med verifierad grundbatch, inte en äldre sidcacheprofil.")
+                                    .font(.caption2).foregroundStyle(.secondary)
+                                Button("Aktivera uppmätt snabbare expertcache") { model.useMeasuredExpertCache() }
+                                    .disabled(!model.canStart)
+                            } else {
+                                Text("Sidcache är snabbare eller gav bättre helhetsresultat.").foregroundStyle(.secondary)
+                            }
+                        } else {
+                            Text("Ingen jämförbar vinnare. Sidcache är kvar.").foregroundStyle(.secondary)
+                        }
+                    }
+                    if let url = model.cacheModeBenchmarkURL {
+                        ShareLink("Dela expertcachejämförelse", item: url)
+                    }
+                    if model.cacheMode == .boundedExpertCache {
+                        Button("Återgå till sidcache") { model.usePageCache() }
+                            .disabled(!model.canStart)
+                    }
                 }
             }.font(.caption)
             if !model.chatMessages.isEmpty {
