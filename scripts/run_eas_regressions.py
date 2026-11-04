@@ -21,7 +21,8 @@ GROUPS = {
     "regression": [
         ("ornith-les.yml", "native-controls", "Build isolated Mac runtime for fast numerical controls",
          "Swift memory, comparison and aggregate export controls"),
-        ("ci.yml", "build-and-test", "Delivery logic tests",
+        ("ci.yml", "portable-checks", "Delivery logic tests", "Delivery logic tests"),
+        ("ci.yml", "build-and-test", "Build pinned tokenizer XCFramework (Mac, iPhone, Simulator)",
          "Compile the opt-in Flint app for physical iPhone (unsigned)"),
     ],
 }
