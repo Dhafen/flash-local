@@ -7,6 +7,31 @@ import MinirunKit
 @testable import MinirunRunners
 
 final class OrnithLESChatTests: XCTestCase {
+    func testCacheStrategyRequiresMeasuredSpeedAndNeverAutoAdmitsIncompleteReport() throws {
+        XCTAssertEqual(OrnithLESChatGeneration.CacheMode.osPageCache.rawValue, "omniPageCache")
+        XCTAssertEqual(OrnithLESChatGeneration.CacheMode.boundedExpertCache.rawValue, "boundedExpertCache")
+        let restored = try JSONDecoder().decode(OrnithLESChatGeneration.CacheMode.self,
+            from: JSONEncoder().encode(OrnithLESChatGeneration.CacheMode.boundedExpertCache))
+        XCTAssertEqual(restored, .boundedExpertCache)
+        let unmeasured = OrnithCacheModeBenchmark.Report(runs: [])
+        XCTAssertFalse(unmeasured.comparable)
+        XCTAssertNil(unmeasured.preferredCacheMode)
+        XCTAssertNil(unmeasured.pageCacheDecodeTokensPerSecond)
+
+        let improves = OrnithCacheModeBenchmark.Report.improves(
+            baselineDecode: 4, candidateDecode: 4.6, baselinePrefill: 8, candidatePrefill: 7)
+        XCTAssertTrue(improves)
+        XCTAssertFalse(OrnithCacheModeBenchmark.Report.improves(
+            baselineDecode: 4, candidateDecode: 4.39, baselinePrefill: 8, candidatePrefill: 8))
+        XCTAssertFalse(OrnithCacheModeBenchmark.Report.improves(
+            baselineDecode: 4, candidateDecode: 8, baselinePrefill: 8, candidatePrefill: 6))
+        XCTAssertFalse(OrnithCacheModeBenchmark.Report.improves(
+            baselineDecode: 4, candidateDecode: .infinity, baselinePrefill: 8, candidatePrefill: 8))
+        XCTAssertFalse(OrnithCacheModeBenchmark.Report.improves(
+            baselineDecode: 4, candidateDecode: .nan, baselinePrefill: 8, candidatePrefill: 8))
+        XCTAssertFalse(OrnithCacheModeBenchmark.Report.improves(
+            baselineDecode: 0, candidateDecode: 16, baselinePrefill: 8, candidatePrefill: 8))
+    }
     func testCheckpointExcludesGenerationSuffixThatChangesInHistoricalAssistantTurns() {
         let history = [1, 2, 3, 4, 5, 6]
         for trailer in [[100, 101, 102], [100, 101, 102, 103, 104]] {
