@@ -1,0 +1,111 @@
+# Source-pinned, one-time private TestFlight release of Flash Local PR #14: Ornith cache-mode ABBA experiment.
+# This helper changes no app code and uses the existing full Ornith LES validation, signing and
+# own-tester-only upload gates. CI refuses upload unless all isolated engine,
+# numerical, app, device archive, and signing steps pass. It only triggers
+# when this launcher file is created on this exact source-pinned branch.
+name: One-time Flash Local Ornith cache ABBA import-fix TestFlight launch
+on:
+  push:
+    branches:
+      - release/ornith-cache-abba-import-fix-testflight-20261104
+    paths:
+      - .github/workflows/private-testflight-ornith-cache-import-fix-once-20261104.yml
+
+permissions:
+  contents: read
+
+jobs:
+  dispatch-pinned-product-shell:
+    if: ${{ github.repository == 'Dhafen/flash-local' && github.ref == 'refs/heads/release/ornith-cache-abba-import-fix-testflight-20261104' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Verify the green source and sole launcher change, then request private TestFlight delivery
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_PARENT: cc98bf1bd9fc983345de871e0294eb687c65547b
+          TESTED_RUN: '41792888841'
+          TESTED_PARENT: 'a2da72a7aa87cc81df398753b0bbe14c1ec3c06d'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_PARENT"
+          test "$(git diff --name-only HEAD^ HEAD)" = ".github/workflows/private-testflight-ornith-cache-import-fix-once-20261104.yml"
+          test "$(git diff --name-only "$TESTED_PARENT" "$EXPECTED_PARENT")" = "Sources/MinirunRunners/OrnithCacheModeBenchmark.swift"
+          python3 - <<'PY'
+          import os, subprocess
+          patch = subprocess.check_output([
+              'git', 'diff', '--unified=0', os.environ['TESTED_PARENT'],
+              os.environ['EXPECTED_PARENT'], '--',
+              'Sources/MinirunRunners/OrnithCacheModeBenchmark.swift'
+          ], text=True)
+          added = [line for line in patch.splitlines() if line.startswith('+') and not line.startswith('+++')]
+          removed = [line for line in patch.splitlines() if line.startswith('-') and not line.startswith('---')]
+          if added != ['+import GGUFCore'] or removed:
+              raise RuntimeError('Only the proven missing GGUFCore import is allowed')
+          print('Verified sole fix: +import GGUFCore')
+          PY
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          repo = 'Dhafen/flash-local'
+          branch = 'release/ornith-cache-abba-import-fix-testflight-20261104'
+          parent = os.environ['EXPECTED_PARENT']
+          tested_parent = os.environ['TESTED_PARENT']
+          headers = {
+              'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
+              'Accept': 'application/vnd.github+json',
+              'X-GitHub-Api-Version': '2022-11-28',
+              'User-Agent': 'flash-local-source-pinned-testflight'
+          }
+
+          def get(path):
+              with urllib.request.urlopen(
+                  urllib.request.Request('https://api.github.com/repos/' + repo + path, headers=headers),
+                  timeout=25
+              ) as response:
+                  return json.load(response)
+
+          tested = get('/actions/runs/' + os.environ['TESTED_RUN'])
+          if (tested.get('head_sha'), tested.get('conclusion'), tested.get('status'), tested.get('event')) != (
+              tested_parent, 'success', 'completed', 'pull_request'
+          ):
+              raise RuntimeError('Refusing delivery: expected source is not the successful PR CI revision')
+          pr = get('/pulls/14')
+          if pr['head']['sha'] != parent or pr['head']['repo']['full_name'] != repo:
+              raise RuntimeError('Refusing delivery: PR #13 changed since the verified green build')
+          print('Verified PR #14 exact one-import fix and prior successful CI run:', tested['id'])
+          payload = {
+              'ref': branch,
+              'inputs': {
+                  'use_macos15': 'true',
+                  'ornith_les': 'true',
+                  'flint': 'false',
+                  'release_archive': 'true',
+                  'probe_automatic_signing': 'true',
+                  'provisioning_only': 'false',
+                  'check_delivery_tools': 'false',
+                  'upload_private_testflight': 'true',
+                  'regenerate_project_only': 'false'
+              }
+          }
+          request = urllib.request.Request(
+              'https://api.github.com/repos/' + repo + '/actions/workflows/ci.yml/dispatches',
+              data=json.dumps(payload).encode('utf-8'),
+              headers={**headers, 'Content-Type': 'application/json'},
+              method='POST'
+          )
+          with urllib.request.urlopen(request, timeout=25) as response:
+              if response.status != 204:
+                  raise RuntimeError('GitHub did not accept the private CI delivery request')
+          print('Dispatched the existing signed, internal-only TestFlight delivery gates.')
+          PY
