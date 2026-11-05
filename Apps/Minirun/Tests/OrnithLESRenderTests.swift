@@ -44,6 +44,7 @@ final class OrnithLESRenderTests: XCTestCase {
             case .agentUnix, .agentWindows, .agentHermes: model = .reviewAPIPreview()
             }
             for scheme in [ColorScheme.light, .dark] {
+                print("ORNITH_LES_RENDER fixture=\(fixture.rawValue) appearance=\(scheme == .dark ? "dark" : "light")")
                 // ImageRenderer omits ScrollView contents and replaces native
                 // text fields with yellow placeholders. Host real controls in
                 // a real window before capturing, so a PNG proves actual UI.
@@ -85,6 +86,11 @@ final class OrnithLESRenderTests: XCTestCase {
                 let platform = "ios"
                 #else
                 let host = NSHostingView(rootView: content)
+                // This harness owns a fixed viewport. The hosting view must
+                // not resize the window from the controls' intrinsic sizes:
+                // on macOS 26 that feeds windowDidLayout back into constraint
+                // invalidation and can abort the test host.
+                host.sizingOptions = []
                 let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 430, height: 900),
                     styleMask: .borderless, backing: .buffered, defer: false)
                 window.isReleasedWhenClosed = false
@@ -93,6 +99,8 @@ final class OrnithLESRenderTests: XCTestCase {
                 host.frame = window.contentLayoutRect
                 host.layoutSubtreeIfNeeded()
                 RunLoop.main.run(until: Date().addingTimeInterval(0.15))
+                XCTAssertEqual(host.bounds.size, NSSize(width: 430, height: 900),
+                    "The capture viewport must stay fixed for \(fixture.rawValue)")
                 host.displayIfNeeded()
                 let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
                 host.cacheDisplay(in: host.bounds, to: bitmap)
