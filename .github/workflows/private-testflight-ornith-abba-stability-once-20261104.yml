@@ -1,7 +1,7 @@
-name: Retry corrected Ornith private TestFlight on macOS 26
+name: Deliver render-corrected Ornith private TestFlight once
 on:
   push:
-    branches: [release/ornith-abba-stability-private-testflight-20261104]
+    branches: [release/ornith-render-stability-private-testflight-20261105]
     paths: [.github/workflows/private-testflight-ornith-abba-stability-once-20261104.yml]
 
 permissions:
@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   launch:
-    if: github.repository == 'Dhafen/flash-local' && github.ref == 'refs/heads/release/ornith-abba-stability-private-testflight-20261104'
+    if: github.repository == 'Dhafen/flash-local' && github.ref == 'refs/heads/release/ornith-render-stability-private-testflight-20261105'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -28,18 +28,32 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          EXPECTED_PARENT: 44b533bd52d8760d867a1a93bb91d2982aca11e4
-          PREVIOUS_RUN: '41850728306'
+          EXPECTED_PARENT: ff755c31f318f66e07830a15685d3ea81daff3f5
+          PREVIOUS_SOURCE: a50f027388bdf7973525d6b63a31032ed2ba7242
+          VALIDATED_RUN: '42029394075'
+          PREVIOUS_RUN: '41858653979'
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD^)" = "$EXPECTED_PARENT"
           test "$(git diff --name-only HEAD^ HEAD)" = '.github/workflows/private-testflight-ornith-abba-stability-once-20261104.yml'
           previous=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PREVIOUS_RUN" --jq '[.head_sha, .status, .conclusion, .run_attempt] | @tsv')
           read -r previous_sha status conclusion attempt <<< "$previous"
-          test "$previous_sha" = "$EXPECTED_PARENT"
+          test "$previous_sha" = "$PREVIOUS_SOURCE"
           test "$status" = completed
           test "$conclusion" = failure
-          test "$attempt" = 2
+          test "$attempt" = 5
+          validated=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$VALIDATED_RUN" --jq '[.head_sha, .status, .conclusion] | @tsv')
+          read -r validated_sha validated_status validated_conclusion <<< "$validated"
+          test "$validated_sha" = "$EXPECTED_PARENT"
+          test "$validated_status" = completed
+          test "$validated_conclusion" = success
+          pr_head=$(gh api "repos/$GITHUB_REPOSITORY/pulls/18" --jq .head.sha)
+          test "$pr_head" = "$EXPECTED_PARENT"
+          for run_status in queued in_progress waiting pending requested; do
+            active=$(gh api --method GET "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs" \
+              -f status="$run_status" --jq .total_count)
+            test "$active" = 0 || { echo "Another CI run is active; refusing competing delivery."; exit 1; }
+          done
           current=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$GITHUB_REF_NAME" --jq .object.sha)
           test "$current" = "$GITHUB_SHA"
           existing=$(gh api --method GET "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs" \
