@@ -6,6 +6,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <filesystem>
+#include <memory>
 #include <iostream>
 #include <fstream>
 #include <cmath>
@@ -17,6 +18,7 @@
 #include <cstring>
 #include <set>
 #include <thread>
+#include <utility>
 namespace fs = std::filesystem;
 using json = nlohmann::json;
 struct output { std::vector<std::vector<float>> logits; std::vector<int> positions; flo_metrics metrics; };
@@ -158,6 +160,37 @@ static output evaluate(int fd, const char * dir, bool metal, int depth, int step
     if (released.live_contexts || released.live_metal_buffers || released.owned_metal_bytes || released.mapped_metal_bytes)
         throw std::runtime_error("Native context or buffer ownership survived close");
     return out;
+}
+static void check_demand_residency(int fd, const char * dir) {
+    flo_options options{};
+    options.context_tokens = 32; options.prefill_slots = 32; options.cache_slots_per_layer = 8;
+    options.io_threads = 2; options.cpu_threads = 2; options.trace_routing = true;
+    options.memory_ceiling_bytes = 5500000000ULL;
+    std::unique_ptr<flo_context, decltype(&flo_close)> context(flo_open(fd, dir, options, nullptr, nullptr), flo_close);
+    if (!context) throw std::runtime_error(flo_last_error());
+    const int32_t prompt[] = {1, 2, 3, 15}, token = 4;
+    std::vector<float> cold(flo_vocabulary_size(context.get())), warm(cold.size());
+    auto turn = [&](std::vector<float> & row) {
+        if (flo_decode(context.get(), prompt, 4, row.data(), int(row.size())))
+            throw std::runtime_error(flo_last_error());
+        const auto before = flo_snapshot(context.get());
+        if (flo_decode(context.get(), &token, 1, row.data(), int(row.size())))
+            throw std::runtime_error(flo_last_error());
+        const auto after = flo_snapshot(context.get());
+        return std::pair{before, after};
+    };
+    const auto [cold_before, cold_after] = turn(cold);
+    flo_reset(context.get());
+    const auto [warm_before, warm_after] = turn(warm);
+    if (cold_after.io_bytes <= cold_before.io_bytes || warm_after.io_bytes != warm_before.io_bytes ||
+        warm_after.demand_hits <= warm_before.demand_hits ||
+        std::memcmp(cold.data(), warm.data(), cold.size() * sizeof(float)) != 0 ||
+        cold_after.canonical_routing_digest != warm_after.canonical_routing_digest ||
+        cold_after.canonical_expert_set_digest != warm_after.canonical_expert_set_digest) {
+        throw std::runtime_error("Warm decode failed exact residency across a separate prefill");
+    }
+    std::cout << "ORNITH_DEMAND_RESIDENCY coldDecodeBytes=" << cold_after.io_bytes - cold_before.io_bytes
+              << " warmDecodeBytes=0 exactLogits=true exactRoutes=true syntheticOnly=true\n";
 }
 static double compare(const output & a, const output & b, bool routing = true, bool require_greedy = true) {
     if (routing && (a.metrics.canonical_routing_digest != b.metrics.canonical_routing_digest ||
@@ -351,6 +384,7 @@ int main(int argc, char ** argv) {
             invalid_depth_rejected = reason == "LES lookahead exceeds expert count" || reason == "Invalid scheduling options";
         }
         if (!invalid_depth_rejected) throw std::runtime_error("Invalid lookahead was not rejected before graph construction");
+        check_demand_residency(fd, dir.c_str());
         const auto cpu = evaluate(fd, nullptr, false, 0, steps);
         const auto observed = evaluate(fd, dir.c_str(), false, 0, steps, 8, 0, true);
         const double layer_error = compare(cpu, observed);

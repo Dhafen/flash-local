@@ -46,6 +46,11 @@ jobs:
         run: |
           test "$(uname -m)" = arm64
           sudo xcode-select -s /Applications/Xcode_26.2.app
+      - name: Verify coalesced expert reads and reusable I/O workers
+        run: |
+          c++ -std=c++17 -O2 -pthread -Wall -Wextra -Werror \
+            Experiments/OrnithLES/Native/expert-io-control.cpp -o "${RUNNER_TEMP}/ornith-expert-io-control"
+          "${RUNNER_TEMP}/ornith-expert-io-control"
       - name: Build isolated Mac runtime for fast numerical controls
         run: python3 scripts/build_ornith_les.py --mac-only
       - name: Actual Metal weight decoding and available projections (untrained only)
@@ -84,6 +89,7 @@ jobs:
             > .work/les-controls.log 2>&1
           cat .work/les-controls.log | tail -8
           grep 'ORNITH_LES_CONTROL.*routing=true.*syntheticOnly=true' .work/les-controls.log
+          grep -E 'ORNITH_DEMAND_RESIDENCY coldDecodeBytes=[1-9][0-9]* warmDecodeBytes=0 exactLogits=true exactRoutes=true syntheticOnly=true' .work/les-controls.log
           grep 'ORNITH_ROUTING_TRACE paddedRows=true batchOrderIndependent=true changedExpertDetected=true invalidInputAtomic=true' .work/les-controls.log
           grep 'ORNITH_EXPERT_SETS exactPositionLayer=true rankPermutationDistinguished=true changedExpertDetected=true duplicateRejected=true atomic=true' .work/les-controls.log
           grep 'ORNITH_BATCH_CONTROL prefixCases=5 steps=5 .*canonicalRouting=true reset=true syntheticOnly=true' .work/les-controls.log

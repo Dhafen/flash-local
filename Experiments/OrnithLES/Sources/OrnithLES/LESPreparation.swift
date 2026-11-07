@@ -10,6 +10,10 @@ import StorageCore
 /// they must not permanently prevent an app update from starting the engine.
 public enum LESPreparation {
     private static let lock = NSLock()
+    // The v10 demand reader changes scheduling, not flo_prepare's serialized
+    // format. Preserve the build 428 seal value and still verify both files.
+    // Runtime admission is separately tied to LESContext.revision.
+    private static let formatRevision = "96bbf61710d44421ea54e63f5194f9b17c20d877+flash-local-experiments-v9"
     private struct Seal: Codable {
         let sourceSHA256: String
         let sourceBytes: UInt64
@@ -38,7 +42,7 @@ public enum LESPreparation {
             let seal = try JSONDecoder().decode(Seal.self, from: Data(contentsOf: sealURL))
             guard seal.sourceSHA256 == artifact.manifest.sha256,
                   seal.sourceBytes == artifact.manifest.fileByteCount,
-                  seal.runtimeRevision == LESContext.revision else { return false }
+                  seal.runtimeRevision == formatRevision else { return false }
             return try digest(dense, control: control) == seal.denseSHA256 &&
                 digest(manifest, control: control) == seal.manifestSHA256
         } catch {
@@ -134,7 +138,7 @@ public enum LESPreparation {
         let seal = Seal(sourceSHA256: hash, sourceBytes: artifact.manifest.fileByteCount,
             denseSHA256: try digest(stage.appendingPathComponent("dense.gguf"), control: control),
             manifestSHA256: try digest(stage.appendingPathComponent("manifest-template.json"), control: control),
-            runtimeRevision: LESContext.revision)
+            runtimeRevision: formatRevision)
         try JSONEncoder().encode(seal).write(to: stage.appendingPathComponent("seal.json"), options: .atomic)
         guard try valid(stage, artifact: artifact, control: control) else {
             throw GGUFError.invalid("Rebuilt LES prepared files failed integrity verification")

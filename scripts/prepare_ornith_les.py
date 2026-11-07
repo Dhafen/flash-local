@@ -35,7 +35,7 @@ def patched_files(source):
     replace("src/llama-moe-experts.cpp", "fs::file_size(entry.path, error)",
             "flash_local_expert_file_size(entry.path, error)")
     replace("src/llama-moe-slot.cpp", '#include "llama-moe-slot.h"',
-            '#include "llama-moe-slot.h"\n#include "VerifiedDescriptor.h"')
+            '#include "llama-moe-slot.h"\n#include "ExpertReadWave.h"\n#include "VerifiedDescriptor.h"')
     replace("src/llama-moe-experts.cpp",
             'layout != "layer_major_expert" && layout != "expert_major"',
             'layout != "layer_major_expert" && layout != "expert_major" && layout != "gguf_tensor_major"')
@@ -64,6 +64,95 @@ def patched_files(source):
         } else {
             readv_span(fd, offset, iov, n);
         }""")
+    replace("src/llama-moe-slot.cpp", "    std::mutex fd_mutex;",
+            "    FlashExpertReadPool demand_readers;\n    std::mutex fd_mutex;")
+    replace("src/llama-moe-slot.cpp", "        uint64_t age = 0;\n        std::mutex mutex;",
+            "        uint64_t age = 0;\n        FlashExpertWindow retained_window;\n        std::mutex mutex;")
+    replace("src/llama-moe-slot.cpp", "    bool was_window = false;",
+            "    bool retain_demand_windows = false;\n    bool was_window = false;")
+    replace("src/llama-moe-slot.cpp", "        prewarm_init();\n    }", """        prewarm_init();
+        retain_demand_windows = model.arch == LLM_ARCH_QWEN35MOE && decode_window > 0 && !lookahead.enabled &&
+            !prewarm_enabled && !park_window_enabled() && matmul_split == 0 && disjoint_demand_windows();
+    }
+
+    bool disjoint_demand_windows() const {
+        for (const auto & layer : layers) {
+            if (!layer.enabled) continue;
+            if (!layer.dec_pack_ok || layer.dec_bindings.size() != layer.bindings.size()) return false;
+            for (const auto & decode : layer.dec_bindings) {
+                if (!decode.entry->tensor_major || !decode.tensor->buffer ||
+                    !ggml_backend_buffer_is_host_addressable(decode.tensor->buffer)) return false;
+                for (const auto & other : layers) {
+                    for (const auto & prefill : other.bindings) {
+                        if (!flash_disjoint_expert_buffers(decode.tensor->data, ggml_nbytes(decode.tensor),
+                                prefill.tensor->data, ggml_nbytes(prefill.tensor))) return false;
+                    }
+                }
+            }
+        }
+        return true;
+    }""")
+    replace("src/llama-moe-slot.cpp", "    if (window_mode && !pimpl->was_window) {", """    if (pimpl->retain_demand_windows) {
+        state.retained_window.select(window_mode, state.window_width,
+            state.slot_to_expert, state.expert_to_slot, state.slot_age, state.age);
+    } else if (window_mode && !pimpl->was_window) {""")
+    replace("src/llama-moe-slot.cpp", "    install_timing install_packed_wave(layer_state & state,",
+            """    int64_t read_contiguous_gguf_experts(const layer_state & state, const pending_install * requests,
+                                         size_t count, bool window_mode) {
+        if (count == 1) {
+            return read_expert_directv(state, requests[0].expert, requests[0].slot, window_mode);
+        }
+        const auto & bindings = window_mode ? state.dec_bindings : state.bindings;
+        const auto & path = window_mode ? state.dec_pack_path : state.pack_path;
+        const int fd = fd_for(path);
+        const int64_t start = now_ns();
+        for (const auto & b : bindings) {
+            flash_read_expert_family(requests, count, b.entry->offset, b.entry->bytes_per_expert,
+                static_cast<uint8_t *>(b.tensor->data), [&](size_t offset, iovec * spans, int n) {
+                    readv_span(fd, offset, spans, n);
+                });
+        }
+        const int64_t elapsed = now_ns() - start;
+        stats.pread_ns.fetch_add(elapsed, std::memory_order_relaxed);
+        stats.n_bytes.fetch_add(count * state.pack_bytes, std::memory_order_relaxed);
+        stats.n_miss.fetch_add(count, std::memory_order_relaxed);
+        return elapsed;
+    }
+
+    install_timing install_packed_wave(layer_state & state,""")
+    slot_file = "src/llama-moe-slot.cpp"
+    slot_text = result[slot_file]
+    start = slot_text.index("        std::vector<std::string> errs((size_t) n);", slot_text.index("    install_timing install_packed_wave("))
+    end = slot_text.index("            t.pread_sum_ns += dts[(size_t) i];", start)
+    replace(slot_file, slot_text[start:end], """        std::vector<int64_t> dts((size_t) n, 0);
+        const int64_t wall0 = now_ns();
+        const auto & bindings = window_mode ? state.dec_bindings : state.bindings;
+        static const bool diagnostic = [] {
+            const char * skip = std::getenv("LLAMA_MOE_SKIP_READ");
+            const char * dummy = std::getenv("LLAMA_MOE_DUMMY_READ");
+            const char * delay = std::getenv("LLAMA_MOE_READ_DELAY_US");
+            return (skip && *skip && *skip != '0') || (dummy && *dummy && *dummy != '0') ||
+                (delay && std::atoi(delay) > 0);
+        }();
+        if (n > 1 && !diagnostic && bindings.front().entry->tensor_major) {
+            auto ordered = pending;
+            const auto ranges = flash_expert_read_ranges(ordered);
+            t.n_th = std::min(moe_ssd_io_threads(), (int) ranges.size());
+            demand_readers.run((int) ranges.size(), t.n_th, [&](int i) {
+                const auto range = ranges[(size_t) i];
+                dts[(size_t) i] = read_contiguous_gguf_experts(
+                    state, ordered.data() + range.begin, range.end - range.begin, window_mode);
+            });
+        } else {
+            t.n_th = std::min(moe_ssd_io_threads(), n);
+            demand_readers.run(n, t.n_th, [&](int i) {
+                dts[(size_t) i] = read_expert_directv(
+                    state, pending[(size_t) i].expert, pending[(size_t) i].slot, window_mode);
+            });
+        }
+        t.wall_ns = now_ns() - wall0;
+        for (int i = 0; i < n; ++i) {
+""")
     replace("src/llama-moe-slot.h", "        int64_t process;", """        uint64_t all_bytes, all_calls, predicted, prediction_hits, prefetch_bytes;
         uint64_t demand_hits, demand_misses;
         int64_t process;""")
@@ -230,7 +319,9 @@ def prepare(root, run=None):
     record.write_text(json.dumps(dict(revision=REVISION, repository=REPOSITORY,
         patchScriptSHA256=script_hash,
         patchedSHA256={name: hashlib.sha256((source / name).read_bytes()).hexdigest() for name in files},
-        changes=["tensor-major direct GGUF reads", "aggregate I/O and Metal telemetry", "exclude unused MTP prediction",
+        changes=["tensor-major direct GGUF reads", "coalesced demand reads and reusable I/O workers",
+                 "retain demand-only residency across physically disjoint prefill waves",
+                 "aggregate I/O and Metal telemetry", "exclude unused MTP prediction",
                  "Apple VM-backed page buffers with symmetric deallocation", "native buffer lifetime accounting",
                  "Q4_K GPU nibble-scale adjustment in F32", "CPU Flash Attention requested F32 accumulation honored",
                  "DFlash interleaved SWA KV injection skips unallocated attention masks"],

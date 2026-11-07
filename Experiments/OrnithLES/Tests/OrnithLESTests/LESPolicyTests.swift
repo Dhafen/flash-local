@@ -83,6 +83,22 @@ final class LESPolicyTests: XCTestCase {
             print("ORNITH_CACHE_UPGRADE oldRuntimeRebuilt=true exactDenseBytes=true exactLogits=true originalUnchanged=true syntheticOnly=true")
         }
     }
+    func testDemandIOUpgradeReusesBuild428PreparedFormat() throws {
+        try withPreparationFixture { root, artifact, _ in
+            let cache = root.appendingPathComponent("prepared")
+            let prepared = try LESPreparation.prepare(artifact: artifact, privateRoot: cache, control: LESControl())
+            let url = prepared.appendingPathComponent("seal.json")
+            var seal = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+            seal["runtimeRevision"] = "96bbf61710d44421ea54e63f5194f9b17c20d877+flash-local-experiments-v9"
+            let sealed = try JSONSerialization.data(withJSONObject: seal)
+            try sealed.write(to: url, options: .atomic)
+            var admissions = 0
+            XCTAssertEqual(try LESPreparation.prepare(artifact: artifact, privateRoot: cache, control: LESControl(),
+                onAdmission: { _ in admissions += 1 }), prepared)
+            XCTAssertEqual(admissions, 0, "A read-scheduler upgrade should verify and reuse the same prepared format")
+            XCTAssertEqual(try Data(contentsOf: url), sealed)
+        }
+    }
     func testPreparationRepairsDamagedMissingAndMalformedDerivedFiles() throws {
         try withPreparationFixture { root, artifact, original in
             let cache = root.appendingPathComponent("prepared")

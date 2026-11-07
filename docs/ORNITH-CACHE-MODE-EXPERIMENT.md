@@ -79,3 +79,47 @@ The portable policy test is
 `MinirunRunnersTests/OrnithLESChatTests` and rejects missing/nonfinite/
 insufficient benchmark improvements. Run the integrated iOS Simulator build
 and real-device ABBA before treating this as a performance release.
+
+## Demand I/O in the live Ornith runtime
+
+The original GGUF reader groups at most eight adjacent demanded experts into
+one vectored read per tensor family. The buffers are the actual existing
+Metal-visible slots. It reads no bytes for gaps and never changes routing,
+quantization or computation order. A context reuses its I/O workers across
+layers and waits for every write before exposing the populated slots.
+
+For demand-only expert cache, the native loader checks that all decode views
+are disjoint from the prefill workspace. The layer can then retain its LRU
+metadata through a prefill wave and reuse still-resident experts in the
+next decode. No expert tensors are added or duplicated. The existing
+memory admission and manual on-device comparison still apply.
+The prepared GGUF format is compatible with build 428. The app verifies its
+existing files and uses a fresh runtime admission for the updated engine.
+
+### Recorded Ornith 35B trace
+
+The Phase 2 SparseInferenceLab trace contains 33,600 routes from six complete
+public tasks. Its reconstructed JSONL SHA-256 is
+`2909c82f9a29a1b437018f281111dccb0be75c55819815dda6943593a58438d5`. Replay uses the six
+tasks in sequence as requests sharing one context. With physical batch four
+and a 25-slot decode window, simulated decode demand drops from 34.55 GB to
+33.10 GB (4.21%). Logical decode spans fall from 54,339 to 51,219 (5.74%).
+In page-cache mode the byte ledger is identical and the number of prefill
+spans falls from 489,063 to 446,289 (8.75%). These are modeled file requests.
+The operating system page cache and physical storage are outside this replay.
+
+```sh
+# routes.jsonl is reconstructed from the experiment's sorted .jsonl.gz parts.
+python3 scripts/measure_ornith_demand_trace.py routes.jsonl --physical 4 --slots 25
+python3 scripts/measure_ornith_demand_trace.py routes.jsonl --physical 4 --slots 0
+c++ -std=c++17 -O2 -pthread Experiments/OrnithLES/Native/expert-io-control.cpp -o /tmp/ornith-expert-io-control
+/tmp/ornith-expert-io-control --benchmark
+```
+
+The C++ benchmark is a warm-file host microbenchmark with deliberately
+adjacent requests. It checks both paths' destination bytes after the same
+waves. The Apple workflow separately tests the native Ornith graph against
+the established reference and checks that a repeated synthetic decode
+following prefill reuses the exact weights without reading them again.
+Physical iPhone TTFT, prefill, decode, memory and sustained thermals require
+a device run. The replay neither measures nor implies a 15 tokens/s result.
