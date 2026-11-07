@@ -85,27 +85,34 @@ final class OrnithLESRenderTests: XCTestCase {
                 window.isHidden = true; window.rootViewController = nil
                 let platform = "ios"
                 #else
-                let host = NSHostingView(rootView: content)
-                // This harness owns a fixed viewport. The hosting view must
-                // not resize the window from the controls' intrinsic sizes:
-                // on macOS 26 that feeds windowDidLayout back into constraint
-                // invalidation and can abort the test host.
+                let captureRect = NSRect(x: 0, y: 0, width: 430, height: 900)
+                let viewport = NSView(frame: captureRect)
+                let host = NSHostingView(rootView: content.frame(width: captureRect.width, height: captureRect.height))
+                // Let the AppKit container own the window size. The hosted controls
+                // can update their layout without negotiating the window's size.
                 host.sizingOptions = []
-                let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 430, height: 900),
+                host.frame = viewport.bounds
+                host.autoresizingMask = [.width, .height]
+                viewport.addSubview(host)
+
+                let window = NSWindow(contentRect: captureRect,
                     styleMask: .borderless, backing: .buffered, defer: false)
                 window.isReleasedWhenClosed = false
+                defer { window.close() }
                 window.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
-                window.contentView = host; window.orderFront(nil)
-                host.frame = window.contentLayoutRect
-                host.layoutSubtreeIfNeeded()
+                window.contentView = viewport
+                window.setContentSize(captureRect.size)
+                window.orderFront(nil)
+                viewport.layoutSubtreeIfNeeded()
                 RunLoop.main.run(until: Date().addingTimeInterval(0.15))
-                XCTAssertEqual(host.bounds.size, NSSize(width: 430, height: 900),
+                XCTAssertEqual(viewport.bounds.size, captureRect.size,
+                    "The capture window must stay fixed for \(fixture.rawValue)")
+                XCTAssertEqual(host.bounds.size, captureRect.size,
                     "The capture viewport must stay fixed for \(fixture.rawValue)")
                 host.displayIfNeeded()
                 let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
                 host.cacheDisplay(in: host.bounds, to: bitmap)
                 data = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
-                window.close()
                 let platform = "macos"
                 #endif
                 XCTAssertGreaterThan(data.count, 10000)
