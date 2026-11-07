@@ -1,0 +1,59 @@
+name: Deliver fixed-viewport Ornith private TestFlight once
+on:
+  push:
+    branches: [release/ornith-fixed-viewport-private-testflight-20261107]
+    paths: [.github/workflows/private-testflight-ornith-fixed-viewport-once-20261107.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: flash-local-ornith-fixed-viewport-private-delivery-20261107
+  cancel-in-progress: false
+
+jobs:
+  launch:
+    if: github.repository == 'Dhafen/flash-local' && github.ref == 'refs/heads/release/ornith-fixed-viewport-private-testflight-20261107'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Dispatch the gated internal delivery once
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FIX_COMMIT: ac14bbae3939a867004a6d76777f99d0b443b333
+          FAILED_RUN: '42066709913'
+          FAILED_COMMIT: 1ad1f6cbcc426ac34a25dc56ff6c2d38b07abcae
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = "$FIX_COMMIT"
+          test "$(git diff --name-only HEAD^ HEAD)" = '.github/workflows/private-testflight-ornith-fixed-viewport-once-20261107.yml'
+          previous=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$FAILED_RUN" --jq '[.head_sha, .status, .conclusion] | @tsv')
+          read -r previous_sha status conclusion <<< "$previous"
+          test "$previous_sha" = "$FAILED_COMMIT"
+          test "$status" = completed
+          test "$conclusion" = failure
+          current=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$GITHUB_REF_NAME" --jq .object.sha)
+          test "$current" = "$GITHUB_SHA"
+          existing=$(gh api --method GET "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs" \
+            -f branch="$GITHUB_REF_NAME" -f head_sha="$GITHUB_SHA" -f event=workflow_dispatch --jq .total_count)
+          if [[ "$existing" != 0 ]]; then
+            echo 'A delivery already exists for this exact release commit.'
+            exit 0
+          fi
+          for run_status in queued in_progress waiting pending requested; do
+            active=$(gh api --method GET "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs" \
+              -f status="$run_status" --jq .total_count)
+            test "$active" = 0 || { echo 'Another CI run is active.'; exit 1; }
+          done
+          gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" \
+            -f use_macos15=false -f ornith_les=true -f flint=false -f release_archive=true \
+            -f probe_automatic_signing=true -f provisioning_only=false -f check_delivery_tools=false \
+            -f upload_private_testflight=true -f regenerate_project_only=false
